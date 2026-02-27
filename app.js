@@ -1,4 +1,5 @@
-const STORAGE_KEY = "financePlannerData_v2";
+const BASE_STORAGE_KEY = "financePlannerData_v2";
+let STORAGE_KEY = BASE_STORAGE_KEY;
 const LEGACY_STORAGE_KEYS = ["financePlannerData_v1"];
 
 const DEFAULT_CATEGORIES = {
@@ -9,7 +10,7 @@ const DEFAULT_CATEGORIES = {
 
 function loadState() {
   try {
-    const rawCurrent = localStorage.getItem(STORAGE_KEY);
+    const rawCurrent = localStorage.getItem(BASE_STORAGE_KEY);
     let raw = rawCurrent;
     let loadedFromLegacy = false;
 
@@ -81,7 +82,7 @@ function loadState() {
 
     const state = { months, categories, fixedExpensePresets, ui };
 
-    // Если мы загрузились из legacy-ключа (v1), один раз мигрируем данные в новый STORAGE_KEY.
+    // Если мы загрузились из legacy-ключа (v1), один раз мигрируем данные в новый ключ.
     if (loadedFromLegacy) {
       saveState(state);
     }
@@ -98,7 +99,7 @@ function loadState() {
 }
 
 function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(BASE_STORAGE_KEY, JSON.stringify(state));
 }
 
 function formatCurrency(value) {
@@ -234,6 +235,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const editMonthDetailsButton = document.getElementById("editMonthDetailsButton");
   const monthDetailsModal = document.getElementById("monthDetailsModal");
   const closeMonthDetailsButton = document.getElementById("closeMonthDetailsButton");
+  const toggleMonthPanelButton = null;
+  const monthPanelBody = null;
 
   let state = loadState();
   let editingTransactionId = null;
@@ -437,6 +440,10 @@ document.addEventListener("DOMContentLoaded", () => {
     syncPeriodInputsForMonth(monthKeyFromToday);
   }
 
+  function applyAuthUi() {
+    // авторизация отключена в локальном режиме
+  }
+
   function applyInitialTabFromState() {
     const ui = state.ui && typeof state.ui === "object" ? state.ui : {};
     const currentTab = ui.currentTab || "operations";
@@ -473,6 +480,20 @@ document.addEventListener("DOMContentLoaded", () => {
     updatePeriodInfo();
   }
 
+  function loadStateFromServer() {
+    state = loadState();
+    renderCategoryOptions();
+    renderPresetCategoryOptions();
+    ensurePresetsForMonth(monthSelect.value);
+    applyPanelVisibilityFromState();
+    applyInitialTabFromState();
+    render();
+  }
+
+  function saveStateToServer() {
+    saveState(state);
+  }
+
   function updatePeriodInfo() {
     if (!periodStartInput || !periodEndInput || !periodDaysEl) return;
     const monthKey = monthSelect.value;
@@ -499,7 +520,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       state.ui.monthPeriods[monthKey] = { start: startStr, end: endStr };
     }
-    saveState(state);
+    saveStateToServer();
 
     render();
   }
@@ -709,6 +730,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     renderTransactionsList();
     renderPresetList();
+
+    saveStateToServer();
   }
 
   function ensurePresetsForMonth(monthKey) {
@@ -976,7 +999,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const monthData = state.months[monthKey];
     if (!monthData) return;
     monthData.transactions = monthData.transactions.filter((tx) => tx.id !== id);
-    saveState(state);
+    saveStateToServer();
     render();
   }
 
@@ -1054,7 +1077,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    saveState(state);
+    saveStateToServer();
 
     transactionAmountInput.value = "";
     transactionNoteInput.value = "";
@@ -1178,7 +1201,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (!m || !Array.isArray(m.transactions)) return;
           m.transactions = m.transactions.filter((tx) => tx.presetId !== preset.id);
         });
-        saveState(state);
+        saveStateToServer();
         render();
       });
       right.appendChild(deletePresetBtn);
@@ -1236,7 +1259,7 @@ document.addEventListener("DOMContentLoaded", () => {
       };
       state.fixedExpensePresets.push(preset);
     }
-    saveState(state);
+    saveStateToServer();
 
     presetTitleInput.value = "";
     presetAmountInput.value = "";
@@ -1253,7 +1276,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!ok) return;
     if (state.months[monthKey]) {
       state.months[monthKey].transactions = [];
-      saveState(state);
+      saveStateToServer();
       render();
     }
   }
@@ -1319,6 +1342,7 @@ document.addEventListener("DOMContentLoaded", () => {
       focusTransactionForm();
     });
   }
+  // авторизация отключена в локальном режиме, обработчики не вешаем
   function openMonthDetailsModal() {
     if (!monthDetailsModal) return;
     monthDetailsModal.classList.remove("hidden");
@@ -1358,6 +1382,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ensurePresetsForMonth(monthSelect.value);
   applyPanelVisibilityFromState();
   applyInitialTabFromState();
+  applyAuthUi();
   if (tabOperationsButton) {
     onTap(tabOperationsButton, () => setActiveTab("operations", true));
   }
@@ -1376,7 +1401,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderAnalyticsTable();
     });
   }
-  setupPanelToggle(toggleMonthPanelButton, monthPanelBody, "monthPanelExpanded");
-  render();
+
+  loadStateFromServer();
 });
 
