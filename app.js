@@ -138,17 +138,26 @@ function generateId() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // На iOS в режиме «добавить на экран» click часто не срабатывает — используем touchend
+  // Унифицированный обработчик тапов: и click, и touchend, чтобы всё работало и в PWA, и в браузере
   function onTap(el, handler) {
     if (!el) return;
-    if (document.documentElement.classList.contains("ios-standalone")) {
-      el.addEventListener("touchend", function (e) {
+    let lastTouchTime = 0;
+    const TOUCH_DELAY = 500;
+
+    el.addEventListener(
+      "touchend",
+      (e) => {
+        lastTouchTime = Date.now();
         e.preventDefault();
         handler(e);
-      }, { passive: false });
-    } else {
-      el.addEventListener("click", handler);
-    }
+      },
+      { passive: false },
+    );
+
+    el.addEventListener("click", (e) => {
+      if (Date.now() - lastTouchTime < TOUCH_DELAY) return;
+      handler(e);
+    });
   }
 
   const monthSelect = document.getElementById("monthSelect");
@@ -195,8 +204,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const transactionsHeaderSummaryEl = document.getElementById("transactionsHeaderSummary");
   const toggleTransactionsPanelButton = null;
   const transactionsPanelBody = document.getElementById("transactionsPanelBody");
-  const toggleMonthPanelButton = document.getElementById("toggleMonthPanel");
-  const monthPanelBody = document.getElementById("monthPanelBody");
   const headerAddOperationButton = document.getElementById("headerAddOperationButton");
   const toggleOperationsPanelButton = null;
   const operationsPanelBody = document.getElementById("operationsPanelBody");
@@ -224,6 +231,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const presetDayInput = document.getElementById("presetDay");
   const presetListEl = document.getElementById("presetList");
   const presetEmptyStateEl = document.getElementById("presetEmptyState");
+  const editMonthDetailsButton = document.getElementById("editMonthDetailsButton");
+  const monthDetailsModal = document.getElementById("monthDetailsModal");
+  const closeMonthDetailsButton = document.getElementById("closeMonthDetailsButton");
 
   let state = loadState();
   let editingTransactionId = null;
@@ -306,12 +316,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function applyPanelVisibilityFromState() {
-    const ui = state.ui && typeof state.ui === "object" ? state.ui : {};
-    const monthExpanded = ui.monthPanelExpanded !== false;
-    if (monthPanelBody && toggleMonthPanelButton) {
-      monthPanelBody.classList.toggle("hidden", !monthExpanded);
-      toggleMonthPanelButton.textContent = monthExpanded ? "Свернуть" : "Развернуть";
-    }
+    // Панель месяца теперь открывается во всплывающем окне, состояние не храним
   }
 
   function setActiveTab(tab, saveToState = true) {
@@ -1267,22 +1272,34 @@ document.addEventListener("DOMContentLoaded", () => {
       focusTransactionForm();
     });
   }
+  function openMonthDetailsModal() {
+    if (!monthDetailsModal) return;
+    monthDetailsModal.classList.remove("hidden");
+    monthDetailsModal.classList.add("flex");
+  }
+  function closeMonthDetailsModal() {
+    if (!monthDetailsModal) return;
+    monthDetailsModal.classList.add("hidden");
+    monthDetailsModal.classList.remove("flex");
+  }
+  if (editMonthDetailsButton) {
+    onTap(editMonthDetailsButton, openMonthDetailsModal);
+  }
+  if (closeMonthDetailsButton) {
+    onTap(closeMonthDetailsButton, closeMonthDetailsModal);
+  }
+  if (monthDetailsModal) {
+    monthDetailsModal.addEventListener("click", (e) => {
+      if (e.target === monthDetailsModal) {
+        closeMonthDetailsModal();
+      }
+    });
+  }
   if (periodStartInput) {
     periodStartInput.addEventListener("change", updatePeriodInfo);
   }
   if (periodEndInput) {
     periodEndInput.addEventListener("change", updatePeriodInfo);
-  }
-
-  function setupPanelToggle(button, body, uiKey) {
-    if (!button || !body) return;
-    onTap(button, () => {
-      const isHidden = body.classList.toggle("hidden");
-      button.textContent = isHidden ? "Развернуть" : "Свернуть";
-      state.ui = state.ui && typeof state.ui === "object" ? state.ui : {};
-      state.ui[uiKey] = !isHidden;
-      saveState(state);
-    });
   }
 
   initDefaultDates();

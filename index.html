@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <title>Финансовый планировщик</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#020617" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -65,6 +68,22 @@
       .number-input[type="number"] {
         -moz-appearance: textfield;
       }
+
+      /* Предотвращаем авто‑зум инпутов в iOS PWA */
+      html.ios-standalone input,
+      html.ios-standalone select,
+      html.ios-standalone textarea {
+        font-size: 16px !important;
+      }
+
+      /* Выравнивание всех полей выбора даты с остальными на мобильных */
+      input[type="date"] {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        -webkit-appearance: none;
+        appearance: none;
+      }
     </style>
   </head>
   <body class="text-slate-100 antialiased overflow-x-hidden">
@@ -78,16 +97,7 @@
     <div class="min-h-full flex flex-col">
       <header class="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur">
         <div class="max-w-6xl mx-auto px-4 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-          <div class="min-w-0">
-            <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">
-              Финансовый планировщик
-            </h1>
-            <p class="text-slate-400 text-xs sm:text-sm mt-1 max-w-xl break-words">
-              Планируйте доходы и расходы по месяцам и периодам, отслеживайте историю и доступный
-              дневной лимит.
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center justify-start sm:justify-end gap-2 sm:gap-3 text-xs text-slate-400 mt-2 sm:mt-0">
+          <div class="flex flex-wrap items-center justify-start sm:justify-end gap-2 sm:gap-3 text-xs text-slate-400 mt-1 sm:mt-0">
             <span
               class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/30 text-emerald-300"
               title="Все данные сохраняются только локально в вашем браузере."
@@ -95,174 +105,186 @@
               <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
               Локальное хранение
             </span>
-            <button
-              type="button"
-              id="headerAddOperationButton"
-              class="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-md shadow-emerald-500/40"
-            >
-              <span class="text-base leading-none">+</span>
-              <span>Добавить операцию</span>
-            </button>
           </div>
         </div>
       </header>
 
       <main class="flex-1">
         <div class="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-5">
-          <!-- Month & date controls -->
-          <section class="glass rounded-2xl px-3 sm:px-5 py-3 sm:py-4 shadow-xl shadow-slate-900/60">
-            <div class="flex flex-col gap-3">
-              <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 sm:gap-3">
-                <div class="flex-1 max-w-xs">
-                  <label for="monthSelect" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
-                    Месяц
+          <!-- Month line + add button -->
+          <div class="flex items-center justify-between gap-2 sm:gap-3">
+            <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+              <label for="monthSelect" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                Месяц
+              </label>
+              <input
+                id="monthSelect"
+                type="month"
+                class="max-w-[180px] sm:max-w-xs flex-shrink-0 rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                id="editMonthDetailsButton"
+                class="ml-1 inline-flex items-center gap-1 rounded-lg border border-slate-600/80 bg-slate-900/70 px-2.5 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors flex-shrink-0"
+              >
+                <span class="text-xs">✎</span>
+                <span class="hidden xs:inline">Редактировать</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              id="headerAddOperationButton"
+              class="inline-flex items-center justify-center gap-1 rounded-full bg-emerald-500 px-4 py-2 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-md shadow-emerald-500/40 flex-shrink-0"
+            >
+              <span class="text-base leading-none">+</span>
+              <span>Добавить</span>
+            </button>
+          </div>
+
+          <!-- Month details modal -->
+          <div
+            id="monthDetailsModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[90vh] overflow-y-auto p-4 space-y-3">
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Детали месяца
+                </h2>
+                <button
+                  type="button"
+                  id="closeMonthDetailsButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="flex flex-col gap-1.5">
+                  <label for="currentDate" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                    Текущая дата в месяце
                   </label>
                   <input
-                    id="monthSelect"
-                    type="month"
+                    id="currentDate"
+                    type="date"
                     class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   />
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="hidden sm:inline text-[11px] text-slate-500">
-                    Дату и период можно развернуть при необходимости.
+
+                <div class="flex flex-col gap-1.5">
+                  <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                    Инфо по месяцу
                   </span>
-                  <button
-                    type="button"
-                    id="toggleMonthPanel"
-                    class="text-[11px] text-slate-300/80 hover:text-slate-100 px-2 py-1 rounded-md hover:bg-slate-800/80 transition-colors"
+                  <div
+                    class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
                   >
-                    Свернуть
-                  </button>
+                    <div class="flex justify-between">
+                      <span class="text-slate-400">Дней в месяце:</span>
+                      <span id="monthDays" class="font-medium text-slate-100">—</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-slate-400">Текущий день:</span>
+                      <span id="currentDayNumber" class="font-medium text-slate-100">—</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div id="monthPanelBody" class="flex flex-col gap-3">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div class="flex flex-col gap-1.5">
-                    <label for="currentDate" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
-                      Текущая дата в месяце
-                    </label>
-                    <input
-                      id="currentDate"
-                      type="date"
-                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                    />
-                  </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="flex flex-col gap-1.5">
+                  <label
+                    for="periodStartDate"
+                    class="text-xs font-medium text-slate-300 uppercase tracking-wide"
+                  >
+                    Начало периода
+                  </label>
+                  <input
+                    id="periodStartDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
 
-                  <div class="flex flex-col gap-1.5">
-                    <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
-                      Инфо по месяцу
-                    </span>
-                    <div
-                      class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
-                    >
-                      <div class="flex justify-between">
-                        <span class="text-slate-400">Дней в месяце:</span>
-                        <span id="monthDays" class="font-medium text-slate-100">—</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span class="text-slate-400">Текущий день:</span>
-                        <span id="currentDayNumber" class="font-medium text-slate-100">—</span>
-                      </div>
+                <div class="flex flex-col gap-1.5">
+                  <label
+                    for="periodEndDate"
+                    class="text-xs font-medium text-slate-300 uppercase tracking-wide"
+                  >
+                    Конец периода
+                  </label>
+                  <input
+                    id="periodEndDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                  <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                    Инфо по периоду
+                  </span>
+                  <div
+                    class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
+                  >
+                    <div class="flex justify-between">
+                      <span class="text-slate-400">Дней в периоде:</span>
+                      <span id="periodDays" class="font-medium text-slate-100">—</span>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div class="flex flex-col sm:flex-row gap-4 sm:items-end justify-between">
-                  <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div class="flex flex-col gap-1.5">
-                      <label
-                        for="periodStartDate"
-                        class="text-xs font-medium text-slate-300 uppercase tracking-wide"
-                      >
-                        Начало периода
-                      </label>
-                      <input
-                        id="periodStartDate"
-                        type="date"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                      <label
-                        for="periodEndDate"
-                        class="text-xs font-medium text-slate-300 uppercase tracking-wide"
-                      >
-                        Конец периода
-                      </label>
-                      <input
-                        id="periodEndDate"
-                        type="date"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                      <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
-                        Инфо по периоду
-                      </span>
-                      <div
-                        class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
-                      >
-                        <div class="flex justify-between">
-                          <span class="text-slate-400">Дней в периоде:</span>
-                          <span id="periodDays" class="font-medium text-slate-100">—</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="flex items-center gap-3 justify-end">
-                    <button
-                      id="resetMonthButton"
-                      class="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/20 transition-colors"
-                    >
-                      <span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span>
-                      Очистить месяц
-                    </button>
-                  </div>
-                </div>
+              <div class="flex items-center justify-between pt-1">
+                <button
+                  id="resetMonthButton"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/20 transition-colors"
+                >
+                  <span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span>
+                  Очистить месяц
+                </button>
+                <span class="text-[11px] text-slate-500">
+                  Изменения применяются сразу
+                </span>
               </div>
             </div>
-          </section>
+          </div>
 
           <!-- Tabs -->
           <div class="mt-1 border-b border-slate-800/70 overflow-x-auto">
-            <nav class="flex gap-1 sm:gap-2 text-xs whitespace-nowrap">
+            <nav class="flex flex-nowrap gap-1 sm:gap-2 text-[11px] sm:text-xs whitespace-nowrap">
               <button
                 id="tabOperations"
                 type="button"
-                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium bg-slate-800/80 border-slate-500/60 text-slate-50"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium bg-slate-800/80 border-slate-500/60 text-slate-50"
               >
                 Операции
               </button>
               <button
                 id="tabDashboard"
                 type="button"
-                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
               >
                 Дашборд
               </button>
               <button
                 id="tabHistory"
                 type="button"
-                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
               >
                 История
               </button>
               <button
                 id="tabPresets"
                 type="button"
-                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
               >
-                Повторяемые шаблоны
+                Шаблоны
               </button>
               <button
                 id="tabAnalytics"
                 type="button"
-                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
               >
                 Аналитика
               </button>
@@ -699,7 +721,7 @@
                 </div>
                 <div
                   id="transactionsList"
-                  class="hidden max-h-80 overflow-y-auto mt-1.5 text-xs divide-y divide-slate-800/80"
+                  class="hidden mt-1.5 text-xs divide-y divide-slate-800/80"
                 >
                   <!-- rows injected by JS -->
                 </div>
