@@ -77,17 +77,17 @@
     </script>
     <div class="min-h-full flex flex-col">
       <header class="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur">
-        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-          <div>
+        <div class="max-w-6xl mx-auto px-4 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+          <div class="min-w-0">
             <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">
               Финансовый планировщик
             </h1>
-            <p class="text-slate-400 text-xs sm:text-sm mt-1 max-w-xl">
+            <p class="text-slate-400 text-xs sm:text-sm mt-1 max-w-xl break-words">
               Планируйте доходы и расходы по месяцам и периодам, отслеживайте историю и доступный
               дневной лимит.
             </p>
           </div>
-          <div class="flex items-center gap-3 text-xs text-slate-400">
+          <div class="flex flex-wrap items-center justify-start sm:justify-end gap-2 sm:gap-3 text-xs text-slate-400 mt-2 sm:mt-0">
             <span
               class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/30 text-emerald-300"
               title="Все данные сохраняются только локально в вашем браузере."
@@ -110,9 +110,9 @@
       <main class="flex-1">
         <div class="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-5">
           <!-- Month & date controls -->
-          <section class="glass rounded-2xl px-4 sm:px-5 py-3 sm:py-4 shadow-xl shadow-slate-900/60">
+          <section class="glass rounded-2xl px-3 sm:px-5 py-3 sm:py-4 shadow-xl shadow-slate-900/60">
             <div class="flex flex-col gap-3">
-              <div class="flex items-end justify-between gap-3">
+              <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 sm:gap-3">
                 <div class="flex-1 max-w-xs">
                   <label for="monthSelect" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
                     Месяц
@@ -272,7 +272,7 @@
           <!-- Summary cards -->
           <section
             id="summarySection"
-            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4"
           >
             <!-- Current daily limit first and most prominent -->
             <div class="card rounded-2xl p-4 border border-fuchsia-500/60 shadow-lg shadow-fuchsia-500/25 lg:col-span-1">
@@ -362,7 +362,7 @@
             class="grid grid-cols-1 lg:grid-cols-3 gap-4"
           >
             <div class="glass rounded-2xl p-4 border border-slate-700/70 lg:col-span-2">
-              <div class="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+              <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-center sm:justify-between">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
                     Сальдо месяца (гибкий бюджет минус все обычные расходы)
@@ -648,14 +648,14 @@
               id="transactionsCard"
               class="glass rounded-2xl p-4 border border-slate-700/70"
             >
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-3">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div class="flex items-center gap-3 min-w-0">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
                     Операции выбранного месяца
                   </p>
                   <span
                     id="transactionsHeaderSummary"
-                    class="text-[11px] text-slate-400 hidden sm:inline-flex"
+                    class="text-[11px] text-slate-400 hidden sm:inline-flex truncate"
                   >
                     —
                   </span>
