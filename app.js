@@ -237,6 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let state = loadState();
   let editingTransactionId = null;
+  let editingPresetId = null;
 
   function getCategoriesForType(type) {
     if (!state.categories) {
@@ -1129,6 +1130,35 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       right.appendChild(activeToggle);
 
+      const editPresetBtn = document.createElement("button");
+      editPresetBtn.type = "button";
+      editPresetBtn.textContent = "✎";
+      editPresetBtn.title = "Редактировать шаблон";
+      editPresetBtn.className =
+        "w-5 h-5 flex items-center justify-center rounded-full border border-slate-600/70 text-[11px] text-slate-300 hover:bg-sky-600/80 hover:border-sky-500 hover:text-white transition-colors";
+      onTap(editPresetBtn, () => {
+        if (!presetForm) return;
+        editingPresetId = preset.id;
+        if (presetTitleInput) {
+          presetTitleInput.value = preset.title || "";
+        }
+        if (presetCategoryInput) {
+          renderPresetCategoryOptions();
+          presetCategoryInput.value = preset.category || "";
+        }
+        if (presetAmountInput) {
+          presetAmountInput.value =
+            preset.amount != null && Number.isFinite(Number(preset.amount))
+              ? String(preset.amount)
+              : "";
+        }
+        if (presetDayInput) {
+          presetDayInput.value = preset.dayOfMonth != null ? String(preset.dayOfMonth) : "";
+        }
+        presetForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      right.appendChild(editPresetBtn);
+
       const deletePresetBtn = document.createElement("button");
       deletePresetBtn.type = "button";
       deletePresetBtn.textContent = "×";
@@ -1137,6 +1167,12 @@ document.addEventListener("DOMContentLoaded", () => {
         "w-5 h-5 flex items-center justify-center rounded-full border border-slate-600/70 text-[11px] text-slate-300 hover:bg-rose-600/80 hover:border-rose-500 hover:text-white transition-colors";
       onTap(deletePresetBtn, () => {
         state.fixedExpensePresets = (state.fixedExpensePresets || []).filter((p) => p.id !== preset.id);
+        if (editingPresetId === preset.id) {
+          editingPresetId = null;
+          if (presetTitleInput) presetTitleInput.value = "";
+          if (presetAmountInput) presetAmountInput.value = "";
+          if (presetDayInput) presetDayInput.value = "";
+        }
         Object.keys(state.months || {}).forEach((key) => {
           const m = state.months[key];
           if (!m || !Array.isArray(m.transactions)) return;
@@ -1176,19 +1212,30 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const preset = {
-      id: generateId(),
-      title,
-      category,
-      amount,
-      dayOfMonth: day,
-      active: true,
-    };
-
     if (!Array.isArray(state.fixedExpensePresets)) {
       state.fixedExpensePresets = [];
     }
-    state.fixedExpensePresets.push(preset);
+
+    if (editingPresetId) {
+      const existing = state.fixedExpensePresets.find((p) => p.id === editingPresetId);
+      if (existing) {
+        existing.title = title;
+        existing.category = category;
+        existing.amount = amount;
+        existing.dayOfMonth = day;
+      }
+      editingPresetId = null;
+    } else {
+      const preset = {
+        id: generateId(),
+        title,
+        category,
+        amount,
+        dayOfMonth: day,
+        active: true,
+      };
+      state.fixedExpensePresets.push(preset);
+    }
     saveState(state);
 
     presetTitleInput.value = "";

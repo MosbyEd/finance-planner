@@ -75,15 +75,6 @@
       html.ios-standalone textarea {
         font-size: 16px !important;
       }
-
-      /* Выравнивание всех полей выбора даты с остальными на мобильных */
-      input[type="date"] {
-        width: 100%;
-        max-width: 100%;
-        box-sizing: border-box;
-        -webkit-appearance: none;
-        appearance: none;
-      }
     </style>
   </head>
   <body class="text-slate-100 antialiased overflow-x-hidden">
@@ -721,7 +712,7 @@
                 </div>
                 <div
                   id="transactionsList"
-                  class="hidden mt-1.5 text-xs divide-y divide-slate-800/80"
+                  class="hidden max-h-80 overflow-y-auto mt-1.5 text-xs divide-y divide-slate-800/80"
                 >
                   <!-- rows injected by JS -->
                 </div>
