@@ -1,0 +1,11 @@
+{
+  "name": "Финансовый планировщик",
+  "short_name": "Финансы",
+  "description": "Планируйте доходы и расходы по месяцам, отслеживайте дневной лимит и историю операций.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "any",
+  "lang": "ru"
+}

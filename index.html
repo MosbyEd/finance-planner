@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Финансовый планировщик</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="manifest.json" />
+    <!-- Tailwind via CDN for modern UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      html {
+        -webkit-text-size-adjust: 100%;
+        height: 100%;
+      }
+
+      body {
+        height: 100%;
+        background: radial-gradient(circle at top left, #1d2433 0, #050816 45%, #020617 100%);
+        /* iOS standalone: убираем задержку тапа и делаем клики стабильными */
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: rgba(148, 163, 184, 0.2);
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      /* Кликабельные элементы в standalone Safari на iOS */
+      button,
+      a,
+      input,
+      select,
+      [role="button"] {
+        touch-action: manipulation;
+        cursor: pointer;
+      }
+
+      /* Минимальная зона нажатия для табов и главной кнопки (Apple HIG) */
+      nav button,
+      #headerAddOperationButton,
+      #toggleMonthPanel {
+        min-height: 44px;
+        min-width: 44px;
+      }
+
+      .glass {
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(18px);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+      }
+
+      .card {
+        background: radial-gradient(circle at top left, #0f172a 0, #020617 60%);
+      }
+
+      .number-input::-webkit-outer-spin-button,
+      .number-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      .number-input[type="number"] {
+        -moz-appearance: textfield;
+      }
+    </style>
+  </head>
+  <body class="text-slate-100 antialiased overflow-x-hidden">
+    <script>
+      (function () {
+        var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        var isStandalone = window.navigator.standalone === true;
+        if (isIOS && isStandalone) document.documentElement.classList.add('ios-standalone');
+      })();
+    </script>
+    <div class="min-h-full flex flex-col">
+      <header class="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+          <div>
+            <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">
+              Финансовый планировщик
+            </h1>
+            <p class="text-slate-400 text-xs sm:text-sm mt-1 max-w-xl">
+              Планируйте доходы и расходы по месяцам и периодам, отслеживайте историю и доступный
+              дневной лимит.
+            </p>
+          </div>
+          <div class="flex items-center gap-3 text-xs text-slate-400">
+            <span
+              class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/30 text-emerald-300"
+              title="Все данные сохраняются только локально в вашем браузере."
+            >
+              <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Локальное хранение
+            </span>
+            <button
+              type="button"
+              id="headerAddOperationButton"
+              class="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-md shadow-emerald-500/40"
+            >
+              <span class="text-base leading-none">+</span>
+              <span>Добавить операцию</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1">
+        <div class="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-5">
+          <!-- Month & date controls -->
+          <section class="glass rounded-2xl px-4 sm:px-5 py-3 sm:py-4 shadow-xl shadow-slate-900/60">
+            <div class="flex flex-col gap-3">
+              <div class="flex items-end justify-between gap-3">
+                <div class="flex-1 max-w-xs">
+                  <label for="monthSelect" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                    Месяц
+                  </label>
+                  <input
+                    id="monthSelect"
+                    type="month"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="hidden sm:inline text-[11px] text-slate-500">
+                    Дату и период можно развернуть при необходимости.
+                  </span>
+                  <button
+                    type="button"
+                    id="toggleMonthPanel"
+                    class="text-[11px] text-slate-300/80 hover:text-slate-100 px-2 py-1 rounded-md hover:bg-slate-800/80 transition-colors"
+                  >
+                    Свернуть
+                  </button>
+                </div>
+              </div>
+
+              <div id="monthPanelBody" class="flex flex-col gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="flex flex-col gap-1.5">
+                    <label for="currentDate" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                      Текущая дата в месяце
+                    </label>
+                    <input
+                      id="currentDate"
+                      type="date"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div class="flex flex-col gap-1.5">
+                    <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                      Инфо по месяцу
+                    </span>
+                    <div
+                      class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
+                    >
+                      <div class="flex justify-between">
+                        <span class="text-slate-400">Дней в месяце:</span>
+                        <span id="monthDays" class="font-medium text-slate-100">—</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-slate-400">Текущий день:</span>
+                        <span id="currentDayNumber" class="font-medium text-slate-100">—</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-4 sm:items-end justify-between">
+                  <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div class="flex flex-col gap-1.5">
+                      <label
+                        for="periodStartDate"
+                        class="text-xs font-medium text-slate-300 uppercase tracking-wide"
+                      >
+                        Начало периода
+                      </label>
+                      <input
+                        id="periodStartDate"
+                        type="date"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label
+                        for="periodEndDate"
+                        class="text-xs font-medium text-slate-300 uppercase tracking-wide"
+                      >
+                        Конец периода
+                      </label>
+                      <input
+                        id="periodEndDate"
+                        type="date"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <span class="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                        Инфо по периоду
+                      </span>
+                      <div
+                        class="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2.5 text-xs flex flex-col justify-center gap-1.5"
+                      >
+                        <div class="flex justify-between">
+                          <span class="text-slate-400">Дней в периоде:</span>
+                          <span id="periodDays" class="font-medium text-slate-100">—</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-3 justify-end">
+                    <button
+                      id="resetMonthButton"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 hover:bg-rose-500/20 transition-colors"
+                    >
+                      <span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span>
+                      Очистить месяц
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Tabs -->
+          <div class="mt-1 border-b border-slate-800/70 overflow-x-auto">
+            <nav class="flex gap-1 sm:gap-2 text-xs whitespace-nowrap">
+              <button
+                id="tabOperations"
+                type="button"
+                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium bg-slate-800/80 border-slate-500/60 text-slate-50"
+              >
+                Операции
+              </button>
+              <button
+                id="tabDashboard"
+                type="button"
+                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                Дашборд
+              </button>
+              <button
+                id="tabHistory"
+                type="button"
+                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                История
+              </button>
+              <button
+                id="tabPresets"
+                type="button"
+                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                Повторяемые шаблоны
+              </button>
+              <button
+                id="tabAnalytics"
+                type="button"
+                class="px-3 py-1.5 rounded-lg border text-[11px] font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                Аналитика
+              </button>
+            </nav>
+          </div>
+
+          <!-- Summary cards -->
+          <section
+            id="summarySection"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4"
+          >
+            <!-- Current daily limit first and most prominent -->
+            <div class="card rounded-2xl p-4 border border-fuchsia-500/60 shadow-lg shadow-fuchsia-500/25 lg:col-span-1">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-fuchsia-300/90 font-semibold">
+                  Можно потратить сегодня
+                </span>
+              </div>
+              <p id="currentDailyLimit" class="text-2xl sm:text-3xl font-semibold text-fuchsia-100">
+                0 ₽
+              </p>
+              <p class="text-[11px] text-slate-400 mt-1">
+                Уже потрачено:
+                <span id="spentSoFar" class="text-fuchsia-100 font-medium">0 ₽</span>
+              </p>
+            </div>
+
+            <!-- Monthly income -->
+            <div class="card rounded-2xl p-4 border border-emerald-500/40 shadow-lg shadow-emerald-500/15">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-emerald-300/90 font-semibold">
+                  Доходы месяца
+                </span>
+              </div>
+              <p id="totalIncome" class="text-xl sm:text-2xl font-semibold text-emerald-200">
+                0 ₽
+              </p>
+            </div>
+
+            <!-- Fixed purchases -->
+            <div class="card rounded-2xl p-4 border border-amber-500/40 shadow-lg shadow-amber-500/15">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-amber-300/90 font-semibold">
+                  Крупные покупки
+                </span>
+                <span class="text-[10px] text-amber-300/80 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                  фиксированные / повторяемые
+                </span>
+              </div>
+              <p id="totalFixedExpenses" class="text-xl sm:text-2xl font-semibold text-amber-200">
+                0 ₽
+              </p>
+            </div>
+
+            <!-- Flexible monthly budget -->
+            <div class="card rounded-2xl p-4 border border-sky-500/40 shadow-lg shadow-sky-500/15">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-sky-300/90 font-semibold">
+                  Гибкий бюджет месяца
+                </span>
+                <span class="text-[10px] text-sky-300/80 bg-sky-500/10 px-2 py-0.5 rounded-full">
+                  доходы − обяз.
+                </span>
+              </div>
+              <p id="flexibleBudget" class="text-xl sm:text-2xl font-semibold text-sky-200">
+                0 ₽
+              </p>
+              <p class="text-[11px] text-slate-400 mt-1">
+                Плановый дневной лимит:
+                <span id="plannedDailyLimit" class="text-sky-100 font-medium">0 ₽</span>
+              </p>
+              <p class="text-[11px] text-slate-400 mt-0.5">
+                Потрачено обычных расходов:
+                <span id="totalFlexibleExpenses" class="text-sky-100 font-medium">0 ₽</span>
+              </p>
+            </div>
+
+            <!-- Auto-savings -->
+            <div class="card rounded-2xl p-4 border border-emerald-500/40 shadow-lg shadow-emerald-500/15">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-emerald-300/90 font-semibold">
+                  Сбережения (10% зарплаты)
+                </span>
+                <span class="text-[10px] text-emerald-300/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                  учитываются как расход
+                </span>
+              </div>
+              <p id="autoSavings" class="text-xl sm:text-2xl font-semibold text-emerald-200">
+                0 ₽
+              </p>
+            </div>
+          </section>
+
+          <!-- Saldo and alerts -->
+          <section
+            id="saldoSection"
+            class="grid grid-cols-1 lg:grid-cols-3 gap-4"
+          >
+            <div class="glass rounded-2xl p-4 border border-slate-700/70 lg:col-span-2">
+              <div class="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Сальдо месяца (гибкий бюджет минус все обычные расходы)
+                  </p>
+                  <p id="monthSaldo" class="text-2xl mt-1 font-semibold text-emerald-200">
+                    0 ₽
+                  </p>
+                </div>
+                <div
+                  id="saldoBadge"
+                  class="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-100 max-w-xs"
+                >
+                </div>
+              </div>
+            </div>
+
+            <div class="glass rounded-2xl p-4 border border-slate-700/70">
+              <ul id="warningsList" class="text-[11px] text-slate-400 space-y-1 list-disc list-inside"></ul>
+            </div>
+          </section>
+
+          <!-- Analytics by category -->
+          <section
+            id="analyticsSection"
+            class="glass rounded-2xl p-4 border border-slate-700/70 hidden"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                Аналитика по категориям расходов
+              </p>
+              <span class="text-[11px] text-slate-500">
+                За выбранный месяц и период
+              </span>
+            </div>
+            <div class="overflow-x-auto text-xs">
+              <table class="min-w-full border-collapse">
+                <thead class="text-[11px] text-slate-400 border-b border-slate-700/70">
+                  <tr>
+                    <th class="text-left pb-2 pr-4 font-normal">Категория</th>
+                    <th class="text-right pb-2 pr-4 font-normal">Сумма расходов</th>
+                    <th class="text-right pb-2 font-normal">% от всех расходов</th>
+                  </tr>
+                </thead>
+                <tbody id="analyticsTableBody" class="text-[11px] text-slate-200"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Forms and transactions list -->
+          <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Forms -->
+            <div class="space-y-4">
+              <div
+                id="addOperationCard"
+                class="glass rounded-2xl p-4 border border-slate-700/70"
+              >
+                <div class="flex items-center justify-between mb-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Добавить операцию
+                  </p>
+                </div>
+                <div id="operationsPanelBody" class="space-y-2">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                    <div class="rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
+                      <div class="text-[10px] uppercase tracking-wide text-fuchsia-300/90 font-semibold mb-0.5">
+                        Рекомендуется потратить сегодня
+                      </div>
+                      <div id="todayRecommended" class="text-base font-semibold text-fuchsia-100">
+                        0 ₽
+                      </div>
+                    </div>
+                    <div class="rounded-xl border border-slate-600/70 bg-slate-900/70 px-3 py-2 text-[11px] sm:text-right">
+                      <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">
+                        Уже потрачено сегодня
+                      </div>
+                      <div id="todaySpent" class="text-base font-semibold text-slate-100">
+                        0 ₽
+                      </div>
+                    </div>
+                  </div>
+                  <form id="transactionForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div class="flex flex-col gap-1.5 sm:col-span-2">
+                      <label for="transactionType" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Тип операции
+                      </label>
+                      <select
+                        id="transactionType"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      >
+                        <option value="flexibleExpense">Обычный расход</option>
+                        <option value="income">Доход</option>
+                        <option value="fixedExpense">Крупная покупка</option>
+                      </select>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="transactionCategory" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Категория
+                      </label>
+                      <select
+                        id="transactionCategory"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      >
+                        <!-- варианты категорий заполняются из JS -->
+                      </select>
+                      <div class="mt-1 flex items-center gap-1.5">
+                        <input
+                          id="newCategoryName"
+                          type="text"
+                          placeholder="Новая категория"
+                          class="flex-1 rounded-lg bg-slate-900/70 border border-slate-700/80 px-2 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          id="addCategoryButton"
+                          class="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="transactionTitle" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Название
+                      </label>
+                      <input
+                        id="transactionTitle"
+                        type="text"
+                        placeholder="Например: Зарплата, Аренда, Продукты"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="transactionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Сумма, ₽
+                      </label>
+                      <input
+                        id="transactionAmount"
+                        type="number"
+                        step="0.01"
+                        class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="transactionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Дата операции
+                      </label>
+                      <input
+                        id="transactionDate"
+                        type="date"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5 sm:col-span-2">
+                      <label for="transactionNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Комментарий (необязательно)
+                      </label>
+                      <input
+                        id="transactionNote"
+                        type="text"
+                        placeholder="Любые дополнительные детали"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex justify-between sm:col-span-2 mt-1.5 gap-2">
+                      <button
+                        type="button"
+                        id="fillSalaryExample"
+                        class="inline-flex items-center px-3 py-2 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                      >
+                        Пример: Зарплата
+                      </button>
+                      <button
+                        type="submit"
+                        id="transactionSubmitBtn"
+                        class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/30"
+                      >
+                        Сохранить операцию
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              <div
+                id="presetsCard"
+                class="glass rounded-2xl p-4 border border-slate-700/70"
+              >
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Повторяемые расходы
+                  </p>
+                <div class="flex items-center gap-2">
+                  <span
+                    id="presetsHeaderSummary"
+                    class="text-[11px] text-slate-400 hidden sm:inline-flex"
+                  >
+                    —
+                  </span>
+                </div>
+                </div>
+                <div id="presetsPanelBody">
+                  <form id="presetForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs mb-3">
+                    <div class="flex flex-col gap-1.5">
+                      <label for="presetTitle" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Название шаблона
+                      </label>
+                      <input
+                        id="presetTitle"
+                        type="text"
+                        placeholder="Например: Ипотека, аренда"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="presetCategory" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Категория
+                      </label>
+                      <select
+                        id="presetCategory"
+                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      >
+                        <!-- категории заполняются из JS -->
+                      </select>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="presetAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Сумма, ₽
+                      </label>
+                      <input
+                        id="presetAmount"
+                        type="number"
+                        step="0.01"
+                        class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <label for="presetDay" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        День месяца
+                      </label>
+                      <input
+                        id="presetDay"
+                        type="number"
+                        min="1"
+                        max="31"
+                        class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div class="flex justify-end sm:col-span-2 mt-1.5">
+                      <button
+                        type="submit"
+                        id="presetSubmitBtn"
+                        class="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-50 hover:bg-slate-600 transition-colors"
+                      >
+                        Сохранить шаблон
+                      </button>
+                    </div>
+                  </form>
+
+                  <div
+                    id="presetEmptyState"
+                    class="text-[11px] text-slate-500 border border-dashed border-slate-700/70 rounded-xl px-3 py-3"
+                  >
+                    Пока нет повторяемых расходов. Добавьте, например, ипотеку или аренду.
+                  </div>
+                  <div id="presetList" class="hidden mt-1.5 max-h-40 overflow-y-auto text-xs"></div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Transactions list -->
+            <div
+              id="transactionsCard"
+              class="glass rounded-2xl p-4 border border-slate-700/70"
+            >
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Операции выбранного месяца
+                  </p>
+                  <span
+                    id="transactionsHeaderSummary"
+                    class="text-[11px] text-slate-400 hidden sm:inline-flex"
+                  >
+                    —
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <select
+                    id="transactionsFilter"
+                    class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                    <option value="all">Все типы</option>
+                    <option value="income">Только доходы</option>
+                    <option value="fixedExpense">Только крупные покупки</option>
+                    <option value="recurringExpense">Только повторяемые расходы</option>
+                    <option value="flexibleExpense">Только обычные расходы</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mb-2 flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
+                <div class="flex items-center gap-2 text-[11px] text-slate-400">
+                  <span>Фильтр по дате:</span>
+                  <input
+                    id="transactionsDateFilter"
+                    type="date"
+                    class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  id="transactionsDateFilterClear"
+                  class="text-[11px] text-slate-400 hover:text-slate-100 hover:underline"
+                >
+                  Очистить фильтр даты
+                </button>
+              </div>
+              <div id="transactionsPanelBody">
+                <div
+                  id="transactionsEmptyState"
+                  class="text-[11px] text-slate-500 border border-dashed border-slate-700/70 rounded-xl px-3 py-3"
+                >
+                  Пока нет операций за этот месяц. Добавьте доход, крупную покупку или обычный расход.
+                </div>
+                <div
+                  id="transactionsList"
+                  class="hidden max-h-80 overflow-y-auto mt-1.5 text-xs divide-y divide-slate-800/80"
+                >
+                  <!-- rows injected by JS -->
+                </div>
+              </div>
+            </div>
+          </section>
+    <script src="./app.js"></script>
+  </body>
+</html>
