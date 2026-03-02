@@ -250,8 +250,200 @@
             </div>
           </div>
 
+          <!-- Edit transaction modal -->
+          <div
+            id="editTransactionModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[90vh] overflow-y-auto p-4 space-y-3">
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Редактировать операцию
+                </h2>
+                <button
+                  type="button"
+                  id="closeEditTransactionButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                >
+                  ×
+                </button>
+              </div>
+              <form id="editTransactionForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <input type="hidden" id="editTransactionType" value="flexibleExpense" />
+                <div class="sm:col-span-2">
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      id="editTypeExpenseButton"
+                      class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 transition-colors"
+                    >
+                      Расход
+                    </button>
+                    <button
+                      type="button"
+                      id="editTypeIncomeButton"
+                      class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 transition-colors"
+                    >
+                      Доход
+                    </button>
+                  </div>
+                </div>
+                <div class="sm:col-span-2">
+                  <label for="editTransactionCategory" class="text-[11px] text-slate-300 uppercase tracking-wide block mb-1">
+                    Категория
+                  </label>
+                  <select
+                    id="editTransactionCategory"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                  </select>
+                </div>
+                <div class="sm:col-span-2">
+                  <label for="editTransactionTitle" class="text-[11px] text-slate-300 uppercase tracking-wide block mb-1">
+                    Название
+                  </label>
+                  <input
+                    id="editTransactionTitle"
+                    type="text"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label for="editTransactionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide block mb-1">
+                    Сумма, ₽
+                  </label>
+                  <input
+                    id="editTransactionAmount"
+                    type="number"
+                    step="0.01"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label for="editTransactionDate" class="text-[11px] text-slate-300 uppercase tracking-wide block mb-1">
+                    Дата
+                  </label>
+                  <input
+                    id="editTransactionDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="sm:col-span-2">
+                  <label for="editTransactionNote" class="text-[11px] text-slate-300 uppercase tracking-wide block mb-1">
+                    Комментарий (необязательно)
+                  </label>
+                  <input
+                    id="editTransactionNote"
+                    type="text"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="sm:col-span-2 flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    id="cancelEditTransactionButton"
+                    class="flex-1 rounded-lg border border-slate-600/80 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    class="flex-1 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Today summary (Dashboard & Operations, above tabs) -->
+          <div
+            id="todaySummaryRow"
+            class="hidden mt-3 grid grid-cols-3 gap-2"
+          >
+            <div class="rounded-xl border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-[11px]">
+              <div class="flex items-center justify-between mb-0.5">
+                <div class="text-[10px] uppercase tracking-wide text-emerald-300/90 font-semibold">
+                  Остаток на балансе
+                </div>
+                <button
+                  type="button"
+                  id="todayBalanceEditButton"
+                  class="inline-flex items-center justify-center w-6 h-6 rounded-full border border-emerald-400/70 text-[11px] text-emerald-200 hover:bg-emerald-500/20 hover:border-emerald-300 hover:text-emerald-50 transition-colors"
+                  aria-label="Редактировать остаток на балансе"
+                  title="Редактировать остаток на балансе"
+                >
+                  ✎
+                </button>
+              </div>
+              <div id="todayBalance" class="text-base font-semibold text-emerald-100">
+                0 ₽
+              </div>
+            </div>
+            <div class="rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
+              <div class="text-[10px] uppercase tracking-wide text-fuchsia-300/90 font-semibold mb-0.5">
+                Рекомендуется потратить сегодня
+              </div>
+              <div id="todayRecommended" class="text-base font-semibold text-fuchsia-100">
+                0 ₽
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-600/70 bg-slate-900/70 px-3 py-2 text-[11px] text-right">
+              <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">
+                Уже потрачено сегодня
+              </div>
+              <div id="todaySpent" class="text-base font-semibold text-slate-100">
+                0 ₽
+              </div>
+            </div>
+          </div>
+          <div
+            id="todayBalanceEditRow"
+            class="hidden mt-2 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-3 text-[11px] space-y-2"
+          >
+            <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+              <label for="todayBalanceInput" class="text-slate-300">
+                Новый остаток на балансе, ₽
+              </label>
+              <input
+                id="todayBalanceInput"
+                type="number"
+                step="0.01"
+                class="number-input w-full sm:max-w-[160px] rounded-lg bg-slate-950/70 border border-slate-700/80 px-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+              />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="todayBalanceComment" class="text-slate-300">
+                Комментарий (необязательно)
+              </label>
+              <input
+                id="todayBalanceComment"
+                type="text"
+                class="w-full rounded-lg bg-slate-950/70 border border-slate-700/80 px-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+              />
+            </div>
+            <div class="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                id="todayBalanceCancel"
+                class="rounded-lg border border-slate-600/80 px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                id="todayBalanceSave"
+                class="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+
           <!-- Tabs -->
-          <div class="mt-1 border-b border-slate-800/70 overflow-x-auto">
+          <div class="mt-2 border-b border-slate-800/70 overflow-x-auto">
             <nav class="flex flex-nowrap gap-1 sm:gap-2 text-[11px] sm:text-xs whitespace-nowrap">
               <button
                 id="tabOperations"
@@ -291,27 +483,13 @@
             </nav>
           </div>
 
-          <!-- Summary cards -->
+          <!-- Today summary (Dashboard & Operations) -->
+
+          <!-- Summary cards (Dashboard) -->
           <section
             id="summarySection"
-            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4"
+            class="hidden grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4"
           >
-            <!-- Current daily limit first and most prominent -->
-            <div class="card rounded-2xl p-4 border border-fuchsia-500/60 shadow-lg shadow-fuchsia-500/25 lg:col-span-1">
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-[11px] uppercase tracking-wide text-fuchsia-300/90 font-semibold">
-                  Можно потратить сегодня
-                </span>
-              </div>
-              <p id="currentDailyLimit" class="text-2xl sm:text-3xl font-semibold text-fuchsia-100">
-                0 ₽
-              </p>
-              <p class="text-[11px] text-slate-400 mt-1">
-                Уже потрачено:
-                <span id="spentSoFar" class="text-fuchsia-100 font-medium">0 ₽</span>
-              </p>
-            </div>
-
             <!-- Monthly income -->
             <div class="card rounded-2xl p-4 border border-emerald-500/40 shadow-lg shadow-emerald-500/15">
               <div class="flex items-center justify-between mb-1.5">
@@ -366,7 +544,7 @@
             <div class="card rounded-2xl p-4 border border-emerald-500/40 shadow-lg shadow-emerald-500/15">
               <div class="flex items-center justify-between mb-1.5">
                 <span class="text-[11px] uppercase tracking-wide text-emerald-300/90 font-semibold">
-                  Сбережения (10% зарплаты)
+                  Сбережения (15% зарплаты)
                 </span>
                 <span class="text-[10px] text-emerald-300/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                   учитываются как расход
@@ -378,10 +556,10 @@
             </div>
           </section>
 
-          <!-- Saldo and alerts -->
+          <!-- Saldo and alerts (Dashboard) -->
           <section
             id="saldoSection"
-            class="grid grid-cols-1 lg:grid-cols-3 gap-4"
+            class="hidden grid grid-cols-1 lg:grid-cols-3 gap-4"
           >
             <div class="glass rounded-2xl p-4 border border-slate-700/70 lg:col-span-2">
               <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-center sm:justify-between">
@@ -406,10 +584,40 @@
             </div>
           </section>
 
+          <!-- Planner (upcoming income/expenses) -->
+          <section
+            id="plannerSection"
+            class="hidden glass rounded-2xl p-4 border border-slate-700/70"
+          >
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                Ближайшие события
+              </p>
+              <span class="text-[11px] text-slate-500">
+                Ожидаемые доходы и расходы
+              </span>
+            </div>
+            <div id="plannerEmptyState" class="text-[11px] text-slate-500">
+              Нет запланированных операций после сегодняшнего дня.
+            </div>
+            <div id="plannerList" class="hidden mt-1.5 text-xs">
+              <table class="min-w-full border-collapse">
+                <thead class="text-[11px] text-slate-400 border-b border-slate-700/70">
+                  <tr>
+                    <th class="text-left pb-1 pr-3 font-normal">Дата</th>
+                    <th class="text-left pb-1 pr-3 font-normal">Описание</th>
+                    <th class="text-right pb-1 font-normal">Сумма</th>
+                  </tr>
+                </thead>
+                <tbody id="plannerTableBody" class="text-[11px] text-slate-200"></tbody>
+              </table>
+            </div>
+          </section>
+
           <!-- Analytics by category -->
           <section
             id="analyticsSection"
-            class="glass rounded-2xl p-4 border border-slate-700/70 hidden"
+            class="hidden glass rounded-2xl p-4 border border-slate-700/70"
           >
             <div class="flex items-center justify-between mb-3">
               <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
@@ -446,27 +654,53 @@
                     Добавить операцию
                   </p>
                 </div>
-                <div id="operationsPanelBody" class="space-y-2">
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                    <div class="rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
-                      <div class="text-[10px] uppercase tracking-wide text-fuchsia-300/90 font-semibold mb-0.5">
-                        Рекомендуется потратить сегодня
-                      </div>
-                      <div id="todayRecommended" class="text-base font-semibold text-fuchsia-100">
-                        0 ₽
-                      </div>
-                    </div>
-                    <div class="rounded-xl border border-slate-600/70 bg-slate-900/70 px-3 py-2 text-[11px] sm:text-right">
-                      <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">
-                        Уже потрачено сегодня
-                      </div>
-                      <div id="todaySpent" class="text-base font-semibold text-slate-100">
-                        0 ₽
-                      </div>
-                    </div>
-                  </div>
+                <div id="operationsPanelBody" class="space-y-3">
                   <form id="transactionForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div class="flex flex-col gap-1.5 sm:col-span-2">
+                    <div class="sm:col-span-2">
+                      <div class="flex gap-2">
+                        <button
+                          type="button"
+                          id="typeExpenseButton"
+                          class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-rose-500/20 hover:border-rose-400/80 transition-colors"
+                        >
+                          Расход
+                        </button>
+                        <button
+                          type="button"
+                          id="typeIncomeButton"
+                          class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-emerald-500/20 hover:border-emerald-400/80 transition-colors"
+                        >
+                          Доход
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      id="expenseKindRow"
+                      class="hidden sm:col-span-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-300"
+                    >
+                      <span class="uppercase tracking-wide text-[10px] text-slate-400">
+                        Тип расхода:
+                      </span>
+                      <div class="inline-flex rounded-full border border-slate-700/80 bg-slate-900/70 p-0.5">
+                        <button
+                          type="button"
+                          id="expenseKindNormalButton"
+                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-200"
+                        >
+                          Обычный
+                        </button>
+                        <button
+                          type="button"
+                          id="expenseKindFixedButton"
+                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300"
+                        >
+                          Крупная покупка
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5 sm:col-span-2 hidden">
                       <label for="transactionType" class="text-[11px] text-slate-300 uppercase tracking-wide">
                         Тип операции
                       </label>
@@ -480,16 +714,21 @@
                       </select>
                     </div>
 
-                    <div class="flex flex-col gap-1.5">
-                      <label for="transactionCategory" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    <div class="flex flex-col gap-1.5 sm:col-span-2">
+                      <label class="text-[11px] text-slate-300 uppercase tracking-wide">
                         Категория
                       </label>
                       <select
                         id="transactionCategory"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        class="hidden w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       >
                         <!-- варианты категорий заполняются из JS -->
                       </select>
+                      <div
+                        id="transactionCategoryButtons"
+                        class="flex flex-wrap gap-1.5 mt-0.5"
+                      >
+                      </div>
                       <div class="mt-1 flex items-center gap-1.5">
                         <input
                           id="newCategoryName"
@@ -529,9 +768,20 @@
                         step="0.01"
                         class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       />
+                      <div class="mt-1 flex items-center justify-between">
+                        <span id="transactionDateLabel" class="text-[10px] text-slate-500">
+                        </span>
+                        <button
+                          type="button"
+                          id="transactionDateToggleButton"
+                          class="text-[10px] text-sky-300 hover:text-sky-100 px-2 py-1 rounded-md hover:bg-slate-800/80 transition-colors"
+                        >
+                          Изменить дату
+                        </button>
+                      </div>
                     </div>
 
-                    <div class="flex flex-col gap-1.5">
+                    <div class="flex flex-col gap-1.5 hidden" id="transactionDateRow">
                       <label for="transactionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
                         Дата операции
                       </label>
@@ -576,11 +826,11 @@
 
               <div
                 id="presetsCard"
-                class="glass rounded-2xl p-4 border border-slate-700/70"
+                class="hidden glass rounded-2xl p-4 border border-slate-700/70"
               >
                 <div class="flex items-center justify-between mb-2">
                   <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                    Повторяемые расходы
+                    Повторяемые операции
                   </p>
                 <div class="flex items-center gap-2">
                   <span
@@ -592,7 +842,30 @@
                 </div>
                 </div>
                 <div id="presetsPanelBody">
+                  <!-- Повторяемые операции -->
                   <form id="presetForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs mb-3">
+                    <div class="sm:col-span-2 flex flex-wrap items-center gap-2">
+                      <span class="text-[11px] text-slate-300 uppercase tracking-wide">
+                        Тип:
+                      </span>
+                      <div class="inline-flex rounded-full border border-slate-700/80 bg-slate-900/70 p-0.5">
+                        <button
+                          type="button"
+                          id="presetTypeExpenseButton"
+                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-emerald-100 bg-emerald-500/20 border border-emerald-400/80"
+                        >
+                          Расход
+                        </button>
+                        <button
+                          type="button"
+                          id="presetTypeIncomeButton"
+                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300"
+                        >
+                          Доход
+                        </button>
+                      </div>
+                      <input type="hidden" id="presetType" value="expense" />
+                    </div>
                     <div class="flex flex-col gap-1.5">
                       <label for="presetTitle" class="text-[11px] text-slate-300 uppercase tracking-wide">
                         Название шаблона
@@ -657,9 +930,10 @@
                     id="presetEmptyState"
                     class="text-[11px] text-slate-500 border border-dashed border-slate-700/70 rounded-xl px-3 py-3"
                   >
-                    Пока нет повторяемых расходов. Добавьте, например, ипотеку или аренду.
+                    Пока нет повторяемых операций. Добавьте, например, ипотеку, аренду, аванс или зарплату.
                   </div>
                   <div id="presetList" class="hidden mt-1.5 max-h-40 overflow-y-auto text-xs"></div>
+
                 </div>
               </div>
 
@@ -695,22 +969,75 @@
                   </select>
                 </div>
               </div>
-              <div class="mb-2 flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
-                <div class="flex items-center gap-2 text-[11px] text-slate-400">
-                  <span>Фильтр по дате:</span>
+              <div class="mb-3 space-y-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-[11px] text-slate-400">Период:</span>
+                  <div class="flex gap-1 rounded-lg border border-slate-700/80 p-0.5 bg-slate-900/50">
+                    <button
+                      type="button"
+                      id="historyPeriodTabDay"
+                      class="history-period-tab px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors"
+                      data-mode="day"
+                    >
+                      День
+                    </button>
+                    <button
+                      type="button"
+                      id="historyPeriodTabMonth"
+                      class="history-period-tab px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors"
+                      data-mode="month"
+                    >
+                      Месяц
+                    </button>
+                    <button
+                      type="button"
+                      id="historyPeriodTabRange"
+                      class="history-period-tab px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors"
+                      data-mode="range"
+                    >
+                      Все
+                    </button>
+                  </div>
+                </div>
+                <div id="historyPeriodDayRow" class="flex flex-wrap items-center gap-2">
+                  <label for="historyFilterDay" class="text-[11px] text-slate-400">Дата:</label>
                   <input
-                    id="transactionsDateFilter"
+                    id="historyFilterDay"
                     type="date"
                     class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
                   />
                 </div>
-                <button
-                  type="button"
-                  id="transactionsDateFilterClear"
-                  class="text-[11px] text-slate-400 hover:text-slate-100 hover:underline"
-                >
-                  Очистить фильтр даты
-                </button>
+                <div id="historyPeriodMonthRow" class="hidden flex flex-wrap items-center gap-2">
+                  <label for="historyFilterMonth" class="text-[11px] text-slate-400">Месяц:</label>
+                  <input
+                    id="historyFilterMonth"
+                    type="month"
+                    class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div id="historyPeriodRangeRow" class="hidden flex flex-wrap items-center gap-2">
+                  <label for="historyFilterRangeStart" class="text-[11px] text-slate-400">С:</label>
+                  <input
+                    id="historyFilterRangeStart"
+                    type="date"
+                    class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                  <label for="historyFilterRangeEnd" class="text-[11px] text-slate-400">По:</label>
+                  <input
+                    id="historyFilterRangeEnd"
+                    type="date"
+                    class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    id="transactionsDateFilterClear"
+                    class="text-[11px] text-slate-400 hover:text-slate-100 hover:underline"
+                  >
+                    Очистить фильтр периода
+                  </button>
+                </div>
               </div>
               <div id="transactionsPanelBody">
                 <div
@@ -721,7 +1048,7 @@
                 </div>
                 <div
                   id="transactionsList"
-                  class="hidden max-h-80 overflow-y-auto mt-1.5 text-xs divide-y divide-slate-800/80"
+                  class="hidden mt-1.5 text-xs divide-y divide-slate-800/80"
                 >
                   <!-- rows injected by JS -->
                 </div>
