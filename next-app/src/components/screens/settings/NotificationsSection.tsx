@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import type { NotificationPrefs } from "@/domain/notifications";
 import { useSnapshot } from "@/client/react";
 import {
@@ -14,7 +14,7 @@ import {
 import { isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
 import { Notice, Switch } from "../../ui/controls";
-import { controlClass } from "../../ui/Field";
+import { TimeInput } from "../../ui/Field";
 import { SectionCard, useRowSummary, type RowSummary } from "./SettingsList";
 
 const KINDS: { key: keyof NotificationPrefs; label: string; description: string }[] = [
@@ -38,8 +38,6 @@ export function NotificationsSection() {
   const { state } = useSnapshot();
   const [access, setAccess] = useState<NotificationAccess>("unavailable");
   const [prefs, setPrefs] = useState<NotificationPrefs>(() => loadNotificationPrefs());
-  const morningId = useId();
-  const eveningId = useId();
   const native = isNativeApp();
 
   useEffect(() => {
@@ -94,18 +92,11 @@ export function NotificationsSection() {
                 description={kind.description}
               />
             ))}
-            <div className="space-y-1.5">
-              <label htmlFor={morningId} className="block text-sm font-medium text-muted">
-                Время напоминаний о платежах и доходах
-              </label>
-              <input
-                id={morningId}
-                type="time"
-                value={prefs.morningTime}
-                onChange={(e) => e.target.value && update({ morningTime: e.target.value })}
-                className={`${controlClass} h-12 w-40`}
-              />
-            </div>
+            <TimeInput
+              label="Время напоминаний о платежах и доходах"
+              value={prefs.morningTime}
+              onChange={(e) => e.target.value && update({ morningTime: e.target.value })}
+            />
             <Switch
               checked={prefs.dailyReminder}
               onChange={(value) => update({ dailyReminder: value })}
@@ -113,18 +104,11 @@ export function NotificationsSection() {
               description="«Внесите сегодняшние траты» — каждый день в выбранное время."
             />
             {prefs.dailyReminder && (
-              <div className="space-y-1.5">
-                <label htmlFor={eveningId} className="block text-sm font-medium text-muted">
-                  Время вечернего напоминания
-                </label>
-                <input
-                  id={eveningId}
-                  type="time"
-                  value={prefs.reminderTime}
-                  onChange={(e) => e.target.value && update({ reminderTime: e.target.value })}
-                  className={`${controlClass} h-12 w-40`}
-                />
-              </div>
+              <TimeInput
+                label="Время вечернего напоминания"
+                value={prefs.reminderTime}
+                onChange={(e) => e.target.value && update({ reminderTime: e.target.value })}
+              />
             )}
           </>
         )}

@@ -136,4 +136,29 @@ export function DateInput({
   );
 }
 
+/**
+ * Поле времени. У type="time" в WebKit на iPhone своя минимальная ширина — без min-w-0 и appearance-none
+ * оно вылезает за карточку (как и поле даты, см. DateInput).
+ */
+export function TimeInput({
+  label,
+  hint,
+  error,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode; hint?: ReactNode; error?: string | null }) {
+  const id = useId();
+  return (
+    <Field label={label} hint={hint} error={error} htmlFor={id}>
+      <input
+        id={id}
+        type="time"
+        aria-describedby={describedBy(id, hint, error)}
+        {...props}
+        aria-invalid={error ? true : undefined}
+        className={`${CONTROL} h-12 min-w-0 max-w-48 appearance-none [&::-webkit-date-and-time-value]:text-left`}
+      />
+    </Field>
+  );
+}
+
 export const controlClass = CONTROL;
