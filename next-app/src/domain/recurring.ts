@@ -25,6 +25,9 @@ export interface Occurrence {
   amount: number;
   /** Счёт шаблона (нет — основной). */
   accountId?: string;
+  /** Куда идут деньги: свой счёт или кредит (см. Template). */
+  toAccountId?: string;
+  loanId?: string;
 }
 
 /**
@@ -128,6 +131,8 @@ function toOccurrence(template: Template, month: MonthKey, date: IsoDate): Occur
     category: template.category,
     amount: template.amount,
     ...(template.accountId ? { accountId: template.accountId } : {}),
+    ...(template.toAccountId ? { toAccountId: template.toAccountId } : {}),
+    ...(template.loanId ? { loanId: template.loanId } : {}),
   };
 }
 

@@ -5,7 +5,10 @@ import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import type { Kopecks } from "@/domain/money";
 import { dueOccurrences, nextOccurrence, type Occurrence } from "@/domain/recurring";
 import { LIMITS, type Template } from "@/domain/schema";
+import { activeAccounts, findAccount, MAIN_ACCOUNT_ID } from "@/domain/accounts";
+import { loanRemaining } from "@/domain/metrics";
 import { newId, useSnapshot, useToday } from "@/client/react";
+import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { CategoryPicker } from "../../ui/CategoryPicker";
@@ -14,6 +17,7 @@ import { useConfirm, useToast } from "../../ui/feedback";
 import { DateInput, TextInput } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
+import { ACCOUNT_KINDS, hasOwnAccounts } from "../accounts";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 import { plural } from "@/domain/text";
@@ -31,6 +35,19 @@ function parseDay(text: string): number | null {
 
 function groupOf(kind: Kind): "income" | "mandatory" {
   return kind === "income" ? "income" : "mandatory";
+}
+
+/** Куда идут деньги платежа: обычный расход, свой счёт или кредит из «Долгов». */
+type Target = { kind: "none" } | { kind: "account"; id: string } | { kind: "loan"; id: string };
+
+function targetOf(t: Template | undefined): Target {
+  if (t?.toAccountId) return { kind: "account", id: t.toAccountId };
+  if (t?.loanId) return { kind: "loan", id: t.loanId };
+  return { kind: "none" };
+}
+
+function sameTarget(a: Target, b: Target): boolean {
+  return a.kind === b.kind && (a.kind === "none" || a.id === (b as { id: string }).id);
 }
 
 function templateNoun(kind: Kind): string {
@@ -60,6 +77,8 @@ export function TemplateSheet({
     title: existing?.title ?? "",
     dayText: existing ? String(existing.dayOfMonth) : "",
     active: existing?.active ?? true,
+    accountId: existing?.accountId ?? MAIN_ACCOUNT_ID,
+    target: targetOf(existing),
   }));
   const [kind, setKind] = useState<Kind>(initial.kind);
   const [amount, setAmount] = useState<Kopecks | null>(initial.amount);
@@ -72,6 +91,17 @@ export function TemplateSheet({
   const [startDraft, setStartDraft] = useState<IsoDate | null>(null);
   // Пауза применяется вместе с остальными полями — по кнопке «Сохранить».
   const [active, setActive] = useState(initial.active);
+  // Счета: с какого списывается платёж (или куда приходит доход) и куда идут деньги платежа.
+  const [accountId, setAccountId] = useState(initial.accountId);
+  const [target, setTarget] = useState<Target>(initial.target);
+  const accounts = activeAccounts(state);
+  const showAccounts = hasOwnAccounts(state) || initial.accountId !== MAIN_ACCOUNT_ID;
+  // Кредиты и займы, по которым платят (свой долг): действующие и уже выбранный.
+  const loans = state.loans.filter(
+    (l) => l.kind !== "lend" && (loanRemaining(state, l) > 0 || (target.kind === "loan" && target.id === l.id)),
+  );
+  const targetAccounts = accounts.filter((a) => a.id !== accountId);
+  const showTarget = kind === "expense" && (targetAccounts.length > 0 || loans.length > 0) && (showAccounts || loans.length > 0);
   const [errors, setErrors] = useState<Errors>({});
 
   const resuming = Boolean(existing && !existing.active && active);
@@ -110,7 +140,9 @@ export function TemplateSheet({
     title !== initial.title ||
     dayText !== initial.dayText ||
     (startDraft !== null && startDraft !== currentStart) ||
-    active !== initial.active;
+    active !== initial.active ||
+    accountId !== initial.accountId ||
+    !sameTarget(target, initial.target);
   const clearError = (key: keyof Errors) => setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
 
   const pickCategory = (value: string) => {
@@ -122,6 +154,8 @@ export function TemplateSheet({
 
   const switchKind = (next: Kind) => {
     setKind(next);
+    // Куда идут деньги — только у платежа.
+    if (next === "income") setTarget({ kind: "none" });
     if (category && !state.categories[groupOf(next)].includes(category)) {
       setCategory("");
       if (!titleTouched) setTitle("");
@@ -139,9 +173,21 @@ export function TemplateSheet({
     if (Object.keys(next).length || !amount || day === null) return;
 
     const fields = { kind, title: title.trim(), category: category.trim(), amount, dayOfMonth: day, startDate };
+    const effectiveTarget: Target = kind === "expense" ? target : { kind: "none" };
+    const toAccountId = effectiveTarget.kind === "account" ? effectiveTarget.id : null;
+    const loanId = effectiveTarget.kind === "loan" ? effectiveTarget.id : null;
     if (!existing) {
       if (templateId) return;
-      if (dispatch({ type: "template.add", template: { id: newId(), ...fields, active: true, note: "" } })) close();
+      const template: Template = {
+        id: newId(),
+        ...fields,
+        active: true,
+        note: "",
+        ...(accountId !== MAIN_ACCOUNT_ID ? { accountId } : {}),
+        ...(toAccountId ? { toAccountId } : {}),
+        ...(loanId ? { loanId } : {}),
+      };
+      if (dispatch({ type: "template.add", template })) close();
       return;
     }
     const activeChanged = active !== existing.active;
@@ -149,7 +195,11 @@ export function TemplateSheet({
     // которую человек выбрал сам.
     const ok = dispatch([
       ...(activeChanged ? [{ type: "template.setActive" as const, id: existing.id, active, today }] : []),
-      { type: "template.update", id: existing.id, patch: fields },
+      {
+        type: "template.update",
+        id: existing.id,
+        patch: { ...fields, accountId: accountId === MAIN_ACCOUNT_ID ? null : accountId, toAccountId, loanId },
+      },
     ]);
     if (!ok) return;
     if (activeChanged) toast(`${templateNoun(kind)} «${fields.title}» ${active ? "возобновлён" : "приостановлен"}`);
@@ -223,6 +273,58 @@ export function TemplateSheet({
           onChange={pickCategory}
           error={errors.category}
         />
+
+        {showAccounts && (
+          <AccountPicker
+            label={kind === "income" ? "На какой счёт" : "С какого счёта"}
+            accounts={accounts}
+            value={accountId}
+            onChange={(id) => {
+              setAccountId(id);
+              if (target.kind === "account" && target.id === id) setTarget({ kind: "none" });
+            }}
+          />
+        )}
+
+        {showTarget && (
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-sm font-medium text-muted">Куда идут деньги</legend>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: "none", label: "Обычный платёж", value: { kind: "none" } as Target, icon: null },
+                ...targetAccounts.map((a) => ({
+                  key: `a:${a.id}`,
+                  label: a.name,
+                  value: { kind: "account", id: a.id } as Target,
+                  icon: ACCOUNT_KINDS[a.kind].icon,
+                })),
+                ...loans.map((l) => ({
+                  key: `l:${l.id}`,
+                  label: l.name,
+                  value: { kind: "loan", id: l.id } as Target,
+                  icon: "handshake" as const,
+                })),
+              ].map((option) => {
+                const selected = sameTarget(option.value, target);
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setTarget(option.value)}
+                    className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
+                      selected ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
+                    }`}
+                  >
+                    {option.icon && <Icon name={option.icon} size={16} />}
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-sm text-muted">{targetHint(target, state)}</p>
+          </fieldset>
+        )}
 
         <TextInput
           label="Название"
@@ -316,6 +418,19 @@ export function TemplateSheet({
       </form>
     </Sheet>
   );
+}
+
+function targetHint(target: Target, state: Parameters<typeof findAccount>[0]): string {
+  if (target.kind === "loan") return "Платёж по кредиту — обязательный расход месяца, уменьшает остаток долга.";
+  if (target.kind === "account") {
+    const account = findAccount(state, target.id);
+    if (account?.kind === "credit") {
+      return "Погашение кредитки — перевод, а не расход: покупки по ней уже учтены в бюджете, когда вы их делали.";
+    }
+    if (account?.kind === "savings") return "Пополнение накопительного — считается отложенным в этом месяце.";
+    return "Перевод на свой счёт — не расход.";
+  }
+  return "Обязательный расход месяца — вычитается из бюджета заранее.";
 }
 
 function PreviewBox({ children }: { children: ReactNode }) {

@@ -100,6 +100,22 @@ export function transactionAccountLabel(state: State, tx: Transaction): string |
   return parts.length ? parts.join(" · ") : null;
 }
 
+/**
+ * Откуда и куда идёт регулярный платёж: «Основной → Кредитка», «Основной → Ипотека», «Кредитка» (только откуда).
+ * null — счетов нет и платёж обычный.
+ */
+export function templateRoute(state: State, t: { accountId?: string; toAccountId?: string; loanId?: string }): string | null {
+  const own = hasOwnAccounts(state);
+  const from = own ? (findAccount(state, t.accountId ?? MAIN_ACCOUNT_ID)?.name ?? "счёт") : null;
+  const to = t.toAccountId
+    ? findAccount(state, t.toAccountId)?.name
+    : t.loanId
+      ? state.loans.find((l) => l.id === t.loanId)?.name
+      : undefined;
+  if (to) return from ? `${from} → ${to}` : `→ ${to}`;
+  return from;
+}
+
 /** Карта последней операции по этому счёту — её предлагаем по умолчанию. */
 export function lastCardOf(state: State, accountId: string): string | null {
   const account = findAccount(state, accountId);

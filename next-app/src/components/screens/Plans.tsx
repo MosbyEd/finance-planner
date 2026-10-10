@@ -6,6 +6,7 @@ import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { isSkipped, nextOccurrence, occurrenceDate } from "@/domain/recurring";
 import type { Template } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
+import { templateRoute } from "../app/accounts";
 import { useDispatch } from "../app/hooks";
 import { useUi } from "../app/overlays";
 import { Button } from "../ui/Button";
@@ -29,8 +30,13 @@ function byActiveAndDay(a: Template, b: Template): number {
   return Number(b.active) - Number(a.active) || a.dayOfMonth - b.dayOfMonth || a.title.localeCompare(b.title, "ru");
 }
 
+/** Сумма действующих шаблонов. Платежи на свои счета (погашение кредитки, пополнение накопительного) — не расходы. */
 function sumActive(templates: Template[], kind: Kind): Kopecks {
-  return templates.reduce((sum, t) => (t.active && t.kind === kind ? sum + t.amount : sum), 0);
+  return templates.reduce((sum, t) => (t.active && t.kind === kind && !(kind === "expense" && t.toAccountId) ? sum + t.amount : sum), 0);
+}
+
+function sumTransfers(templates: Template[]): Kopecks {
+  return templates.reduce((sum, t) => (t.active && t.kind === "expense" && t.toAccountId ? sum + t.amount : sum), 0);
 }
 
 export function Plans() {
@@ -57,6 +63,7 @@ export function Plans() {
       expenses: rows("expense"),
       income,
       expense,
+      transfers: sumTransfers(state.templates),
       savingsTarget,
       free: income - expense - savingsTarget,
       skipped,
@@ -77,6 +84,7 @@ export function Plans() {
           <SummaryCard
             income={data.income}
             expense={data.expense}
+            transfers={data.transfers}
             savingsTarget={data.savingsTarget}
             rate={state.settings.savingsRatePercent}
             free={data.free}
@@ -93,12 +101,14 @@ export function Plans() {
 function SummaryCard({
   income,
   expense,
+  transfers,
   savingsTarget,
   rate,
   free,
 }: {
   income: Kopecks;
   expense: Kopecks;
+  transfers: Kopecks;
   savingsTarget: Kopecks;
   rate: number;
   free: Kopecks;
@@ -109,6 +119,10 @@ function SummaryCard({
         <SummaryRow label="Доходы" value={income} tone="positive" />
         <SummaryRow label="Обязательные платежи" value={-expense} />
         <SummaryRow label={`Норма сбережений, ${rate}%`} value={-savingsTarget} />
+        {transfers > 0 && (
+          // Погашение кредитки и пополнение накопительного — не расходы бюджета, показываем справочно.
+          <SummaryRow label="Переводы на свои счета (не расход)" value={-transfers} />
+        )}
         <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-border pt-3">
           <dt className="font-medium">Свободно после регулярных платежей</dt>
           <dd>
@@ -182,6 +196,7 @@ function TemplateSection({ kind, rows }: { kind: Kind; rows: Row[] }) {
 
 function TemplateRow({ row }: { row: Row }) {
   const { template: t, next } = row;
+  const { state } = useSnapshot();
   const { open } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
@@ -200,6 +215,7 @@ function TemplateRow({ row }: { row: Row }) {
   };
 
   const amount = t.kind === "income" ? t.amount : -t.amount;
+  const route = templateRoute(state, t);
 
   // Строка открывает шаблон: кнопка растянута на всю строку через ::after. Справа — сумма и под ней
   // подписанная кнопка паузы, так на узком экране тексту слева остаётся вся ширина.
@@ -219,6 +235,7 @@ function TemplateRow({ row }: { row: Row }) {
             {t.dayOfMonth}-го числа
           </span>
         </span>
+        {route && <span className="block truncate text-xs text-muted">{route}</span>}
         <span className={`block text-xs ${t.active ? "text-muted" : "font-medium text-warning"}`}>
           {!t.active ? "На паузе" : next ? `Следующий — ${formatDay(next, today)}` : "Начнётся позже"}
         </span>

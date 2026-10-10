@@ -10,7 +10,7 @@ const SYMBOLS: Record<string, [string, string]> = {
   history: ["list.bullet", "list.bullet"],
   plans: ["repeat", "repeat"],
   goals: ["target", "target"],
-  analytics: ["chart.bar", "chart.bar.fill"],
+  settings: ["gearshape", "gearshape.fill"],
 };
 
 /**
@@ -27,7 +27,7 @@ export function useNativeTabBar({
   onAdd,
 }: {
   enabled: boolean;
-  tabs: readonly { id: Exclude<Tab, "settings">; label: string }[];
+  tabs: readonly { id: Exclude<Tab, "analytics">; label: string }[];
   tab: Tab;
   showAdd: boolean;
   onSelect: (tab: Tab) => void;

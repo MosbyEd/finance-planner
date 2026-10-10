@@ -216,7 +216,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
 
   for (const occ of plannedOccurrences(state, cutoff, last)) {
     if (occ.kind === "income") incomeFuture += occ.amount;
-    else mandatoryFuture += occ.amount;
+    else if (occurrenceIsExpense(state, occ)) mandatoryFuture += occ.amount;
   }
 
   const incomePlan = incomeFact + incomeFuture;
@@ -272,6 +272,19 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   };
 }
 
+/**
+ * Будущее начисление шаблона — расход бюджета? Перевод на свой счёт (погашение кредитки, пополнение
+ * накопительного) — нет; платёж по долгу, деньги которого прошли через счёт, — тоже нет (корректировка).
+ */
+function occurrenceIsExpense(state: State, occ: { toAccountId?: string; loanId?: string }): boolean {
+  if (occ.toAccountId) return false;
+  if (occ.loanId) {
+    const loan = state.loans.find((l) => l.id === occ.loanId);
+    return !loan || !loanOpening(state, loan);
+  }
+  return true;
+}
+
 export interface UpcomingEvent {
   key: string;
   date: IsoDate;
@@ -320,13 +333,23 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
     });
   }
   for (const occ of plannedOccurrences(state, today, until)) {
+    // Платёж на свой счёт двигает деньги между счетами: на счетах для трат меняется только то, что ушло с них.
+    const toOwn = occ.kind === "expense" && occ.toAccountId;
+    const type: Transaction["type"] = toOwn ? "transfer" : occ.kind;
+    const effect = toOwn
+      ? spendingEffect(spending, { type: "transfer", amount: occ.amount, accountId: occ.accountId, toAccountId: occ.toAccountId })
+      : onSpending(occ.accountId)
+        ? occ.kind === "income"
+          ? occ.amount
+          : -occ.amount
+        : 0;
     events.push({
       key: `plan:${occ.templateId}.${occ.month}`,
       date: occ.date,
-      type: occ.kind,
+      type,
       title: occ.title,
       category: occ.category,
-      effect: onSpending(occ.accountId) ? (occ.kind === "income" ? occ.amount : -occ.amount) : 0,
+      effect,
       amount: occ.kind === "income" ? occ.amount : -occ.amount,
       mandatory: occ.kind === "expense",
       source: "template",
@@ -352,8 +375,10 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
       }
     }
   }
+  // Кредитки, которые гасит регулярный платёж, — не дублируем напоминанием о конце льготного периода.
+  const repaidByTemplate = new Set(state.templates.filter((t) => t.active && t.toAccountId).map((t) => t.toAccountId));
   for (const credit of creditDebts(state, today)) {
-    if (!credit.graceEnd) continue;
+    if (!credit.graceEnd || repaidByTemplate.has(credit.account.id)) continue;
     const date = credit.graceEnd > today ? credit.graceEnd : addDays(today, 1);
     if (date > until) continue;
     events.push({

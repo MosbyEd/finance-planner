@@ -18,7 +18,7 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
         Item(id: "history", title: "История", symbol: "list.bullet"),
         Item(id: "plans", title: "Регулярные", symbol: "repeat"),
         Item(id: "goals", title: "Цели", symbol: "target"),
-        Item(id: "analytics", title: "Аналитика", symbol: "chart.bar"),
+        Item(id: "settings", title: "Настройки", symbol: "gearshape"),
     ]
 
     let web = BudgetViewController()
@@ -26,7 +26,7 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
     private var hosts: [String: UIViewController] = [:]
     private let addButton = UIButton(type: .system)
 
-    /// Вкладка, которую показывает интерфейс (может быть «settings» — её нет на панели).
+    /// Вкладка, которую показывает интерфейс (может быть «analytics» — её нет на панели, она открывается из шапки).
     private var webTab = "home"
     /// Открыто окно интерфейса (или вот-вот откроется после команды «open»).
     private var webOverlay = false
@@ -90,7 +90,7 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
     /// «+» — там, где добавляют операции: Главная и История, пока не открыто окно интерфейса.
     private var addButtonVisible: Bool {
         let id = selectedTab?.identifier
-        return (id == "home" || id == "history") && webTab != "settings" && !webOverlay
+        return (id == "home" || id == "history") && webTab != "analytics" && !webOverlay
     }
 
     private func updateAddButton(animated: Bool) {
@@ -175,7 +175,7 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
 
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
         if tab.identifier != selectedTab?.identifier { UISelectionFeedbackGenerator().selectionChanged() }
-        // Повторное касание Главной возвращает с «Настроек» и прокручивает наверх.
+        // Повторное касание Главной возвращает с «Аналитики» и прокручивает наверх.
         if tab.identifier == "home", selectedTab?.identifier == "home" { home.scrollToTop() }
         plugin?.notifyTabSelected(tab.identifier)
         return true

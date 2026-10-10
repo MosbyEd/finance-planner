@@ -27,12 +27,13 @@ import { useNativeBridge } from "./useNativeBridge";
 import { useNativeTabBar } from "./useNativeTabBar";
 import { useReviewPrompt } from "./useReviewPrompt";
 
-const TABS: { id: Exclude<Tab, "settings">; label: string; icon: IconName }[] = [
+/** Вкладки панели. Аналитика открывается кнопкой в шапке (там, где раньше были настройки). */
+const TABS: { id: Exclude<Tab, "analytics">; label: string; icon: IconName }[] = [
   { id: "home", label: "Главная", icon: "home" },
   { id: "history", label: "История", icon: "list" },
   { id: "plans", label: "Регулярные", icon: "repeat" },
   { id: "goals", label: "Цели", icon: "target" },
-  { id: "analytics", label: "Аналитика", icon: "chart" },
+  { id: "settings", label: "Настройки", icon: "settings" },
 ];
 
 /** Заголовок в шапке: на главной — название приложения, в остальных разделах — название раздела. */
@@ -85,8 +86,8 @@ function Shell() {
     };
   }, [store, toast]);
 
-  // Запоминаем вкладку между запусками. «Настройки» не восстанавливаем: их нет на панели вкладок,
-  // и в iOS-приложении панель показывала бы «Главную», а на экране оставались бы настройки.
+  // Запоминаем вкладку между запусками. Аналитику не восстанавливаем: её нет на панели вкладок,
+  // и в iOS-приложении панель показывала бы одну вкладку, а на экране оставалась бы аналитика.
   useEffect(() => {
     const saved = storage.get("fp:tab") as Tab | null;
     if (saved && saved !== "home" && TABS.some((t) => t.id === saved)) setTab(saved);
@@ -163,12 +164,12 @@ function Shell() {
             </button>
           )}
           <IconButton
-            icon="settings"
-            label="Настройки"
-            variant={tab === "settings" ? "soft" : "secondary"}
+            icon="chart"
+            label="Аналитика"
+            variant={tab === "analytics" ? "soft" : "secondary"}
             size={44}
-            aria-current={tab === "settings" ? "page" : undefined}
-            onClick={() => setTab("settings")}
+            aria-current={tab === "analytics" ? "page" : undefined}
+            onClick={() => setTab("analytics")}
           />
         </div>
         <nav aria-label="Разделы" className="hidden gap-1 px-3 pb-3 sm:flex">

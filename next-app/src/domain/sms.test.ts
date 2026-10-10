@@ -537,3 +537,22 @@ describe("свой счёт по названию в СМС", () => {
     expect(ops(result.actions)[0]).toMatchObject({ type: "tx.add" });
   });
 });
+
+describe("СМС и регулярные переводы на свои счета", () => {
+  it("перевод на кредитку, для которого есть регулярный платёж, — отмечает его исполненным", () => {
+    const s = stateWith({
+      accounts: [
+        { id: "main", name: "Основной счёт", kind: "debit", spending: true, number: "5804" },
+        { id: "savings", name: "Сбережения", kind: "savings", spending: false },
+        { id: "cc", name: "Кредитка", kind: "credit", spending: false, cards: [{ digits: "1234", name: "" }] },
+      ],
+      templates: [{ ...template({ kind: "expense", amount: 500_000, dayOfMonth: 12, startDate: "2026-10-01" }), id: "repay", title: "Кредитка", toAccountId: "cc" }],
+    });
+    const text = "СЧЁТ5804 10:00 Перевод 4800р на карту MIR-1234 Баланс: 100р";
+    const result = planSmsImport(s, parseSberSms(text)!, { idBase: "sms-r", date: "2026-10-10", sms: text });
+    expect(ops(result.actions)).toEqual([expect.objectContaining({ type: "occurrence.confirm", templateId: "repay", month: "2026-10", amount: 480_000 })]);
+    expect(result.summary.replace(/\s/g, " ")).toBe("Кредитка 4 800 ₽ — регулярный (по плану 5 000 ₽)");
+    const after = applyActions(s, result.actions);
+    expect(after.transactions.find((t) => t.templateId === "repay")).toMatchObject({ type: "transfer", amount: 480_000, toAccountId: "cc" });
+  });
+});

@@ -17,7 +17,7 @@ import {
   findAccount,
   sourceAccountId,
 } from "./accounts";
-import { formatMoney } from "./money";
+import { formatMoney, type Kopecks } from "./money";
 import {
   balanceAt,
   goalSaved,
@@ -29,7 +29,7 @@ import {
   savingsTotal,
 } from "./metrics";
 import { getOwn, withKey, withoutKey } from "./records";
-import { dueOccurrences, occurrenceTxId, skippedMonths } from "./recurring";
+import { dueOccurrences, occurrenceTxId, skippedMonths, type Occurrence } from "./recurring";
 import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount } from "./savings";
 import {
   LIMITS,
@@ -177,7 +177,12 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("template.update"),
     id: idSchema,
-    patch: templateSchema.omit({ id: true, active: true }).partial().strict(),
+    // null — убрать счёт, свой счёт назначения или кредит (платёж стал обычным).
+    patch: templateSchema
+      .omit({ id: true, active: true })
+      .extend({ accountId: idSchema.nullable(), toAccountId: idSchema.nullable(), loanId: idSchema.nullable() })
+      .partial()
+      .strict(),
   }),
   z.object({ type: z.literal("template.delete"), id: idSchema }),
   z.object({ type: z.literal("template.setActive"), id: idSchema, active: z.boolean(), today: isoDateSchema }),
@@ -344,6 +349,26 @@ function assertAccount(state: State, id: string, forNew = true): Account {
   return account;
 }
 
+/**
+ * Счета регулярного платежа: откуда (любой открытый счёт) и куда — свой счёт (не тот же) или кредит из «Долгов»
+ * (мой долг: заём или кредит). Куда — только у платежа, не у дохода. current — прежняя версия: уже выбранный
+ * и с тех пор закрытый счёт не мешает сохранить другие правки.
+ */
+function assertTemplateTargets(state: State, t: Template, current?: Template): void {
+  if (t.accountId && t.accountId !== current?.accountId) assertAccount(state, t.accountId);
+  if (t.toAccountId && t.loanId) throw new DomainError("Выберите что-то одно: счёт или кредит.");
+  if ((t.toAccountId || t.loanId) && t.kind !== "expense") throw new DomainError("Счёт или кредит выбирают только у платежа.");
+  if (t.toAccountId) {
+    if (t.toAccountId !== current?.toAccountId) assertAccount(state, t.toAccountId);
+    if (t.toAccountId === (t.accountId ?? MAIN_ACCOUNT_ID)) throw new DomainError("Платёж не может идти на тот же счёт.");
+  }
+  if (t.loanId) {
+    const loan = state.loans.find((l) => l.id === t.loanId);
+    if (!loan) throw new DomainError("Долг не найден.");
+    if (loan.kind === "lend") throw new DomainError("Платить можно только по своему долгу или кредиту.");
+  }
+}
+
 function assertSavingsAccount(state: State, id: string): Account {
   const account = assertAccount(state, id, false);
   if (account.kind !== "savings") throw new DomainError("Деньги цели могут лежать только на накопительном счёте.");
@@ -427,6 +452,86 @@ function moveLinkedSaving(state: State, source: Transaction): State {
   return { ...state, transactions: state.transactions.map((t) => (t === existing ? moved : t)) };
 }
 
+/** Начисление регулярного платежа или дохода за месяц — из шаблона. */
+function templateOccurrence(template: Template, month: MonthKey): Omit<Occurrence, "date" | "amount"> {
+  return {
+    templateId: template.id,
+    month,
+    kind: template.kind,
+    title: template.title,
+    category: template.category,
+    ...(template.accountId ? { accountId: template.accountId } : {}),
+    ...(template.toAccountId ? { toAccountId: template.toAccountId } : {}),
+    ...(template.loanId ? { loanId: template.loanId } : {}),
+  };
+}
+
+/**
+ * Операция-начисление регулярного платежа (синхронизация шаблонов и подтверждение по СМС — одинаково).
+ * Платёж на свой счёт — перевод (на накопительный — отложено в месяце), платёж по кредиту — расход в счёт
+ * долга (или корректировка, если деньги долга прошли через счёт), остальное — обязательный расход или доход.
+ */
+function occurrenceTransaction(
+  state: State,
+  occ: Omit<Occurrence, "date" | "amount">,
+  fields: { id: string; amount: Kopecks; date: IsoDate; note: string; review?: boolean; accountId?: string },
+): Transaction {
+  const accountId = fields.accountId ?? occ.accountId;
+  const base = {
+    id: fields.id,
+    date: fields.date,
+    title: occ.title,
+    note: fields.note,
+    templateId: occ.templateId,
+    occurrenceMonth: occ.month,
+    ...(fields.review ? { review: true as const } : {}),
+    ...(accountId ? { accountId } : {}),
+  };
+  if (occ.kind === "expense" && occ.toAccountId) {
+    if (findAccount(state, occ.toAccountId)?.kind === "savings") {
+      return {
+        ...base,
+        type: "saving",
+        amount: fields.amount,
+        category: SAVINGS_CATEGORY,
+        ...(occ.toAccountId !== SAVINGS_ACCOUNT_ID ? { toAccountId: occ.toAccountId } : {}),
+      };
+    }
+    return { ...base, type: "transfer", amount: fields.amount, category: "", toAccountId: occ.toAccountId };
+  }
+  if (occ.kind === "expense" && occ.loanId) {
+    const loan = state.loans.find((l) => l.id === occ.loanId);
+    if (loan && loanOpening(state, loan)) {
+      return {
+        ...base,
+        type: "adjustment",
+        amount: -loanOpeningSign(loan.kind) * fields.amount,
+        category: ADJUSTMENT_CATEGORY,
+        loanId: loan.id,
+      };
+    }
+    return {
+      ...base,
+      type: "expense",
+      amount: fields.amount,
+      category: occ.category,
+      mandatory: true,
+      autoSaving: false,
+      ...(loan ? { loanId: loan.id } : {}),
+    };
+  }
+  return {
+    ...base,
+    type: occ.kind,
+    amount: fields.amount,
+    category: occ.category,
+    // Расход по шаблону обязательный и без «копилки с покупок»; с дохода — отчисление по настройкам.
+    ...(occ.kind === "expense"
+      ? { mandatory: true, autoSaving: false }
+      : { autoSaving: salarySavingAmount(fields.amount, occ.category, state.settings) > 0 }),
+  };
+}
+
 function materialize(state: State, today: IsoDate): State {
   const due = dueOccurrences(state, today);
   if (!due.length) return state;
@@ -438,21 +543,7 @@ function materialize(state: State, today: IsoDate): State {
     const id = occurrenceTxId(occ.templateId, occ.month);
     if (existing.has(id)) continue;
     existing.add(id);
-    const tx: Transaction = {
-      id,
-      type: occ.kind,
-      amount: occ.amount,
-      date: occ.date,
-      category: occ.category,
-      title: occ.title,
-      note: notes.get(occ.templateId) ?? "",
-      templateId: occ.templateId,
-      occurrenceMonth: occ.month,
-      ...(occ.accountId ? { accountId: occ.accountId } : {}),
-      ...(occ.kind === "expense"
-        ? { mandatory: true, autoSaving: false }
-        : { autoSaving: salarySavingAmount(occ.amount, occ.category, state.settings) > 0 }),
-    };
+    const tx = occurrenceTransaction(state, occ, { id, amount: occ.amount, date: occ.date, note: notes.get(occ.templateId) ?? "" });
     created.push(tx);
     const saving = autoSavingAmount(tx, state.settings);
     const savingId = linkedSavingId(id);
@@ -763,7 +854,7 @@ export function applyAction(state: State, action: Action): State {
       if (isBuiltinAccount(current.id)) throw new DomainError("Этот счёт нельзя удалить — его можно переименовать.");
       const used =
         state.transactions.some((t) => t.accountId === current.id || t.toAccountId === current.id) ||
-        state.templates.some((t) => t.accountId === current.id) ||
+        state.templates.some((t) => t.accountId === current.id || t.toAccountId === current.id) ||
         state.goals.some((g) => g.accountId === current.id);
       if (used) throw new DomainError("По счёту есть операции — закройте его, тогда он останется в истории.");
       return { ...state, accounts: accounts.filter((a) => a.id !== current.id) };
@@ -829,7 +920,7 @@ export function applyAction(state: State, action: Action): State {
         throw new DomainError("Шаблон с таким id уже существует.");
       }
       if (state.templates.length >= LIMITS.templates) throw new DomainError("Слишком много регулярных платежей.");
-      if (action.template.accountId) assertAccount(state, action.template.accountId);
+      assertTemplateTargets(state, action.template);
       const t = { ...action.template, category: canonicalCategory(state, action.template.category) };
       const next = ensureCategory(state, t.kind === "income" ? "income" : "mandatory", t.category);
       return { ...next, templates: [...next.templates, t] };
@@ -837,12 +928,19 @@ export function applyAction(state: State, action: Action): State {
 
     case "template.update": {
       const current = findTemplate(state, action.id);
-      if (action.patch.accountId && action.patch.accountId !== current.accountId) assertAccount(state, action.patch.accountId);
-      const patch =
-        action.patch.category === undefined
-          ? action.patch
-          : { ...action.patch, category: canonicalCategory(state, action.patch.category) };
-      const updated: Template = { ...current, ...patch };
+      const { accountId, toAccountId, loanId, ...fields } = action.patch;
+      const patched: Template = { ...current, ...fields };
+      for (const [key, value] of [
+        ["accountId", accountId],
+        ["toAccountId", toAccountId],
+        ["loanId", loanId],
+      ] as const) {
+        if (value === null) delete patched[key];
+        else if (value !== undefined) patched[key] = value;
+      }
+      assertTemplateTargets(state, patched, current);
+      const updated: Template =
+        fields.category === undefined ? patched : { ...patched, category: canonicalCategory(state, fields.category) };
       const next = ensureCategory(state, updated.kind === "income" ? "income" : "mandatory", updated.category);
       return { ...next, templates: next.templates.map((t) => (t.id === current.id ? updated : t)) };
     }
@@ -878,10 +976,13 @@ export function applyAction(state: State, action: Action): State {
       const template = findTemplate(state, action.templateId);
       if (action.accountId) assertAccount(state, action.accountId);
       const current = state.transactions.find((t) => t.templateId === template.id && t.occurrenceMonth === action.month);
+      const occurrence = templateOccurrence(template, action.month);
       if (current) {
+        // Сумма со знаком, как у начисления этого вида (у корректировки по долгу — минус).
+        const amount = occurrenceTransaction(state, occurrence, { id: current.id, amount: action.amount, date: action.date, note: "" }).amount;
         const updated: Transaction = {
           ...current,
-          amount: action.amount,
+          amount,
           date: action.date,
           note: action.note,
           ...(action.review ? { review: true as const } : {}),
@@ -893,23 +994,14 @@ export function applyAction(state: State, action: Action): State {
       const id = occurrenceTxId(template.id, action.month);
       assertNewId(state, id);
       assertTxCapacity(state, 2);
-      const tx: Transaction = {
+      const tx = occurrenceTransaction(state, occurrence, {
         id,
-        type: template.kind,
         amount: action.amount,
         date: action.date,
-        category: template.category,
-        title: template.title,
         note: action.note,
-        templateId: template.id,
-        occurrenceMonth: action.month,
-        ...(action.review ? { review: true as const } : {}),
-        ...(action.accountId || template.accountId ? { accountId: action.accountId ?? template.accountId } : {}),
-        // Как у начислений из recurring.sync: расход по шаблону обязательный и без «копилки с покупок».
-        ...(template.kind === "expense"
-          ? { mandatory: true, autoSaving: false }
-          : { autoSaving: salarySavingAmount(action.amount, template.category, state.settings) > 0 }),
-      };
+        review: action.review,
+        accountId: action.accountId,
+      });
       // Платёж всё-таки был — месяц больше не считается пропущенным.
       const next = removeSkip({ ...state, transactions: [...state.transactions, tx] }, template.id, action.month);
       return syncLinkedSaving(next, tx);
@@ -1021,6 +1113,13 @@ export function applyAction(state: State, action: Action): State {
       return {
         ...state,
         loans: state.loans.filter((l) => l.id !== action.id),
+        // Регулярные платежи по этому долгу становятся обычными обязательными платежами.
+        templates: state.templates.map((t) => {
+          if (t.loanId !== action.id) return t;
+          const rest = { ...t };
+          delete rest.loanId;
+          return rest;
+        }),
         transactions: state.transactions.map((t) => {
           if (t.loanId !== action.id) return t;
           const rest = { ...t };

@@ -568,6 +568,26 @@ function pairedMove(state: State, to: string, amount: Kopecks, date: IsoDate, si
 }
 
 /**
+ * Регулярный платёж с этого счёта на тот, срок которого рядом с датой СМС (за неделю до или после) и который
+ * ещё не исполнен: начисления нет или оно плановое (никто не подтверждал и не правил).
+ */
+function plannedMoveFor(state: State, from: string, to: string, date: IsoDate): { template: State["templates"][number]; month: MonthKey } | null {
+  const smsMonth = monthKeyOf(date);
+  for (const template of state.templates) {
+    if (!template.active || template.kind !== "expense" || template.toAccountId !== to) continue;
+    if ((template.accountId ?? MAIN_ACCOUNT_ID) !== from) continue;
+    for (const month of [smsMonth, addMonths(smsMonth, -1), addMonths(smsMonth, 1)]) {
+      const planned = occurrenceDate(template, month);
+      if (planned < template.startDate || Math.abs(diffDays(planned, date)) > 7 || isSkipped(state, template.id, month)) continue;
+      const existing = state.transactions.find((t) => t.templateId === template.id && t.occurrenceMonth === month);
+      if (existing && !isPristineOccurrence(existing, template, planned)) continue;
+      return { template, month };
+    }
+  }
+  return null;
+}
+
+/**
  * Деньги между своими счетами по СМС: на накопительный — пополнение сбережений (отложено в этом месяце),
  * с накопительного — снятие, между остальными (погашение кредитки) — перевод. Вторая СМС того же перевода
  * пропускается; зачисление, записанное раньше доходом (ещё не проверенное), заменяется перемещением.
@@ -598,6 +618,26 @@ function planMove(
   const replaced: Action[] = income ? [{ type: "tx.delete", id: income.id }] : [];
   const money = formatMoney(amount);
   const base = { id: ctx.idBase, date: ctx.date, note: ctx.note, review: true };
+  // Регулярный платёж на этот счёт (погашение кредитки, пополнение накопительного) — отмечаем его исполненным.
+  const planned = plannedMoveFor(state, source.id, to.id, ctx.date);
+  if (planned) {
+    const differs = planned.template.amount !== amount ? ` (по плану ${formatMoney(planned.template.amount)})` : "";
+    return {
+      actions: [
+        ...replaced,
+        {
+          type: "occurrence.confirm",
+          templateId: planned.template.id,
+          month: planned.month,
+          amount,
+          date: ctx.date,
+          note: ctx.note,
+          review: true,
+        },
+      ],
+      summary: `${planned.template.title} ${money} — регулярный${differs}`,
+    };
+  }
   if (to.kind === "savings" && source.kind !== "savings") {
     return {
       actions: [

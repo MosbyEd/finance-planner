@@ -121,6 +121,12 @@ export const templateSchema = z.object({
   note: noteSchema,
   /** С какого счёта платёж или на какой приходит доход. Нет — основной счёт. */
   accountId: idSchema.optional(),
+  /**
+   * Куда идут деньги платежа: на свой счёт (погашение кредитки — перевод, пополнение накопительного — отложено)
+   * или в счёт кредита из «Долгов» (loanId). Нет — обычный расход.
+   */
+  toAccountId: idSchema.optional(),
+  loanId: idSchema.optional(),
 });
 export type Template = z.infer<typeof templateSchema>;
 

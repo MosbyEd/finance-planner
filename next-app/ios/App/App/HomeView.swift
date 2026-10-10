@@ -47,11 +47,11 @@ struct HomeScreen: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        AppShell.shared.setTab("settings")
+                        AppShell.shared.setTab("analytics")
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "chart.bar")
                     }
-                    .accessibilityLabel("Настройки")
+                    .accessibilityLabel("Аналитика")
                 }
             }
         }

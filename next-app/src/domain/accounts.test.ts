@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { accountBalance, accountsOf, creditStatus, findAccount } from "./accounts";
 import { applyActions, type Action } from "./actions";
-import { balanceAt, monthMetrics, safeToSpend, savingsTotal, upcomingEvents } from "./metrics";
+import { balanceAt, loanRemaining, monthMetrics, safeToSpend, savingsTotal, upcomingEvents } from "./metrics";
 import type { Account, State } from "./schema";
 import { addTx, run, stateWith, template } from "./test-utils";
 
@@ -180,5 +180,72 @@ describe("правила счетов", () => {
     expect(() =>
       applyActions(s, [{ type: "transfer.add", id: "t", date: "2026-10-01", from: "main", to: "main", amount: 100, note: "" }]),
     ).toThrow(/два разных счёта/);
+  });
+});
+
+describe("счета регулярных платежей", () => {
+  const card: Account = { ...credit, graceDays: 30 };
+  const deposit: Account = { id: "dep", name: "Вклад", kind: "savings", spending: false };
+
+  function withTemplates(): State {
+    return run(
+      base(),
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 5_000_000 },
+      { type: "account.add", account: card },
+      { type: "account.add", account: deposit },
+      {
+        type: "loan.add",
+        loan: { id: "mortgage", kind: "credit", name: "Ипотека", amount: 100_000_000, initialPaid: 0, dueDate: null, note: "", createdAt: "2026-01-01" },
+      },
+    );
+  }
+
+  it("погашение кредитки по шаблону — перевод: не расход бюджета, напоминание о льготном периоде не дублируется", () => {
+    let s = run(withTemplates(), addTx({ type: "expense", amount: 300_000, date: "2026-10-02", accountId: "cc" }));
+    s = run(s, {
+      type: "template.add",
+      template: { ...template({ kind: "expense", amount: 300_000, dayOfMonth: 15, startDate: "2026-10-01" }), id: "repay", title: "Кредитка", toAccountId: "cc" },
+    });
+    expect(monthMetrics(s, "2026-10", "2026-10-10").mandatory.plan).toBe(0);
+    const events = upcomingEvents(s, "2026-10-10", "2026-11-10");
+    expect(events.find((e) => e.templateId === "repay")).toMatchObject({ type: "transfer", effect: -300_000, amount: -300_000 });
+    expect(events.some((e) => e.source === "credit")).toBe(false);
+
+    const synced = run(s, { type: "recurring.sync", today: "2026-10-15" });
+    expect(synced.transactions.find((t) => t.templateId === "repay")).toMatchObject({ type: "transfer", toAccountId: "cc", amount: 300_000 });
+    expect(creditStatus(synced, findAccount(synced, "cc")!, "2026-10-15").debt).toBe(0);
+  });
+
+  it("пополнение накопительного по шаблону — отложено; платёж по ипотеке — расход в счёт долга", () => {
+    const s = run(
+      withTemplates(),
+      {
+        type: "template.add",
+        template: { ...template({ kind: "expense", amount: 500_000, dayOfMonth: 5, startDate: "2026-10-01" }), id: "save", title: "Копим", toAccountId: "dep" },
+      },
+      {
+        type: "template.add",
+        template: { ...template({ kind: "expense", amount: 4_504_400, dayOfMonth: 21, startDate: "2026-10-01" }), id: "ipo", title: "Ипотека", category: "Ипотека/кредит", loanId: "mortgage" },
+      },
+      { type: "recurring.sync", today: "2026-10-25" },
+    );
+    expect(s.transactions.find((t) => t.templateId === "save")).toMatchObject({ type: "saving", toAccountId: "dep", amount: 500_000 });
+    expect(accountBalance(s, "dep")).toBe(500_000);
+    expect(monthMetrics(s, "2026-10", "2026-10-25").savings.fact).toBe(500_000);
+    expect(s.transactions.find((t) => t.templateId === "ipo")).toMatchObject({ type: "expense", mandatory: true, loanId: "mortgage" });
+    expect(loanRemaining(s, s.loans[0])).toBe(100_000_000 - 4_504_400);
+  });
+
+  it("проверки: не на тот же счёт, не по чужому долгу; удалённый долг — платёж становится обычным", () => {
+    const s = withTemplates();
+    const t = template({ kind: "expense", amount: 100, dayOfMonth: 1 });
+    expect(() => applyActions(s, [{ type: "template.add", template: { ...t, toAccountId: "main" } }])).toThrow(/тот же счёт/);
+    const lend = run(s, {
+      type: "loan.add",
+      loan: { id: "lera", kind: "lend", name: "Лера", amount: 300_000, initialPaid: 0, dueDate: null, note: "", createdAt: "2026-01-01" },
+    });
+    expect(() => applyActions(lend, [{ type: "template.add", template: { ...t, loanId: "lera" } }])).toThrow(/своему долгу/);
+    const linked = run(s, { type: "template.add", template: { ...t, id: "ipo", loanId: "mortgage" } }, { type: "loan.delete", id: "mortgage" });
+    expect(linked.templates[0].loanId).toBeUndefined();
   });
 });
