@@ -123,7 +123,7 @@ export function Switch({
         aria-describedby={description ? descriptionId : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${checked ? "bg-accent" : "bg-border-strong"}`}
+        className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${checked ? "bg-accent-fill" : "bg-border-strong"}`}
       >
         <span
           className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.2),0_3px_8px_-2px_rgb(0_0_0/0.2)] transition-all ${checked ? "left-[22px]" : "left-0.5"}`}

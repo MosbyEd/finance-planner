@@ -20,7 +20,9 @@ struct HomeScreen: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
-                    .padding(.bottom, 32)
+                    // Снизу — место под круг «+» над панелью вкладок (58 pt и отступ 12): последняя карточка
+                    // прокручивается над ним, а не прячется под ним.
+                    .padding(.bottom, 92)
                     .id("top")
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .homeScrollToTop)) { _ in
@@ -195,13 +197,7 @@ private struct TodayCard: View {
                     .opacity(0.9)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let status = today.status {
-                    Text(status.text)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .foregroundStyle(Theme.color(status.tone))
-                        .background(Theme.soft(status.tone), in: .capsule)
+                    HeroStatusBadge(status: status)
                 }
             }
             Text(today.amount ?? "")
@@ -256,6 +252,50 @@ private struct HeroSurface: ViewModifier {
                     in: .rect(cornerRadius: 28, style: .continuous)
                 )
                 .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 10)
+        }
+    }
+}
+
+/**
+ * Статус на карточке лимита — в стиле самой карточки: светлая полупрозрачная капсула с белым текстом.
+ * Смысл передаёт значок (и слово), а не цветная подложка — коричнево-оранжевая плашка на индиго выглядела чужой.
+ */
+struct HeroStatusBadge: View {
+    let status: HomeModel.Status
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: Self.symbol(status.tone))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Self.iconColor(status.tone))
+                .accessibilityHidden(true)
+            Text(status.text)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.white.opacity(0.16), in: .capsule)
+        .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
+    }
+
+    static func symbol(_ tone: Tone) -> String {
+        switch tone {
+        case .positive: "checkmark.circle.fill"
+        case .warning: "exclamationmark.circle.fill"
+        case .negative: "exclamationmark.triangle.fill"
+        case .accent, .muted, .default: "info.circle.fill"
+        }
+    }
+
+    /// Светлые тона, читаемые на индиго в обеих темах.
+    static func iconColor(_ tone: Tone) -> Color {
+        switch tone {
+        case .positive: Color(red: 0.49, green: 0.94, blue: 0.72)
+        case .warning: Color(red: 1, green: 0.82, blue: 0.48)
+        case .negative: Color(red: 1, green: 0.6, blue: 0.66)
+        case .accent, .muted, .default: .white.opacity(0.8)
         }
     }
 }

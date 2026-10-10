@@ -208,7 +208,7 @@ export function TypeChips({ value, onChange }: { value: TypeFilter; onChange: (v
           >
             <span
               className={`inline-flex h-9 items-center whitespace-nowrap rounded-full border px-4 text-sm font-medium transition group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-accent ${
-                selected ? "sheen border-accent bg-accent text-accent-text" : "glass-control text-text"
+                selected ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control text-text"
               }`}
             >
               {f.label}

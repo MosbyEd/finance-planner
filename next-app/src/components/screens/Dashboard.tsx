@@ -29,16 +29,20 @@ import { Card, Money, Progress } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { Icon, type IconName } from "../ui/Icon";
 
-const STATUS_TEXT: Record<SafeToSpend["status"], { text: string; tone: string }> = {
-  ok: { text: "Всё по плану", tone: "bg-positive-soft text-positive" },
-  tight: { text: "До дохода впритык", tone: "bg-warning-soft text-warning" },
-  over: { text: "Сегодня перерасход", tone: "bg-negative-soft text-negative" },
-  gap: { text: "Кассовый разрыв", tone: "bg-negative-soft text-negative" },
-  "no-income": { text: "Нет доходов в плане", tone: "bg-surface-2 text-muted" },
+/**
+ * Статус на карточке лимита — в стиле карточки: светлая полупрозрачная капсула и белый текст,
+ * смысл передаёт значок (светлый тон, читаемый на индиго), а не цветная подложка.
+ */
+const STATUS_TEXT: Record<SafeToSpend["status"], { text: string; icon: IconName; tone: string }> = {
+  ok: { text: "Всё по плану", icon: "check", tone: "text-[#7cf0b8]" },
+  tight: { text: "До дохода впритык", icon: "alert", tone: "text-[#ffd27a]" },
+  over: { text: "Сегодня перерасход", icon: "alert", tone: "text-[#ff9aa8]" },
+  gap: { text: "Кассовый разрыв", icon: "alert", tone: "text-[#ff9aa8]" },
+  "no-income": { text: "Нет доходов в плане", icon: "info", tone: "text-on-accent/80" },
 };
 
 /** Текст статуса с уточнениями: «перерасход» без трат сегодня — это исчерпанный бюджет месяца. */
-function statusBadge(sts: SafeToSpend): { text: string; tone: string } {
+function statusBadge(sts: SafeToSpend): { text: string; icon: IconName; tone: string } {
   const base = STATUS_TEXT[sts.status];
   if (sts.status === "over" && sts.leftToday >= 0) return { ...base, text: "Бюджет месяца исчерпан" };
   if (sts.status === "tight" && sts.horizon.reason === "month-end") return { ...base, text: "До конца месяца впритык" };
@@ -479,12 +483,13 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
   const status = statusBadge(sts);
   const over = sts.leftToday < 0;
   return (
-    <section className="surface-accent rounded-[28px] p-5 text-accent-text">
+    <section className="surface-accent rounded-[28px] p-5 text-on-accent">
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm opacity-90">
           {over ? "Сегодня потрачено сверх лимита" : "Сегодня можно потратить"}
         </p>
-        <span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${status.tone}`}>
+        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-on-accent/15 px-2.5 py-1 text-xs font-semibold ring-1 ring-on-accent/20">
+          <Icon name={status.icon} size={13} className={status.tone} />
           {status.text}
         </span>
       </div>
@@ -507,7 +512,7 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
           variant="secondary"
           size="sm"
           icon="plus"
-          className="!border-transparent !bg-accent-text/15 !font-semibold !text-accent-text hover:!bg-accent-text/25"
+          className="!border-transparent !bg-on-accent/15 !font-semibold !text-on-accent hover:!bg-on-accent/25"
           onClick={() => open({ kind: "tx", preset: { type: "expense" } })}
         >
           Расход
@@ -516,7 +521,7 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
           variant="secondary"
           size="sm"
           icon="info"
-          className="!border-transparent !bg-accent-text/15 !font-semibold !text-accent-text hover:!bg-accent-text/25"
+          className="!border-transparent !bg-on-accent/15 !font-semibold !text-on-accent hover:!bg-on-accent/25"
           onClick={() => open({ kind: "explain" })}
         >
           Как посчитано

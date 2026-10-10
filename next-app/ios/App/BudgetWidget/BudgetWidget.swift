@@ -79,21 +79,22 @@ private enum Palette {
     static let accent2 = dynamic(0x5A3FD6, 0x45309F)
     static let accentText = Color.white
 
-    static func statusColor(_ tone: String) -> Color {
+    static func statusSymbol(_ tone: String) -> String {
         switch tone {
-        case "positive": dynamic(0x0B7651, 0x3DC58E)
-        case "warning": dynamic(0x965A00, 0xF0A83A)
-        case "negative": dynamic(0xC02F43, 0xFF7083)
-        default: dynamic(0x5F5C56, 0xA3A09A)
+        case "positive": "checkmark.circle.fill"
+        case "warning": "exclamationmark.circle.fill"
+        case "negative": "exclamationmark.triangle.fill"
+        default: "info.circle.fill"
         }
     }
 
-    static func statusSoft(_ tone: String) -> Color {
+    /// Светлые тона значка статуса, читаемые на индиго.
+    static func statusIcon(_ tone: String) -> Color {
         switch tone {
-        case "positive": dynamic(0xE3F4EC, 0x163326)
-        case "warning": dynamic(0xFDF1DC, 0x3A2A12)
-        case "negative": dynamic(0xFBE7EA, 0x3A1C22)
-        default: dynamic(0xF0EFEB, 0x242421)
+        case "positive": Color(red: 0.49, green: 0.94, blue: 0.72)
+        case "warning": Color(red: 1, green: 0.82, blue: 0.48)
+        case "negative": Color(red: 1, green: 0.6, blue: 0.66)
+        default: .white.opacity(0.8)
         }
     }
 }
@@ -101,6 +102,9 @@ private enum Palette {
 struct TodayLimitView: View {
     let entry: Entry
     @Environment(\.widgetFamily) private var family
+    /// На рабочем столе в стеклянном или тонированном режиме система перекрашивает виджет в один цвет:
+    /// плашка статуса с подложкой там становится белой полосой без текста.
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     private var openURL: URL { URL(string: "budget://home")! }
 
@@ -191,13 +195,24 @@ struct TodayLimitView: View {
                     .lineLimit(1)
                     .contentTransition(.numericText())
                 Spacer(minLength: 0)
-                Text(s.status)
+                if renderingMode == .fullColor {
+                    // Как на карточке лимита в приложении: светлая капсула на индиго, смысл — значком.
+                    HStack(spacing: 4) {
+                        Image(systemName: Palette.statusSymbol(s.statusTone))
+                            .foregroundStyle(Palette.statusIcon(s.statusTone))
+                        Text(s.status).lineLimit(1)
+                    }
                     .font(.caption2.weight(.semibold))
-                    .lineLimit(1)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .foregroundStyle(Palette.statusColor(s.statusTone))
-                    .background(Palette.statusSoft(s.statusTone), in: .capsule)
+                    .background(.white.opacity(0.16), in: .capsule)
+                } else {
+                    Text(s.status)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .widgetAccentable()
+                }
                 if detail {
                     Text(s.detail).font(.caption).opacity(0.9).lineLimit(2)
                 }

@@ -85,10 +85,11 @@ function Shell() {
     };
   }, [store, toast]);
 
-  // Запоминаем вкладку между запусками.
+  // Запоминаем вкладку между запусками. «Настройки» не восстанавливаем: их нет на панели вкладок,
+  // и в iOS-приложении панель показывала бы «Главную», а на экране оставались бы настройки.
   useEffect(() => {
     const saved = storage.get("fp:tab") as Tab | null;
-    if (saved && saved !== "home" && (TABS.some((t) => t.id === saved) || saved === "settings")) setTab(saved);
+    if (saved && saved !== "home" && TABS.some((t) => t.id === saved)) setTab(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- только при запуске
   }, []);
   useEffect(() => {
@@ -193,7 +194,10 @@ function Shell() {
         className={`flex-1 px-4 pt-4 sm:pt-5 ${
           nativeShell
             ? // Системная панель вкладок входит в безопасную зону WebView — отступ уже учитывает её.
-              "pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+              // Где над панелью есть круг «+», добавляем место под него, чтобы он не закрывал последние строки.
+              showAdd
+              ? "pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+              : "pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
             : showAdd
               ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-28"
               : "pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-12"

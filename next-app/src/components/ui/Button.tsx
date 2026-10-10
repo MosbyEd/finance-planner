@@ -7,7 +7,7 @@ type Size = "sm" | "md" | "lg";
 // Liquid Glass: кнопки-капсулы. Основная и опасная — сплошной цвет с бликом (текст контрастный),
 // второстепенная — «стекло» без размытия (glass-control в globals.css).
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-text sheen enabled:hover:brightness-110 disabled:opacity-50",
+  primary: "bg-accent-fill text-on-accent sheen enabled:hover:brightness-110 disabled:opacity-50",
   secondary: "glass-control text-text disabled:opacity-50",
   ghost: "text-text hover:bg-surface-2 disabled:opacity-40",
   danger: "bg-negative-strong text-white sheen enabled:hover:brightness-110 disabled:opacity-50",

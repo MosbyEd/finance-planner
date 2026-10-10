@@ -4,7 +4,7 @@ import { useState } from "react";
 import { accountBalance, activeAccounts, creditStatus, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "@/domain/accounts";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
-import type { Account, AccountKind } from "@/domain/schema";
+import type { AccountKind } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";

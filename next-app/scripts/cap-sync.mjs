@@ -47,3 +47,8 @@ fs.writeFileSync(
   `window.__BUDGET_CONFIG__ = ${JSON.stringify({ native: true, apiBase })};\n`,
 );
 execSync("npx cap sync ios", { stdio: "inherit" });
+
+// Capacitor пишет в свой пакет первую IPHONEOS_DEPLOYMENT_TARGET из проекта — теперь это 26.0 виджета,
+// а .v26 не знает swift-tools-version 5.9 этого пакета. Пакету плагинов достаточно прежней iOS 15.
+const spmPackage = new URL("../ios/App/CapApp-SPM/Package.swift", import.meta.url);
+fs.writeFileSync(spmPackage, fs.readFileSync(spmPackage, "utf8").replace(/\.iOS\(\.v\d+\)/, ".iOS(.v15)"));

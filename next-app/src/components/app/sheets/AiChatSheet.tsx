@@ -596,7 +596,7 @@ function Intro({ onPick, disabled }: { onPick: (prompt: string) => void; disable
 
 function UserBubble({ message }: { message: UserMessage }) {
   return (
-    <div className="max-w-[85%] self-end whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-[15px] text-accent-text">
+    <div className="max-w-[85%] self-end whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent-fill px-4 py-2.5 text-[15px] text-on-accent">
       <span className="sr-only">Вы: </span>
       {message.content}
     </div>

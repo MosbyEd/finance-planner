@@ -29,7 +29,7 @@ export function AccountPicker({
             aria-pressed={a.id === value}
             onClick={() => onChange(a.id)}
             className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
-              a.id === value ? "sheen border-accent bg-accent text-accent-text" : "glass-control"
+              a.id === value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
             }`}
           >
             <Icon name={ACCOUNT_KINDS[a.kind].icon} size={16} />

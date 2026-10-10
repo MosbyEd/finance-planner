@@ -70,7 +70,7 @@ export function CategoryPicker({
             aria-pressed={c === value}
             onClick={() => onChange(c)}
             className={`h-10 rounded-full border px-3.5 text-sm transition ${
-              c === value ? "sheen border-accent bg-accent text-accent-text" : "glass-control"
+              c === value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
             }`}
           >
             {c}

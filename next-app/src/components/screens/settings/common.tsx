@@ -97,7 +97,7 @@ export function ChoiceChips<T extends string>({
             aria-checked={value === o.value}
             onClick={() => onChange(o.value)}
             className={`h-10 rounded-full border px-3.5 text-sm transition ${
-              value === o.value ? "sheen border-accent bg-accent text-accent-text" : "glass-control text-text"
+              value === o.value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control text-text"
             }`}
           >
             {o.label}
