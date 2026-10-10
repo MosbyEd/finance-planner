@@ -6,6 +6,7 @@ import {
   balanceAt,
   categoryBreakdown,
   goalSaved,
+  loanInterest,
   loanRemaining,
   monthMetrics,
   periodTotals,
@@ -17,8 +18,16 @@ import { isReservedKey } from "./records";
 import { nextOccurrence } from "./recurring";
 import { autoSavingByDefault } from "./savings";
 import { suggestCategory } from "./sms";
-import { LIMITS, type Account, type State } from "./schema";
-import { accountBalance, activeAccounts, creditStatus, findAccount, isSpendingAccount, MAIN_ACCOUNT_ID } from "./accounts";
+import { LIMITS, type Account, type CreditTerms, type State } from "./schema";
+import {
+  accountBalance,
+  activeAccounts,
+  creditStatus,
+  findAccount,
+  isSpendingAccount,
+  MAIN_ACCOUNT_ID,
+  type CreditSummary,
+} from "./accounts";
 
 // ---------- снимок данных для модели ----------
 
@@ -115,7 +124,12 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
         name: a.name,
         kind: a.kind,
         ...(credit
-          ? { debt: rub(credit.debt), creditLimit: a.creditLimit ? rub(a.creditLimit) : null, interestFreeUntil: credit.graceEnd }
+          ? {
+              debt: rub(credit.debt),
+              creditLimit: a.creditLimit ? rub(a.creditLimit) : null,
+              interestFreeUntil: credit.graceEnd,
+              ...aiInterest(credit, a.terms),
+            }
           : { balance: rub(accountBalance(state, a.id, today)) }),
         countsInSafeToSpend: isSpendingAccount(a),
       };
@@ -137,14 +151,18 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
       saved: rub(goalSaved(state, g)),
       dueDate: g.dueDate,
     })),
-    loans: state.loans.map((l) => ({
-      kind: l.kind,
-      direction: l.kind === "lend" ? "мне должны" : "я должен",
-      name: l.name,
-      amount: rub(l.amount),
-      remaining: rub(loanRemaining(state, l)),
-      dueDate: l.dueDate,
-    })),
+    loans: state.loans.map((l) => {
+      const interest = loanInterest(state, l, today);
+      return {
+        kind: l.kind,
+        direction: l.kind === "lend" ? "мне должны" : "я должен",
+        name: l.name,
+        amount: rub(l.amount),
+        remaining: rub(loanRemaining(state, l)),
+        dueDate: l.dueDate,
+        ...(interest ? { interestFreeUntil: interest.graceEnd, ...aiInterest(interest, l.terms) } : {}),
+      };
+    }),
     categoryLimits: Object.fromEntries(Object.entries(state.categoryLimits).map(([k, v]) => [k, rub(v)])),
     categories: state.categories,
     settings: {
@@ -154,6 +172,22 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
     },
     profile: state.profile,
     recentTransactions: recent,
+  };
+}
+
+/** Условия и оценка процентов кредитки или долга — для модели. */
+function aiInterest(summary: CreditSummary, terms: CreditTerms | undefined) {
+  if (!terms && summary.accrued === 0 && summary.ifMissed === 0) return {};
+  return {
+    terms: terms
+      ? {
+          purchases: { ratePercent: terms.purchase.rate ?? null, interestFreeDays: terms.purchase.graceDays ?? null },
+          cashAndTransfers: { ratePercent: terms.cash.rate ?? null, interestFreeDays: terms.cash.graceDays ?? null },
+        }
+      : null,
+    interestAccruedEstimate: rub(summary.accrued),
+    interestIfGraceMissedEstimate: rub(summary.ifMissed),
+    interestPerDayEstimate: rub(summary.perDay),
   };
 }
 

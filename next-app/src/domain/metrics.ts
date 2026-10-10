@@ -21,7 +21,10 @@ import {
   savingsAccountIds,
   spendingAccountIds,
   spendingEffect,
+  summarizeParts,
+  type CreditSummary,
 } from "./accounts";
+import { creditParts, hasTerms, resolveTerms, type CreditMove } from "./interest";
 import type { Goal, Loan, Settings, State, Transaction } from "./schema";
 
 /**
@@ -142,6 +145,35 @@ export function loanPaid(state: State, loan: Loan): Kopecks {
 
 export function loanRemaining(state: State, loan: Loan): Kopecks {
   return Math.max(0, loan.amount - loanPaid(state, loan));
+}
+
+/** День, с которого идёт долг: указанный или день записи. */
+export function loanStart(loan: Loan): IsoDate {
+  return loan.takenAt ?? loan.createdAt;
+}
+
+/**
+ * Проценты по моему долгу или кредиту с условиями (см. interest.ts): долг возник в loanStart — покупки
+ * и снятие наличных (cashAmount), дальше его гасят «уже погашено» и платежи. null — условий нет или мне должны.
+ */
+export function loanInterest(state: State, loan: Loan, today: IsoDate): CreditSummary | null {
+  if (loan.kind === "lend" || !hasTerms(loan.terms)) return null;
+  const start = loanStart(loan);
+  const cash = Math.min(loan.cashAmount ?? 0, loan.amount);
+  const moves: CreditMove[] = [];
+  if (loan.amount - cash > 0) moves.push({ date: start, kind: "purchase", amount: loan.amount - cash });
+  if (cash > 0) moves.push({ date: start, kind: "cash", amount: cash });
+  if (loan.initialPaid > 0) moves.push({ date: start, kind: "payment", amount: loan.initialPaid });
+  const opening = loanOpening(state, loan);
+  const payments: CreditMove[] = [];
+  for (const tx of state.transactions) {
+    if (tx.loanId !== loan.id || tx === opening) continue;
+    const amount = tx.type === "income" || tx.type === "expense" ? tx.amount : tx.type === "adjustment" ? Math.abs(tx.amount) : 0;
+    // Платёж раньше начала долга считаем в день начала.
+    if (amount > 0) payments.push({ date: tx.date > start ? tx.date : start, kind: "payment", amount });
+  }
+  payments.sort((a, b) => a.date.localeCompare(b.date));
+  return summarizeParts(creditParts([...moves, ...payments], resolveTerms(loan.terms, undefined), today));
 }
 
 function floorToRubles(kopecks: Kopecks): Kopecks {

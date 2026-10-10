@@ -10,7 +10,7 @@ import {
   MAIN_ACCOUNT_ID,
   SAVINGS_ACCOUNT_ID,
 } from "@/domain/accounts";
-import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
+import { isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { AccountKind } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
@@ -23,6 +23,8 @@ import { DateInput, TextInput, controlClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { ACCOUNT_KINDS, bankResolveActions } from "../accounts";
+import { InterestNotes } from "../InterestNotes";
+import { CreditTermsFields, parseTerms, termsDraft, type TermsDraft } from "./CreditTermsFields";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 
@@ -67,8 +69,8 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   );
   const [nextCardKey, setNextCardKey] = useState(cards.length);
   const [limit, setLimit] = useState<Kopecks | null>(existing?.creditLimit ?? null);
-  const [grace, setGrace] = useState(existing?.graceDays ? String(existing.graceDays) : "");
-  const [errors, setErrors] = useState<{ name?: string; number?: string; cards?: string; grace?: string }>({});
+  const [terms, setTerms] = useState<TermsDraft>(() => termsDraft(existing?.terms, existing?.graceDays));
+  const [errors, setErrors] = useState<{ name?: string; number?: string; cards?: string; terms?: string }>({});
 
   const updateCard = (key: number, patch: Partial<CardDraft>) => {
     setCards((list) => list.map((c) => (c.key === key ? { ...c, ...patch } : c)));
@@ -89,16 +91,17 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   };
 
   const save = () => {
-    const graceDays = grace.trim() ? Number(grace) : null;
+    const parsed = parseTerms(terms);
+    // Беспроцентный период покупок дублируется в graceDays — по нему считают прежние версии приложения.
+    const graceDays = parsed.terms?.purchase.graceDays ?? null;
     const filled = cards.filter((c) => c.digits || c.name.trim());
     const next: typeof errors = {};
     if (!name.trim()) next.name = "Введите название";
     if (number && !/^\d{4}$/.test(number)) next.number = "Нужны последние четыре цифры";
     if (filled.some((c) => !/^\d{4}$/.test(c.digits))) next.cards = "У каждой карты — последние четыре цифры";
     else if (new Set(filled.map((c) => c.digits)).size !== filled.length) next.cards = "Одна и та же карта указана дважды";
-    if (kind === "credit" && graceDays !== null && (!Number.isInteger(graceDays) || graceDays < 1 || graceDays > 365)) {
-      next.grace = "От 1 до 365 дней";
-    }
+    if (kind === "credit" && parsed.error) next.terms = parsed.error;
+    else if (kind === "credit" && graceDays !== null && graceDays > 365) next.terms = "Беспроцентный период покупок — до 365 дней";
     setErrors(next);
     if (Object.keys(next).length) return;
 
@@ -121,6 +124,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             smsKeys: [],
             creditLimit: kind === "credit" ? limit : null,
             graceDays: kind === "credit" ? graceDays : null,
+            terms: kind === "credit" ? parsed.terms : null,
           },
         })
       : dispatch({
@@ -131,6 +135,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             ...(number ? { number } : {}),
             ...(kind === "credit" && limit ? { creditLimit: limit } : {}),
             ...(kind === "credit" && graceDays ? { graceDays } : {}),
+            ...(kind === "credit" && parsed.terms ? { terms: parsed.terms } : {}),
           },
         });
     if (!ok) return;
@@ -191,12 +196,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             <p className="text-2xl font-semibold tabular-nums">
               {formatMoney(existing.kind === "credit" ? (credit?.debt ?? 0) : balance, { whole: true })}
             </p>
-            {credit?.graceEnd && credit.debt > 0 && (
-              <p className={`text-sm ${credit.overdue ? "text-negative" : "text-muted"}`}>
-                {credit.overdue ? "Льготный период закончился " : "Без процентов до "}
-                {formatDay(credit.graceEnd, today)}
-              </p>
-            )}
+            {credit && <InterestNotes summary={credit} />}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => open({ kind: "balance", accountId: existing.id })}>
                 {existing.kind === "credit" ? "Сверить долг" : "Сверить остаток"}
@@ -264,21 +264,18 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
         )}
 
         {kind === "credit" && (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <>
             <AmountInput label="Кредитный лимит" value={limit} onChange={setLimit} />
-            <TextInput
-              label="Беспроцентный период, дней"
-              inputMode="numeric"
-              value={grace}
-              placeholder="120"
-              hint="С первой покупки, когда долга не было"
-              onChange={(e) => {
-                setGrace(e.target.value.replace(/\D/g, "").slice(0, 3));
-                setErrors((v) => ({ ...v, grace: undefined }));
+            <CreditTermsFields
+              value={terms}
+              onChange={(next) => {
+                setTerms(next);
+                setErrors((v) => ({ ...v, terms: undefined }));
               }}
-              error={errors.grace}
+              error={errors.terms}
+              hint="Беспроцентный период — с первой операции, когда долга не было. Не погасили к его концу — проценты за все дни с первой операции (оценка). Пусто — периода нет, проценты с первого дня."
             />
-          </div>
+          </>
         )}
 
         <TextInput

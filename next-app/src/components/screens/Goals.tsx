@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import { diffDays, formatDay, type IsoDate } from "@/domain/dates";
 import { creditDebts, type CreditStatus } from "@/domain/accounts";
-import { goalSaved, goalsReserved, loanRemaining, savingsTotal } from "@/domain/metrics";
+import { goalSaved, goalsReserved, loanInterest, loanRemaining, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Goal, Loan, LoanKind } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
+import { InterestNotes } from "../app/InterestNotes";
 import { useUi } from "../app/overlays";
 import {
   GOAL_REACHED_TEXT,
@@ -296,7 +297,6 @@ function DebtsView() {
 /** Долг по кредитке: сумма, беспроцентный период, использованный лимит и «Погасить». */
 function CreditCardDebt({ credit }: { credit: CreditStatus }) {
   const { open } = useUi();
-  const today = useToday();
   return (
     <Card>
       <div className="flex items-start gap-3">
@@ -317,13 +317,7 @@ function CreditCardDebt({ credit }: { credit: CreditStatus }) {
           <Progress value={credit.debt} max={credit.limit} tone="warning" label={`Использовано лимита: «${credit.account.name}»`} />
         </div>
       )}
-      {credit.graceEnd && (
-        <p className={`mt-2 text-sm ${credit.overdue ? "font-medium text-negative" : "text-muted"}`}>
-          {credit.overdue
-            ? `Беспроцентный период закончился ${formatDay(credit.graceEnd, today)} — погасите долг`
-            : `Без процентов до ${formatDay(credit.graceEnd, today)}`}
-        </p>
-      )}
+      <InterestNotes summary={credit} className="mt-2" />
       <Button className="mt-3 w-full" variant="soft" onClick={() => open({ kind: "transfer", to: credit.account.id, amount: credit.debt })}>
         Погасить
       </Button>
@@ -357,9 +351,11 @@ function LoanGroup({ title, items }: { title: string; items: LoanItem[] }) {
 
 function LoanCard({ loan, remaining }: { loan: Loan; remaining: Kopecks }) {
   const { open } = useUi();
+  const { state } = useSnapshot();
   const today = useToday();
   const isLend = loan.kind === "lend";
   const closed = remaining === 0;
+  const interest = closed ? null : loanInterest(state, loan, today);
 
   return (
     <Card>
@@ -387,6 +383,7 @@ function LoanCard({ loan, remaining }: { loan: Loan; remaining: Kopecks }) {
         />
       </div>
       {!closed && <LoanDue loan={loan} today={today} />}
+      {interest && <InterestNotes summary={interest} className="mt-1" />}
 
       <Button
         className="mt-3 w-full"

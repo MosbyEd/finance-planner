@@ -53,6 +53,7 @@ import {
   transactionSchema,
   type Account,
   type CategoryGroup,
+  type Loan,
   type Settings,
   type State,
   type Template,
@@ -116,6 +117,7 @@ const accountPatchSchema = accountSchema
     // null — убрать лимит или срок (стал не кредиткой, данных больше нет).
     creditLimit: accountSchema.shape.creditLimit.unwrap().nullable(),
     graceDays: accountSchema.shape.graceDays.unwrap().nullable(),
+    terms: accountSchema.shape.terms.unwrap().nullable(),
     number: accountSchema.shape.number.unwrap().nullable(),
     archived: z.boolean(),
   })
@@ -233,7 +235,16 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("loan.update"),
     id: idSchema,
-    patch: loanSchema.omit({ id: true, createdAt: true }).partial().strict(),
+    patch: loanSchema
+      .omit({ id: true, createdAt: true })
+      .extend({
+        // null — убрать условия, долю наличных или дату.
+        terms: loanSchema.shape.terms.unwrap().nullable(),
+        cashAmount: loanSchema.shape.cashAmount.unwrap().nullable(),
+        takenAt: loanSchema.shape.takenAt.unwrap().nullable(),
+      })
+      .partial()
+      .strict(),
   }),
   z.object({ type: z.literal("loan.delete"), id: idSchema }),
   z.object({
@@ -822,8 +833,12 @@ export function applyAction(state: State, action: Action): State {
       const accounts = accountsOf(state);
       const current = accounts.find((a) => a.id === action.id);
       if (!current) throw new DomainError("Счёт не найден.");
-      const { creditLimit, graceDays, archived, number, ...rest } = action.patch;
+      const { creditLimit, graceDays, terms, archived, number, ...rest } = action.patch;
       const updated: Account = { ...current, ...rest };
+      if (terms !== undefined) {
+        if (terms === null) delete updated.terms;
+        else updated.terms = terms;
+      }
       if (number !== undefined) {
         if (number === null) delete updated.number;
         else updated.number = number;
@@ -1092,6 +1107,9 @@ export function applyAction(state: State, action: Action): State {
     case "loan.add": {
       if (state.loans.some((l) => l.id === action.loan.id)) throw new DomainError("Долг уже существует.");
       if (state.loans.length >= LIMITS.loans) throw new DomainError("Слишком много долгов.");
+      if (action.loan.cashAmount !== undefined && action.loan.cashAmount > action.loan.amount) {
+        throw new DomainError("Снятие наличных не может быть больше суммы долга.");
+      }
       let transactions = state.transactions;
       if (action.cashFlow) {
         assertNewId(state, action.cashFlow.id);
@@ -1116,7 +1134,23 @@ export function applyAction(state: State, action: Action): State {
     case "loan.update": {
       const current = state.loans.find((l) => l.id === action.id);
       if (!current) throw new DomainError("Долг не найден.");
-      const updated = { ...current, ...action.patch };
+      const { terms, cashAmount, takenAt, ...rest } = action.patch;
+      const updated: Loan = { ...current, ...rest };
+      if (terms !== undefined) {
+        if (terms === null) delete updated.terms;
+        else updated.terms = terms;
+      }
+      if (cashAmount !== undefined) {
+        if (cashAmount === null) delete updated.cashAmount;
+        else updated.cashAmount = cashAmount;
+      }
+      if (takenAt !== undefined) {
+        if (takenAt === null) delete updated.takenAt;
+        else updated.takenAt = takenAt;
+      }
+      if (updated.cashAmount !== undefined && updated.cashAmount > updated.amount) {
+        throw new DomainError("Снятие наличных не может быть больше суммы долга.");
+      }
       // Если при создании деньги прошли через счёт, корректировка открытия следует за суммой и направлением
       // долга. Остальные корректировки долга — платежи по нему, их не трогаем.
       const opening = loanOpening(state, current);

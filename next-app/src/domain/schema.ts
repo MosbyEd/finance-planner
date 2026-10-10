@@ -158,6 +158,23 @@ export const cardSchema = z.object({
 });
 export type Card = z.infer<typeof cardSchema>;
 
+/** Условия кредитки или кредита по одному виду операций. */
+export const creditTermSchema = z.object({
+  /** Ставка, % годовых: начисляется, если долг не погашен в беспроцентный период (или его нет). */
+  rate: z.number().min(0).max(1000).optional(),
+  /** Беспроцентный период, дней (включая день операции); нет — проценты с первого дня. */
+  graceDays: z.number().int().min(1).max(3650).optional(),
+});
+export type CreditTerm = z.infer<typeof creditTermSchema>;
+
+export const creditTermsSchema = z.object({
+  /** Покупки и оплата. */
+  purchase: creditTermSchema,
+  /** Снятие наличных и переводы. */
+  cash: creditTermSchema,
+});
+export type CreditTerms = z.infer<typeof creditTermsSchema>;
+
 export const accountSchema = z.object({
   id: idSchema,
   name: titleSchema.min(1, "Укажите название"),
@@ -173,6 +190,11 @@ export const accountSchema = z.object({
   /** Кредитная карта: кредитный лимит и беспроцентный период — дней с первой покупки, когда долга не было. */
   creditLimit: positiveKopecksSchema.optional(),
   graceDays: z.number().int().min(1).max(365).optional(),
+  /**
+   * Условия кредитки по видам операций: ставка и беспроцентный период для покупок и для снятия наличных.
+   * Беспроцентный период покупок дублируется в graceDays. Нет условий — все операции идут по graceDays.
+   */
+  terms: creditTermsSchema.optional(),
   /** Закрыт: не предлагается для новых операций, но остаётся в истории. */
   archived: z.literal(true).optional(),
   /** Накопительный счёт входит в «Сбережения» (итог на Главной, деньги для целей). false — нет; по умолчанию — да. */
@@ -199,6 +221,12 @@ export const loanSchema = z.object({
   dueDate: isoDateSchema.nullable(),
   note: noteSchema,
   createdAt: isoDateSchema,
+  /** Мой долг или кредит: ставка и беспроцентный период для покупок и для снятия наличных. */
+  terms: creditTermsSchema.optional(),
+  /** Какая часть долга — снятие наличных и переводы (остальное — покупки). */
+  cashAmount: positiveKopecksSchema.optional(),
+  /** Когда возник долг — с этого дня идёт беспроцентный период. Нет — день записи (createdAt). */
+  takenAt: isoDateSchema.optional(),
 });
 export type Loan = z.infer<typeof loanSchema>;
 

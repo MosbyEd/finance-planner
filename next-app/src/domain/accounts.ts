@@ -1,5 +1,6 @@
-import { addDays, type IsoDate } from "./dates";
+import type { IsoDate } from "./dates";
 import type { Kopecks } from "./money";
+import { creditParts, resolveTerms, type CreditMove, type CreditOperation, type CreditPart, type ResolvedTerms } from "./interest";
 import type { Account, Card, State, Transaction } from "./schema";
 
 /**
@@ -128,54 +129,72 @@ export function savingsTarget(state: Pick<State, "accounts">, id: string | undef
 
 // ---------- кредитная карта ----------
 
-export interface CreditStatus {
+export interface CreditStatus extends CreditSummary {
   account: Account;
-  /** Долг по карте (≥ 0). */
-  debt: Kopecks;
   limit: Kopecks | null;
   /** Сколько ещё можно потратить по лимиту карты. */
   available: Kopecks | null;
-  /** Первая покупка, с которой идёт беспроцентный период (когда долга до неё не было). */
+}
+
+const CASH_TITLE = /наличн|банкомат|\bATM\b/iu;
+
+/** Вид операции по кредитке: переводы с неё и снятие в банкомате — «снятие наличных», остальное — покупки. */
+export function creditOperation(tx: Pick<Transaction, "type" | "title" | "category">): CreditOperation {
+  if (tx.type === "transfer" || tx.type === "saving") return "cash";
+  if (tx.type === "expense" && (CASH_TITLE.test(tx.title) || CASH_TITLE.test(tx.category))) return "cash";
+  return "purchase";
+}
+
+export function accountTerms(account: Account): ResolvedTerms {
+  return resolveTerms(account.terms, account.graceDays);
+}
+
+/** Долг по видам операций и сводка: ближайший конец беспроцентного периода и проценты. */
+export interface CreditSummary {
+  debt: Kopecks;
   graceStart: IsoDate | null;
-  /** Последний день, когда долг можно погасить без процентов. */
   graceEnd: IsoDate | null;
-  /** Беспроцентный период закончился, а долг остался. */
   overdue: boolean;
+  accrued: Kopecks;
+  ifMissed: Kopecks;
+  perDay: Kopecks;
+  parts: CreditPart[];
+}
+
+export function summarizeParts(parts: CreditPart[]): CreditSummary {
+  const withGrace = parts.filter((p) => p.debt > 0 && p.graceEnd !== null);
+  const first = withGrace.reduce<CreditPart | null>((min, p) => (!min || p.graceEnd! < min.graceEnd! ? p : min), null);
+  return {
+    debt: parts.reduce((sum, p) => sum + p.debt, 0),
+    graceStart: first?.since ?? null,
+    graceEnd: first?.graceEnd ?? null,
+    overdue: parts.some((p) => p.overdue),
+    accrued: parts.reduce((sum, p) => sum + p.accrued, 0),
+    ifMissed: parts.reduce((sum, p) => sum + p.ifMissed, 0),
+    perDay: parts.reduce((sum, p) => sum + p.perDay, 0),
+    parts,
+  };
 }
 
 /**
- * Долг и беспроцентный период кредитной карты на сегодня. Период начинается с первой покупки, когда долга
- * не было, и длится graceDays дней (включая день покупки); полностью погасили долг — период сбрасывается.
+ * Долг, беспроцентный период и проценты кредитной карты на сегодня — по видам операций (см. interest.ts).
+ * Период начинается с первой операции, когда долга этого вида не было; полностью погасили — сбрасывается.
  */
 export function creditStatus(state: State, account: Account, today: IsoDate): CreditStatus {
-  const moves: { date: IsoDate; delta: Kopecks; order: number }[] = [];
+  const moves: (CreditMove & { order: number })[] = [];
   state.transactions.forEach((tx, order) => {
     if (tx.date > today) return;
-    for (const [id, delta] of accountDeltas(tx)) if (id === account.id) moves.push({ date: tx.date, delta, order });
+    for (const [id, delta] of accountDeltas(tx)) {
+      if (id !== account.id || delta === 0) continue;
+      moves.push({ date: tx.date, kind: delta > 0 ? "payment" : creditOperation(tx), amount: Math.abs(delta), order });
+    }
   });
   // По дате; внутри дня — в порядке записи.
   moves.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
 
-  let balance = 0;
-  let graceStart: IsoDate | null = null;
-  for (const move of moves) {
-    if (move.delta < 0 && balance >= 0) graceStart = move.date;
-    balance += move.delta;
-    if (balance >= 0) graceStart = null;
-  }
-
-  const debt = Math.max(0, -balance);
+  const summary = summarizeParts(creditParts(moves, accountTerms(account), today));
   const limit = account.creditLimit ?? null;
-  const graceEnd = graceStart && account.graceDays ? addDays(graceStart, account.graceDays - 1) : null;
-  return {
-    account,
-    debt,
-    limit,
-    available: limit === null ? null : Math.max(0, limit - debt),
-    graceStart,
-    graceEnd,
-    overdue: debt > 0 && graceEnd !== null && graceEnd < today,
-  };
+  return { account, ...summary, limit, available: limit === null ? null : Math.max(0, limit - summary.debt) };
 }
 
 /** Кредитные карты с долгом — для «Скоро», долгов и прогноза остатка. */

@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
-import { loanOpening, loanRemaining } from "@/domain/metrics";
+import { loanInterest, loanOpening, loanRemaining } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { LIMITS, type LoanKind } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
@@ -13,7 +13,9 @@ import { useConfirm, useToast } from "../../ui/feedback";
 import { DateInput, TextArea, TextInput } from "../../ui/Field";
 import { Sheet } from "../../ui/Sheet";
 import { useDispatch } from "../hooks";
+import { InterestNotes } from "../InterestNotes";
 import { useUi } from "../overlays";
+import { CreditTermsFields, parseTerms, sameDraft, termsDraft, type TermsDraft } from "./CreditTermsFields";
 
 /** Три варианта на 360 px едва помещаются: не даём подписи переноситься внутри кнопки. */
 function oneLine(text: string): ReactNode {
@@ -32,7 +34,7 @@ const COPY: Record<LoanKind, { name: string; placeholder: string; paid: string; 
   lend: { name: "Кому одолжили", placeholder: "Например, Саша", paid: "Уже вернули", due: "Вернуть до" },
 };
 
-type LoanErrors = { name?: string; amount?: string; paid?: string; dueDate?: string };
+type LoanErrors = { name?: string; amount?: string; paid?: string; dueDate?: string; terms?: string; cash?: string; takenAt?: string };
 
 export function LoanSheet({ loanId }: { loanId?: string }) {
   const { state } = useSnapshot();
@@ -51,6 +53,10 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
     paid: existing && existing.initialPaid > 0 ? existing.initialPaid : null,
     dueDate: existing?.dueDate ?? "",
     note: existing?.note ?? "",
+    withTerms: Boolean(existing?.terms),
+    terms: termsDraft(existing?.terms),
+    cash: existing?.cashAmount ?? null,
+    takenAt: existing?.takenAt ?? existing?.createdAt ?? today,
   }));
   const [kind, setKind] = useState<LoanKind>(start.kind);
   const [name, setName] = useState(start.name);
@@ -58,6 +64,11 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
   const [paid, setPaid] = useState<Kopecks | null>(start.paid);
   const [dueDate, setDueDate] = useState<string>(start.dueDate);
   const [note, setNote] = useState(start.note);
+  // Проценты и беспроцентный период (мой долг или кредит): условия, доля снятия наличных, когда возник долг.
+  const [withTerms, setWithTerms] = useState(start.withTerms);
+  const [terms, setTerms] = useState<TermsDraft>(start.terms);
+  const [cash, setCash] = useState<Kopecks | null>(start.cash);
+  const [takenAt, setTakenAt] = useState<string>(start.takenAt);
   // Только для нового долга: деньги пришли на счёт (или ушли с него) прямо сейчас.
   const [cashFlow, setCashFlow] = useState(false);
   const [errors, setErrors] = useState<LoanErrors>({});
@@ -72,10 +83,15 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
     paid !== start.paid ||
     dueDate !== start.dueDate ||
     note !== start.note ||
+    withTerms !== start.withTerms ||
+    !sameDraft(terms, start.terms) ||
+    cash !== start.cash ||
+    takenAt !== start.takenAt ||
     cashFlow;
   const copy = COPY[kind];
   const clearError = (key: keyof LoanErrors) => setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
   const remaining = existing ? loanRemaining(state, existing) : null;
+  const interest = existing && remaining ? loanInterest(state, existing, today) : null;
 
   const save = () => {
     const next: LoanErrors = {};
@@ -83,6 +99,14 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
     if (!amount || amount <= 0) next.amount = "Введите сумму";
     if (amount && paid !== null && paid > amount) next.paid = "Не больше суммы долга";
     if (dueDate && !isValidIsoDate(dueDate)) next.dueDate = "Укажите дату или выберите «Без срока»";
+    const charged = kind !== "lend" && withTerms;
+    const parsed = parseTerms(terms);
+    if (charged) {
+      if (parsed.error) next.terms = parsed.error;
+      else if (!parsed.terms) next.terms = "Укажите ставку или беспроцентный период";
+      if (amount && cash !== null && cash > amount) next.cash = "Не больше суммы долга";
+      if (!isValidIsoDate(takenAt)) next.takenAt = "Укажите дату";
+    }
     setErrors(next);
     if (Object.keys(next).length || !amount) return;
 
@@ -94,12 +118,24 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
       dueDate: dueDate || null,
       note: note.trim(),
     };
+    const extra = {
+      terms: charged ? parsed.terms : null,
+      cashAmount: charged && cash ? cash : null,
+      takenAt: charged && takenAt ? takenAt : null,
+    };
     if (!existing && loanId) return;
     const ok = existing
-      ? dispatch({ type: "loan.update", id: existing.id, patch: fields })
+      ? dispatch({ type: "loan.update", id: existing.id, patch: { ...fields, ...extra } })
       : dispatch({
           type: "loan.add",
-          loan: { id: newId(), ...fields, createdAt: today },
+          loan: {
+            id: newId(),
+            ...fields,
+            createdAt: today,
+            ...(extra.terms ? { terms: extra.terms } : {}),
+            ...(extra.cashAmount ? { cashAmount: extra.cashAmount } : {}),
+            ...(extra.takenAt ? { takenAt: extra.takenAt } : {}),
+          },
           ...(cashFlow ? { cashFlow: { id: newId(), date: today } } : {}),
         });
     if (ok) close();
@@ -147,9 +183,12 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
         <Segmented label="Вид долга" value={kind} onChange={setKind} options={KIND_OPTIONS} />
 
         {existing && remaining !== null && (
-          <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">
-            Осталось <Money value={remaining} className="font-semibold" /> из {formatMoney(existing.amount)}
-          </p>
+          <div className="rounded-2xl bg-surface-2 px-4 py-3">
+            <p className="text-sm">
+              Осталось <Money value={remaining} className="font-semibold" /> из {formatMoney(existing.amount)}
+            </p>
+            {interest && <InterestNotes summary={interest} className="mt-1" />}
+          </div>
         )}
 
         <TextInput
@@ -222,6 +261,48 @@ export function LoanSheet({ loanId }: { loanId?: string }) {
             Без срока
           </button>
         </div>
+        {kind !== "lend" && (
+          <Switch
+            checked={withTerms}
+            onChange={setWithTerms}
+            label="Есть проценты"
+            description="Ставка и беспроцентный период — отдельно для покупок и для снятия наличных. Приложение оценит, сколько начислят, если не погасить вовремя."
+          />
+        )}
+        {kind !== "lend" && withTerms && (
+          <>
+            <DateInput
+              label="Когда возник долг"
+              value={takenAt}
+              error={errors.takenAt}
+              hint="С этого дня идёт беспроцентный период"
+              onChange={(e) => {
+                setTakenAt(e.target.value);
+                clearError("takenAt");
+              }}
+            />
+            <AmountInput
+              label="Из них снятие наличных и переводы"
+              placeholder="Необязательно"
+              value={cash}
+              error={errors.cash}
+              hint="Остальное — покупки"
+              onChange={(v) => {
+                setCash(v);
+                clearError("cash");
+              }}
+            />
+            <CreditTermsFields
+              value={terms}
+              onChange={(next) => {
+                setTerms(next);
+                clearError("terms");
+              }}
+              error={errors.terms}
+              hint="Не погасили к концу беспроцентного периода — проценты за все дни с начала долга (оценка). Пусто — периода нет. Платежи гасят сначала наличные."
+            />
+          </>
+        )}
         <TextArea
           label="Заметка"
           placeholder="Необязательно"

@@ -6,11 +6,13 @@ import {
   cardLabel,
   creditStatus,
   findAccount,
+  type CreditSummary,
   isSpendingAccount,
   MAIN_ACCOUNT_ID,
   sourceAccountId,
 } from "@/domain/accounts";
 import type { Action } from "@/domain/actions";
+import { CREDIT_OPERATION_LABEL } from "@/domain/interest";
 import { formatDay, formatRelativeDay, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
@@ -66,6 +68,7 @@ export function accountRows(state: State, today: IsoDate): AccountRow[] {
       if (credit.debt > 0 && credit.graceEnd) {
         parts.push(credit.overdue ? `льготный период закончился ${formatDay(credit.graceEnd, today)}` : `без процентов до ${formatDay(credit.graceEnd, today)}`);
       }
+      if (credit.accrued > 0) parts.push(`проценты ≈ ${formatMoney(credit.accrued, { whole: true })}`);
       if (credit.available !== null) parts.push(`доступно ${formatMoney(credit.available, { whole: true })}`);
       return {
         account,
@@ -213,4 +216,47 @@ export function bankResolveActions(state: State, accountId: string, fix: boolean
     { type: "balance.set", id, date: today, actual: accountBalance(state, accountId, today) + bank.delta, accountId },
     resolve,
   ];
+}
+
+export interface InterestLine {
+  text: string;
+  tone: "muted" | "warning" | "negative";
+}
+
+/** Сумма процентов: до 100 ₽ — с копейками, дальше — в рублях (это оценка). */
+function interestMoney(kopecks: Kopecks): string {
+  return formatMoney(kopecks, { whole: kopecks >= 10_000 });
+}
+
+/**
+ * Беспроцентный период и проценты кредитки или долга — по строке на вид операций с долгом:
+ * «Без процентов до 12 нояб. — не погасите, начислят ≈ 1 234 ₽», «Снятие наличных: проценты с 3 окт. — ≈ 300 ₽, +45 ₽ в день».
+ */
+export function interestLines(summary: CreditSummary, today: IsoDate): InterestLine[] {
+  const active = summary.parts.filter((p) => p.debt > 0);
+  // Подпись вида нужна, когда видов несколько или долг — снятие наличных.
+  const labeled = active.length > 1 || active.some((p) => p.operation === "cash");
+  const lines: InterestLine[] = [];
+  for (const part of active) {
+    const perDay = part.perDay > 0 ? `, +${interestMoney(part.perDay)} в день` : "";
+    let text: string;
+    let tone: InterestLine["tone"];
+    if (part.graceEnd && !part.overdue) {
+      const missed = part.ifMissed > 0 ? ` — не погасите, начислят ≈ ${interestMoney(part.ifMissed)}` : "";
+      text = `без процентов до ${formatDay(part.graceEnd, today)}${missed}`;
+      tone = "muted";
+    } else if (part.overdue && part.graceEnd) {
+      const accrued = part.rate !== null ? ` — набежало ≈ ${interestMoney(part.accrued)}${perDay}` : " — погасите долг";
+      text = `беспроцентный период закончился ${formatDay(part.graceEnd, today)}${accrued}`;
+      tone = "negative";
+    } else if (part.rate !== null && part.since) {
+      text = `проценты с ${formatDay(part.since, today)} — набежало ≈ ${interestMoney(part.accrued)}${perDay}`;
+      tone = "warning";
+    } else continue;
+    lines.push({
+      text: labeled ? `${CREDIT_OPERATION_LABEL[part.operation]}: ${text}` : text[0].toUpperCase() + text.slice(1),
+      tone,
+    });
+  }
+  return lines;
 }
