@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { buildAiSystemPrompt, parseAiReply } from "@/domain/ai";
+import { buildAiSystemPrompt, parseAiReply, pickAiMode } from "@/domain/ai";
 import { addDays, todayLocal } from "@/domain/dates";
 import { isoDateSchema } from "@/domain/schema";
 import { AiProviderError, deepseekChat } from "@/server/deepseek";
@@ -19,7 +19,8 @@ const bodySchema = z.object({
     .min(1)
     .max(20)
     .refine((list) => list[list.length - 1].role === "user", "Последнее сообщение должно быть от пользователя"),
-  mode: z.enum(["fast", "reasoning"]),
+  /** auto — сервер сам выбирает модель по вопросу (pickAiMode). */
+  mode: z.enum(["auto", "fast", "reasoning"]),
   today: isoDateSchema,
 });
 
@@ -52,11 +53,18 @@ export const POST = withUser(async (req, { user }) => {
     if (error instanceof StoredStateError) return jsonError(423, error.message, { code: "state-corrupted" });
     throw error;
   }
+  const question = body.data.messages[body.data.messages.length - 1].content;
+  const mode = body.data.mode === "auto" ? pickAiMode(question) : body.data.mode;
+  const messages = [{ role: "system" as const, content: buildAiSystemPrompt(state, today) }, ...body.data.messages];
   try {
-    const reply = await deepseekChat(env.deepseekApiKey, body.data.mode, [
-      { role: "system", content: buildAiSystemPrompt(state, today) },
-      ...body.data.messages,
-    ]);
+    let reply;
+    try {
+      reply = await deepseekChat(env.deepseekApiKey, mode, messages);
+    } catch (error) {
+      // Модель с рассуждением не ответила вовремя — при автоматическом выборе спрашиваем быструю.
+      if (!(error instanceof AiProviderError) || error.status !== 504 || mode !== "reasoning" || body.data.mode !== "auto") throw error;
+      reply = await deepseekChat(env.deepseekApiKey, "fast", messages);
+    }
     const parsed = parseAiReply(reply.text, state, today);
     return jsonOk({
       text: parsed.text || "Готово.",

@@ -20,7 +20,7 @@ import { Plans } from "../screens/Plans";
 import { Settings } from "../screens/Settings";
 import { useDispatch } from "./hooks";
 import { OverlayHost } from "./OverlayHost";
-import { forgetAiChat } from "./sheets/AiChatSheet";
+import { forgetAiChat } from "./ai/chatStore";
 import { UiProvider, useUi, type Tab } from "./overlays";
 import { useNativeHome, useNativeShell } from "./native/useNativeHome";
 import { useNativeBridge } from "./useNativeBridge";

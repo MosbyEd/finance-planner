@@ -17,6 +17,7 @@ export function Sheet({
   title,
   children,
   footer,
+  actions,
   size = "md",
   dirty = false,
   description,
@@ -27,6 +28,8 @@ export function Sheet({
   children: ReactNode;
   /** Короткое пояснение под заголовком; диалог ссылается на него через aria-describedby. */
   description?: ReactNode;
+  /** Кнопки в шапке слева от «Закрыть». */
+  actions?: ReactNode;
   footer?: ReactNode;
   size?: "md" | "lg" | "full";
   /** В форме есть несохранённые изменения: закрытие по фону или Esc сначала спросит подтверждение. */
@@ -121,9 +124,10 @@ export function Sheet({
         className={`glass-strong relative flex w-full flex-col overflow-hidden rounded-t-[32px] border-b-0 outline-none animate-sheet sm:rounded-[32px] sm:border-b ${width} ${height}`}
       >
         <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-          <h2 id={titleId} className="flex-1 text-[17px] font-semibold">
+          <h2 id={titleId} className="min-w-0 flex-1 truncate text-[17px] font-semibold">
             {title}
           </h2>
+          {actions}
           <IconButton icon="close" label="Закрыть" variant="secondary" onClick={() => void requestClose()} size={40} />
         </div>
         {/* Поперёк окно не прокручивается: если что-то шире окна, оно обрезается, а не сдвигает всю страницу вбок. */}

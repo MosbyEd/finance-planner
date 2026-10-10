@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyActions, actionSchema } from "./actions";
-import { buildAiSystemPrompt, parseAiReply, proposalToActions, refineLocalProposal } from "./ai";
+import { buildAiSystemPrompt, parseAiReply, pickAiMode, proposalToActions, refineLocalProposal } from "./ai";
 import { emptyState } from "./defaults";
 import { stateWith, testId, tx } from "./test-utils";
 
@@ -173,5 +173,17 @@ describe("новые действия помощника: счета, перев
     ]);
     const after = applyActions(s, actions);
     expect(after.templates[0]).toMatchObject({ amount: 69_900, active: false });
+  });
+});
+
+describe("выбор модели", () => {
+  it("изменения — быстрой, разбор и советы — с рассуждением", () => {
+    expect(pickAiMode("Добавь регулярные платежи из старого приложения")).toBe("fast");
+    expect(pickAiMode("Интернет подорожал до 800 и теперь списывается 12-го")).toBe("fast");
+    expect(pickAiMode("Помоги поставить лимиты по категориям")).toBe("fast");
+    expect(pickAiMode("Сколько можно тратить до зарплаты?")).toBe("fast");
+    expect(pickAiMode("Проанализируй мои траты за месяц")).toBe("reasoning");
+    expect(pickAiMode("Как быстрее закрыть долги?")).toBe("reasoning");
+    expect(pickAiMode("Составь план накоплений на цель")).toBe("reasoning");
   });
 });

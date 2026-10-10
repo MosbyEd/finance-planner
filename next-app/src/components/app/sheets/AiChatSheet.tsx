@@ -1,77 +1,38 @@
 "use client";
 
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type KeyboardEvent,
-} from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { z } from "zod";
 import { findAccount } from "@/domain/accounts";
 import { proposalSize, proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
-import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
+import { diffDays, formatDay, todayLocal, type IsoDate } from "@/domain/dates";
 import { formatMoney } from "@/domain/money";
 import type { State } from "@/domain/schema";
-import { ApiError, api, type AiChatMessage } from "@/client/api";
-import { AppleAiError, askApple, pickAppleModel } from "@/client/appleAi";
+import { pickAppleModel } from "@/client/appleAi";
 import { nativeSiriOrb, type AppleModel } from "@/client/native";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { Button, IconButton } from "../../ui/Button";
-import { EmptyState, Money, Notice, Segmented } from "../../ui/controls";
+import { EmptyState, Money, Notice } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
 import { controlClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { templateRoute } from "../accounts";
+import {
+  ENGINE_LABEL,
+  MAX_CONTENT,
+  getChatStore,
+  type AssistantMessage,
+  type ChatStore,
+  type ChatThread,
+  type ErrorMessage,
+  type ProposalStatus,
+  type UserMessage,
+} from "../ai/chatStore";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 import { plural } from "@/domain/text";
 
-// ---------- модель чата ----------
-
-/** fast и reasoning — DeepSeek на сервере; apple — модель Apple Intelligence (на телефоне или в Private Cloud Compute). */
-type ChatMode = "fast" | "reasoning" | "apple";
-type ProposalStatus = "pending" | "applied" | "dismissed";
-
-interface UserMessage {
-  id: string;
-  role: "user";
-  content: string;
-}
-
-interface AssistantMessage {
-  id: string;
-  role: "assistant";
-  content: string;
-  reasoning: string | null;
-  proposal: AiProposal | null;
-  skipped: number;
-  status: ProposalStatus;
-}
-
-interface ErrorMessage {
-  id: string;
-  role: "error";
-  content: string;
-}
-
-type ChatMessage = UserMessage | AssistantMessage | ErrorMessage;
-
-interface ChatSnapshot {
-  messages: ChatMessage[];
-  mode: ChatMode;
-  /** Время отправки запроса, на который ещё нет ответа. */
-  pendingSince: number | null;
-}
-
-/** Ограничения API: до 20 сообщений, до 4000 символов в каждом, запрос до 100 КБ. */
-const MAX_HISTORY = 20;
-const MAX_CONTENT = 4000;
-const MAX_REQUEST_BYTES = 90_000;
+export { forgetAiChat } from "../ai/chatStore";
 
 const QUICK_PROMPTS = [
   "Сколько можно тратить до зарплаты?",
@@ -81,260 +42,6 @@ const QUICK_PROMPTS = [
   "Как быстрее закрыть долги?",
   "Составь план накоплений на цель",
 ];
-
-// Предложения, сохранённые до новых видов действий, читаются с пустыми списками.
-const proposalSchema = z.object({
-  operations: z.array(
-    z.object({
-      type: z.enum(["income", "expense"]),
-      amount: z.number().int(),
-      category: z.string(),
-      title: z.string(),
-      date: z.string().refine(isValidIsoDate),
-      mandatory: z.boolean(),
-      accountId: z.string().optional(),
-    }),
-  ),
-  templates: z.array(
-    z.object({
-      type: z.enum(["income", "expense"]),
-      amount: z.number().int(),
-      category: z.string(),
-      title: z.string(),
-      dayOfMonth: z.number().int().min(1).max(31),
-      accountId: z.string().optional(),
-      toAccountId: z.string().optional(),
-      loanId: z.string().optional(),
-    }),
-  ),
-  limits: z.array(z.object({ category: z.string(), amount: z.number().int() })),
-  transfers: z
-    .array(z.object({ from: z.string(), to: z.string(), amount: z.number().int(), date: z.string().refine(isValidIsoDate) }))
-    .default([]),
-  templateUpdates: z
-    .array(
-      z.object({
-        templateId: z.string(),
-        amount: z.number().int().optional(),
-        dayOfMonth: z.number().int().min(1).max(31).optional(),
-        active: z.boolean().optional(),
-        accountId: z.string().optional(),
-        toAccountId: z.string().nullable().optional(),
-        loanId: z.string().nullable().optional(),
-      }),
-    )
-    .default([]),
-  balances: z.array(z.object({ accountId: z.string(), actual: z.number().int() })).default([]),
-  goals: z.array(z.object({ goalId: z.string(), amount: z.number().int() })).default([]),
-  loanPayments: z
-    .array(z.object({ loanId: z.string(), amount: z.number().int(), date: z.string().refine(isValidIsoDate) }))
-    .default([]),
-});
-
-const storedMessageSchema = z.discriminatedUnion("role", [
-  z.object({ id: z.string(), role: z.literal("user"), content: z.string() }),
-  z.object({
-    id: z.string(),
-    role: z.literal("assistant"),
-    content: z.string(),
-    reasoning: z.string().nullable(),
-    proposal: proposalSchema.nullable(),
-    skipped: z.number().int(),
-    status: z.enum(["pending", "applied", "dismissed"]),
-  }),
-  z.object({ id: z.string(), role: z.literal("error"), content: z.string() }),
-]);
-
-const storedChatSchema = z.object({
-  mode: z.enum(["fast", "reasoning", "apple"]).catch("fast"),
-  messages: z.array(z.unknown()),
-});
-
-/**
- * Новый чат — на модели Apple на телефоне: без интернета и без передачи данных. Где её нет (браузер,
- * выключена Apple Intelligence), окно само переключится на DeepSeek.
- */
-const DEFAULT_MODE: ChatMode = "apple";
-
-function storageKey(login: string): string {
-  return `fp:ai-chat:${login}`;
-}
-
-function loadChat(key: string): Pick<ChatSnapshot, "messages" | "mode"> {
-  try {
-    const raw = globalThis.sessionStorage?.getItem(key);
-    if (!raw) return { messages: [], mode: DEFAULT_MODE };
-    const parsed = storedChatSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) return { messages: [], mode: DEFAULT_MODE };
-    const messages: ChatMessage[] = [];
-    for (const item of parsed.data.messages) {
-      const message = storedMessageSchema.safeParse(item);
-      if (message.success) messages.push(message.data);
-    }
-    // Страницу перезагрузили, пока ждали ответа, — предлагаем отправить вопрос снова.
-    if (messages.at(-1)?.role === "user") {
-      messages.push({ id: newId(), role: "error", content: "Ответ не пришёл: страница была перезагружена." });
-    }
-    return { messages, mode: parsed.data.mode };
-  } catch {
-    return { messages: [], mode: DEFAULT_MODE };
-  }
-}
-
-function saveChat(key: string, chat: ChatSnapshot): void {
-  try {
-    const storage = globalThis.sessionStorage;
-    if (!storage) return;
-    if (!chat.messages.length) {
-      storage.removeItem(key);
-      return;
-    }
-    try {
-      storage.setItem(key, JSON.stringify({ mode: chat.mode, messages: chat.messages }));
-    } catch {
-      // Не хватило места — сохраняем без рассуждений модели, они самые объёмные.
-      const light = chat.messages.map((m) => (m.role === "assistant" ? { ...m, reasoning: null } : m));
-      storage.setItem(key, JSON.stringify({ mode: chat.mode, messages: light }));
-    }
-  } catch {
-    // sessionStorage недоступен (приватный режим) — чат живёт до перезагрузки страницы.
-  }
-}
-
-/** История для API: последние сообщения пользователя и помощника, в пределах лимитов запроса. */
-function buildHistory(messages: ChatMessage[]): AiChatMessage[] {
-  const history = messages
-    .filter((m): m is UserMessage | AssistantMessage => m.role === "user" || m.role === "assistant")
-    .slice(-MAX_HISTORY)
-    .map(({ role, content }) => ({ role, content: content.slice(0, MAX_CONTENT) }));
-  const encoder = new TextEncoder();
-  while (history.length > 1 && encoder.encode(JSON.stringify(history)).length > MAX_REQUEST_BYTES) history.shift();
-  return history;
-}
-
-/**
- * Переписка одного пользователя. Живёт на уровне модуля, а не компонента:
- * если закрыть окно, пока помощник думает, ответ всё равно сохранится.
- */
-class ChatSession {
-  private snapshot: ChatSnapshot;
-  private listeners = new Set<() => void>();
-  private epoch = 0;
-
-  constructor(private readonly key: string) {
-    this.snapshot = { ...loadChat(key), pendingSince: null };
-  }
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-
-  getSnapshot = (): ChatSnapshot => this.snapshot;
-
-  private update(patch: Partial<ChatSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
-    saveChat(this.key, this.snapshot);
-    for (const listener of this.listeners) listener();
-  }
-
-  setMode(mode: ChatMode): void {
-    this.update({ mode });
-  }
-
-  /** mode — режим, который сейчас показан в окне (может отличаться от сохранённого, если тот недоступен). */
-  send(text: string, today: IsoDate, state: State, mode: ChatMode): void {
-    const content = text.trim().slice(0, MAX_CONTENT);
-    if (!content || this.snapshot.pendingSince !== null) return;
-    const messages = this.snapshot.messages.filter((m) => m.role !== "error");
-    this.update({ messages: [...messages, { id: newId(), role: "user", content }] });
-    void this.request(today, state, mode);
-  }
-
-  canRetry(): boolean {
-    const messages = this.snapshot.messages.filter((m) => m.role !== "error");
-    return this.snapshot.pendingSince === null && messages.at(-1)?.role === "user";
-  }
-
-  retry(today: IsoDate, state: State, mode: ChatMode): void {
-    if (!this.canRetry()) return;
-    this.update({ messages: this.snapshot.messages.filter((m) => m.role !== "error") });
-    void this.request(today, state, mode);
-  }
-
-  setStatus(id: string, status: ProposalStatus): void {
-    this.update({
-      messages: this.snapshot.messages.map((m) => (m.id === id && m.role === "assistant" ? { ...m, status } : m)),
-    });
-  }
-
-  clear(): void {
-    this.epoch += 1;
-    this.update({ messages: [], pendingSince: null });
-  }
-
-  /** state — данные бюджета на устройстве: модель Apple отвечает по ним, без сервера. */
-  private async request(today: IsoDate, state: State, mode: ChatMode): Promise<void> {
-    const epoch = this.epoch;
-    this.update({ pendingSince: Date.now() });
-    let reply: ChatMessage;
-    try {
-      const history = buildHistory(this.snapshot.messages);
-      const response =
-        mode === "apple"
-          ? { ...(await askApple(history, state, today)), reasoning: null }
-          : await api.aiChat(history, mode, today);
-      reply = {
-        id: newId(),
-        role: "assistant",
-        content: response.text,
-        reasoning: response.reasoning?.trim() || null,
-        proposal: response.proposal,
-        skipped: response.skipped,
-        status: "pending",
-      };
-    } catch (error) {
-      reply = {
-        id: newId(),
-        role: "error",
-        content:
-          error instanceof ApiError || error instanceof AppleAiError
-            ? error.message
-            : "Не удалось получить ответ. Попробуйте ещё раз.",
-      };
-    }
-    // Чат очистили (или вышли из аккаунта), пока ждали ответа.
-    if (epoch !== this.epoch) return;
-    this.update({ pendingSince: null, messages: [...this.snapshot.messages, reply] });
-  }
-}
-
-const sessions = new Map<string, ChatSession>();
-
-function getSession(login: string): ChatSession {
-  const key = storageKey(login);
-  let session = sessions.get(key);
-  if (!session) {
-    session = new ChatSession(key);
-    sessions.set(key, session);
-  }
-  return session;
-}
-
-/** Забыть переписку (при выходе из аккаунта или его удалении). */
-export function forgetAiChat(login: string): void {
-  const key = storageKey(login);
-  sessions.get(key)?.clear();
-  sessions.delete(key);
-  try {
-    globalThis.sessionStorage?.removeItem(key);
-  } catch {
-    /* ignore */
-  }
-}
-
 
 // ---------- связь ----------
 
@@ -420,8 +127,7 @@ export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
       login={snapshot.user.login}
       initialPrompt={initialPrompt}
       online={online}
-      appleModel={appleModel}
-      appleLoading={apple.loading}
+      apple={appleModel === "device"}
       deepseek={snapshot.aiEnabled}
     />
   );
@@ -431,163 +137,321 @@ function Chat({
   login,
   initialPrompt,
   online,
-  appleModel,
-  appleLoading,
+  apple,
   deepseek,
 }: {
   login: string;
   initialPrompt?: string;
   online: boolean;
-  appleModel: AppleModel | null;
-  /** Ещё выясняем, есть ли модель Apple: до этого сохранённый режим «apple» не подменяем DeepSeek. */
-  appleLoading: boolean;
+  /** Есть модель Apple на телефоне — отвечает на вопросы без интернета. */
+  apple: boolean;
   /** Включён ли на сервере DeepSeek. */
   deepseek: boolean;
 }) {
-  const [session] = useState(() => getSession(login));
-  const snapshotChat = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
-  // Выбранный режим недоступен (модель Apple выключили или DeepSeek отключён на сервере) — берём доступный.
-  const fallbackMode: ChatMode = deepseek ? "fast" : "apple";
-  const modeAvailable = snapshotChat.mode === "apple" ? appleModel !== null || appleLoading : deepseek;
-  const chat = modeAvailable ? snapshotChat : { ...snapshotChat, mode: fallbackMode };
+  const [store] = useState(() => getChatStore(login));
+  const chats = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { state, sync, sessionExpired } = useSnapshot();
   const { close, open } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
   const toast = useToast();
-  const confirm = useConfirm();
   const [input, setInput] = useState(initialPrompt ?? "");
+  const [view, setView] = useState<"chat" | "history">("chat");
+  const thread = chats.threads.find((t) => t.id === chats.currentId) ?? null;
+  const messages = thread?.messages ?? [];
   // Ответы, пришедшие при открытом окне, проявляются с анимацией; история при открытии — сразу.
-  const [initialIds] = useState(() => new Set(snapshotChat.messages.map((m) => m.id)));
+  const [initialIds] = useState(() => new Set(chats.threads.flatMap((t) => t.messages.map((m) => m.id))));
   const endRef = useRef<HTMLDivElement>(null);
   const scrolledOnce = useRef(false);
-  const pending = chat.pendingSince !== null;
-  // Модель на телефоне отвечает и без интернета.
-  const canAsk = !(chat.mode === "apple" && appleLoading) && (online || (chat.mode === "apple" && appleModel === "device"));
+  const pendingHere = chats.pending !== null && chats.pending.threadId === thread?.id;
+  const busy = chats.pending !== null;
+  const waitingHere = chats.waiting !== null && chats.waiting === thread?.id;
+  const canAsk = online ? deepseek || apple : apple || deepseek;
+
+  // Что доступно — для выбора модели (в том числе, когда вопрос дождётся сети при закрытом окне).
+  useEffect(() => {
+    store.setAvailability({ online, deepseek, apple, state });
+  }, [store, online, deepseek, apple, state]);
+  // Открыто ли окно: ответ в открытый чат приходит без уведомления; после долгого перерыва — новый чат.
+  useEffect(() => {
+    store.setVisible(true);
+    return () => store.setVisible(false);
+  }, [store]);
 
   // Прокрутка к последнему сообщению: при открытии сразу, дальше — плавно.
   useEffect(() => {
+    if (view !== "chat") return;
     const smooth = scrolledOnce.current && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     scrolledOnce.current = true;
     endRef.current?.scrollIntoView({ block: "end", behavior: smooth ? "smooth" : "auto" });
-  }, [chat.messages.length, pending]);
+  }, [messages.length, pendingHere, view, thread?.id]);
 
   const send = (text: string) => {
-    if (pending || !canAsk || !text.trim()) return;
-    session.send(text, today, state, chat.mode);
+    if (busy || !canAsk || !text.trim()) return;
+    store.setAvailability({ online, deepseek, apple, state });
+    store.send(text);
     setInput("");
   };
 
   const apply = (message: AssistantMessage, picked: AiProposal) => {
-    if (!message.proposal || message.status !== "pending") return;
+    if (!thread || !message.proposal || message.status !== "pending") return;
     const total = proposalSize(message.proposal);
     const chosen = proposalSize(picked);
     if (dispatch(proposalToActions(picked, state, today, newId))) {
-      session.setStatus(message.id, "applied");
+      store.setStatus(thread.id, message.id, "applied");
       toast(chosen < total ? `Применено ${chosen} из ${total}` : "Изменения применены");
     }
   };
 
-  const clear = async () => {
-    const ok = await confirm({
-      title: "Очистить чат?",
-      message: "Переписка удалится. Данные бюджета не изменятся.",
-      confirmLabel: "Очистить",
-      danger: true,
-    });
-    if (ok) session.clear();
-  };
-
-  const lastId = chat.messages.at(-1)?.id;
+  const lastId = messages.at(-1)?.id;
+  const historyCount = chats.threads.length;
 
   return (
     <Sheet
       open
       onClose={close}
-      title="AI-помощник"
+      title={view === "history" ? "История чатов" : thread ? thread.title : "AI-помощник"}
       size="full"
+      actions={
+        view === "history" ? (
+          <IconButton icon="chevronLeft" label="К чату" variant="secondary" size={40} onClick={() => setView("chat")} />
+        ) : (
+          <>
+            {historyCount > 0 && (
+              <IconButton icon="clock" label="История чатов" variant="secondary" size={40} onClick={() => setView("history")} />
+            )}
+            {thread && (
+              <IconButton icon="compose" label="Новый чат" variant="secondary" size={40} disabled={busy} onClick={() => store.newChat()} />
+            )}
+          </>
+        )
+      }
       footer={
-        <Composer
-          value={input}
-          onChange={setInput}
-          onSend={() => send(input)}
-          pending={pending}
-          offline={!canAsk}
-          mode={chat.mode}
-          onModeChange={(mode) => session.setMode(mode)}
-          appleModel={appleModel}
-          deepseek={deepseek}
-        />
+        view === "chat" ? (
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSend={() => send(input)}
+            pending={busy}
+            offline={!canAsk}
+            hint={
+              !online && apple
+                ? "Без интернета отвечает модель на iPhone; изменения отправятся, когда связь вернётся"
+                : !online
+                  ? "Без интернета вопрос отправится, когда связь вернётся"
+                  : null
+            }
+          />
+        ) : undefined
       }
     >
-      <div className="flex min-h-full flex-col gap-4">
-        {!canAsk && !(chat.mode === "apple" && appleLoading) ? (
-          <Notice tone="warning">
-            <span role="status">{OFFLINE_TEXT}</span>
-          </Notice>
-        ) : chat.mode === "apple" ? (
-          <Notice>
-            {appleModel === "device"
-              ? "Отвечает Apple Intelligence прямо на iPhone: данные не покидают телефон, интернет не нужен."
-              : "Отвечает Apple Intelligence в Private Cloud Compute: данные не сохраняются и недоступны Apple."}
-          </Notice>
-        ) : sessionExpired ? (
-          <Notice
-            tone="negative"
-            action={
-              <Button size="sm" onClick={() => open({ kind: "auth", mode: "login" })}>
-                Войти
-              </Button>
-            }
-          >
-            Сессия истекла — войдите снова, чтобы помощник мог ответить.
-          </Notice>
-        ) : (
-          sync.pending > 0 && (
-            <Notice tone="warning">Часть изменений ещё не отправлена на сервер — помощник их пока не видит.</Notice>
-          )
-        )}
+      {view === "history" ? (
+        <HistoryView
+          store={store}
+          threads={chats.threads}
+          currentId={chats.currentId}
+          pendingId={chats.pending?.threadId ?? null}
+          today={today}
+          onOpen={(id) => {
+            store.open(id);
+            setView("chat");
+          }}
+          onNew={() => {
+            store.newChat();
+            setView("chat");
+          }}
+        />
+      ) : (
+        <div className="flex min-h-full flex-col gap-4">
+          {!canAsk ? (
+            <Notice tone="warning">
+              <span role="status">{OFFLINE_TEXT}</span>
+            </Notice>
+          ) : sessionExpired ? (
+            <Notice
+              tone="negative"
+              action={
+                <Button size="sm" onClick={() => open({ kind: "auth", mode: "login" })}>
+                  Войти
+                </Button>
+              }
+            >
+              Сессия истекла — войдите снова, чтобы помощник мог ответить.
+            </Notice>
+          ) : (
+            online &&
+            sync.pending > 0 && (
+              <Notice tone="warning">Часть изменений ещё не отправлена на сервер — помощник их пока не видит.</Notice>
+            )
+          )}
 
-        {chat.messages.length > 0 && (
-          <div className="flex justify-end">
-            <Button variant="ghost" icon="trash" disabled={pending} onClick={() => void clear()}>
-              Очистить чат
-            </Button>
-          </div>
-        )}
+          {busy && !pendingHere && (
+            <Notice>Помощник ещё отвечает в другом чате — новый вопрос можно задать, когда он закончит.</Notice>
+          )}
 
-        {chat.messages.length === 0 && !pending ? (
-          <Intro onPick={send} disabled={!canAsk} />
-        ) : (
-          <ol aria-live="polite" aria-relevant="additions" aria-label="Переписка с помощником" className="flex flex-col gap-3">
-            {chat.messages.map((m) => (
-              <li key={m.id} className="flex flex-col">
-                {m.role === "user" && <UserBubble message={m} />}
-                {m.role === "assistant" && (
-                  <AssistantBubble
-                    fresh={!initialIds.has(m.id)}
-                    message={m}
-                    today={today}
-                    onApply={(picked) => apply(m, picked)}
-                    onDismiss={() => session.setStatus(m.id, "dismissed")}
-                  />
-                )}
-                {m.role === "error" && (
-                  <ErrorBubble
-                    message={m}
-                    onRetry={m.id === lastId && canAsk && session.canRetry() ? () => session.retry(today, state, chat.mode) : undefined}
-                  />
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
+          {messages.length === 0 && !pendingHere ? (
+            <Intro onPick={send} disabled={!canAsk || busy} />
+          ) : (
+            <ol aria-live="polite" aria-relevant="additions" aria-label="Переписка с помощником" className="flex flex-col gap-3">
+              {messages.map((m) => (
+                <li key={m.id} className="flex flex-col">
+                  {m.role === "user" && <UserBubble message={m} />}
+                  {m.role === "assistant" && (
+                    <AssistantBubble
+                      fresh={!initialIds.has(m.id)}
+                      message={m}
+                      today={today}
+                      onApply={(picked) => apply(m, picked)}
+                      onDismiss={() => thread && store.setStatus(thread.id, m.id, "dismissed")}
+                    />
+                  )}
+                  {m.role === "error" && (
+                    <ErrorBubble
+                      message={m}
+                      onRetry={thread && m.id === lastId && canAsk && store.canRetry(thread.id) ? () => store.retry(thread.id) : undefined}
+                    />
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
 
-        {chat.pendingSince !== null && <TypingIndicator key={chat.pendingSince} since={chat.pendingSince} />}
-        <div ref={endRef} />
-        <SiriFloat active={pending} />
-      </div>
+          {waitingHere && (
+            <p role="status" className="self-start rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+              Отправится, когда появится интернет
+            </p>
+          )}
+          {pendingHere && chats.pending && <TypingIndicator key={chats.pending.since} since={chats.pending.since} />}
+          <div ref={endRef} />
+          <SiriFloat active={pendingHere} />
+        </div>
+      )}
     </Sheet>
+  );
+}
+
+// ---------- история ----------
+
+function dayGroup(at: number, today: IsoDate): string {
+  const day = todayLocal(new Date(at));
+  if (day === today) return "Сегодня";
+  if (diffDays(day, today) === 1) return "Вчера";
+  return formatDay(day, today);
+}
+
+function lastAnswer(thread: ChatThread): string {
+  for (let i = thread.messages.length - 1; i >= 0; i--) {
+    const m = thread.messages[i];
+    if (m.role === "assistant") return m.content.replace(/\s+/g, " ");
+  }
+  return "";
+}
+
+function HistoryView({
+  store,
+  threads,
+  currentId,
+  pendingId,
+  today,
+  onOpen,
+  onNew,
+}: {
+  store: ChatStore;
+  threads: ChatThread[];
+  currentId: string | null;
+  pendingId: string | null;
+  today: IsoDate;
+  onOpen: (id: string) => void;
+  onNew: () => void;
+}) {
+  const confirm = useConfirm();
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLocaleLowerCase("ru");
+  const shown = needle
+    ? threads.filter((t) => t.messages.some((m) => m.content.toLocaleLowerCase("ru").includes(needle)))
+    : threads;
+  const groups: { label: string; items: ChatThread[] }[] = [];
+  for (const thread of shown) {
+    const label = dayGroup(thread.updatedAt, today);
+    const group = groups.at(-1);
+    if (group?.label === label) group.items.push(thread);
+    else groups.push({ label, items: [thread] });
+  }
+
+  const remove = async (thread: ChatThread) => {
+    const ok = await confirm({
+      title: `Удалить чат «${thread.title}»?`,
+      message: "Переписка удалится. Данные бюджета не изменятся.",
+      confirmLabel: "Удалить",
+      danger: true,
+    });
+    if (ok) store.remove(thread.id);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Button className="w-full" icon="plus" onClick={onNew} disabled={pendingId !== null}>
+        Новый чат
+      </Button>
+      {threads.length > 5 && (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Поиск по чатам"
+          aria-label="Поиск по чатам"
+          className={`${controlClass} h-11`}
+        />
+      )}
+      {groups.length === 0 && <p className="px-1 text-sm text-muted">Ничего не нашлось.</p>}
+      {groups.map((group) => (
+        <section key={group.label} aria-label={group.label} className="space-y-2">
+          <h3 className="px-1 text-sm font-medium text-muted">{group.label}</h3>
+          <ul className="space-y-2">
+            {group.items.map((thread) => {
+              const questions = thread.messages.filter((m) => m.role === "user").length;
+              const answer = lastAnswer(thread);
+              return (
+                <li key={thread.id} className="flex items-stretch gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(thread.id)}
+                    aria-current={thread.id === currentId || undefined}
+                    className={`min-w-0 flex-1 rounded-2xl px-4 py-3 text-left transition ${
+                      thread.id === currentId ? "bg-accent-soft" : "bg-surface-2 hover:bg-surface-3"
+                    }`}
+                  >
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">{thread.title}</span>
+                      <span className="shrink-0 text-xs text-muted tabular-nums">
+                        {new Date(thread.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-sm text-muted">
+                      {thread.id === pendingId ? "Помощник отвечает…" : answer || "Без ответа"}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted">
+                      {questions} {plural(questions, ["вопрос", "вопроса", "вопросов"])}
+                    </span>
+                  </button>
+                  <IconButton
+                    icon="trash"
+                    label={`Удалить чат «${thread.title}»`}
+                    variant="ghost"
+                    size={44}
+                    disabled={thread.id === pendingId}
+                    onClick={() => void remove(thread)}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+      <p className="px-1 text-xs text-muted">
+        Чаты хранятся на этом устройстве. Новый чат начинается сам, если не открывать помощника больше шести часов.
+      </p>
+    </div>
   );
 }
 
@@ -684,6 +548,7 @@ function AssistantBubble({
         <span className="sr-only">Помощник: </span>
         {fresh ? <RevealText text={message.content} /> : message.content}
       </div>
+      {message.engine && <p className="-mt-1 px-1 text-xs text-muted">{ENGINE_LABEL[message.engine]}</p>}
       {message.reasoning && (
         <details className="group px-1 text-sm">
           <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1 text-muted hover:text-text [&::-webkit-details-marker]:hidden">
@@ -1037,46 +902,24 @@ function ProposalCard({
 
 // ---------- поле ввода ----------
 
-const MODE_HINTS: Record<ChatMode | "appleCloud", string> = {
-  apple: "Apple Intelligence на телефоне, без интернета",
-  appleCloud: "Apple Intelligence, Private Cloud Compute",
-  fast: "DeepSeek, ответ за несколько секунд",
-  reasoning: "DeepSeek, дольше — до 2–3 минут",
-};
-
 function Composer({
   value,
   onChange,
   onSend,
   pending,
   offline,
-  mode,
-  onModeChange,
-  appleModel,
-  deepseek,
+  hint,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
   pending: boolean;
   offline: boolean;
-  mode: ChatMode;
-  onModeChange: (mode: ChatMode) => void;
-  appleModel: AppleModel | null;
-  deepseek: boolean;
+  /** Подсказка под полем: кто ответит без интернета. */
+  hint: string | null;
 }) {
   const id = useId();
   const ref = useRef<HTMLTextAreaElement>(null);
-  const options: { value: ChatMode; label: string }[] = [
-    ...(appleModel ? [{ value: "apple" as const, label: appleModel === "device" ? "iPhone" : "Apple" }] : []),
-    ...(deepseek
-      ? [
-          { value: "fast" as const, label: "Быстро" },
-          { value: "reasoning" as const, label: "Подробно" },
-        ]
-      : []),
-  ];
-
   // Поле растёт вместе с текстом (до ~6 строк).
   useLayoutEffect(() => {
     const el = ref.current;
@@ -1125,14 +968,7 @@ function Composer({
           disabled={pending || offline || !value.trim()}
         />
       </div>
-      {options.length > 1 && (
-        <div className="flex items-center gap-3">
-          <div className={`${options.length > 2 ? "w-64" : "w-48"} shrink-0`}>
-            <Segmented label="Режим ответа" value={mode} onChange={onModeChange} options={options} />
-          </div>
-          <p className="min-w-0 text-xs text-muted">{MODE_HINTS[mode === "apple" && appleModel === "cloud" ? "appleCloud" : mode]}</p>
-        </div>
-      )}
+      {hint && <p className="text-xs text-muted">{hint}</p>}
     </form>
   );
 }

@@ -158,7 +158,7 @@ export const api = {
       timeoutMs: 60_000,
       account,
     }),
-  aiChat: async (messages: AiChatMessage[], mode: "fast" | "reasoning", today: IsoDate): Promise<AiChatResponse> =>
+  aiChat: async (messages: AiChatMessage[], mode: "auto" | "fast" | "reasoning", today: IsoDate): Promise<AiChatResponse> =>
     (await request("/api/ai/chat", aiChatSchema, {
       method: "POST",
       body: { messages, mode, today },
