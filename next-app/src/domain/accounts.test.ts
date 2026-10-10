@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { accountBalance, accountsOf, creditStatus, findAccount } from "./accounts";
 import { applyActions, type Action } from "./actions";
-import { balanceAt, loanRemaining, monthMetrics, safeToSpend, savingsTotal, upcomingEvents } from "./metrics";
+import { balanceAt, goalSaved, loanRemaining, monthMetrics, safeToSpend, savingsTotal, upcomingEvents } from "./metrics";
 import type { Account, State } from "./schema";
 import { addTx, run, stateWith, template } from "./test-utils";
 
@@ -288,5 +288,36 @@ describe("куда копятся сбережения", () => {
     expect(() =>
       applyActions(s, [{ type: "settings.update", settings: { ...s.settings, rolloverAccountId: "main" } }]),
     ).toThrow(/накопительном/);
+  });
+});
+
+describe("цель со своим счётом", () => {
+  const carAccount: Account = { id: "car-acc", name: "На машину", kind: "savings", spending: false };
+  const goal = { id: "car", name: "Машина", targetAmount: 100_000_000, initialAmount: 0, dueDate: null, note: "", createdAt: "2026-01-01" };
+
+  it("пополнили счёт — пополнилась цель (в обе стороны); счёт двух целей — по отметкам цели", () => {
+    let s = run(
+      base(),
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 5_000_000 },
+      { type: "account.add", account: carAccount },
+      { type: "goal.add", goal: { ...goal, accountId: "car-acc" } },
+      // Пополнение счёта без отметки цели (например, из СМС).
+      { type: "savings.move", id: "m1", date: "2026-10-02", amount: 300_000, note: "", toAccountId: "car-acc" },
+      // Пополнение через цель — уходит на её счёт.
+      { type: "savings.move", id: "m2", date: "2026-10-03", amount: 200_000, note: "", goalId: "car" },
+    );
+    expect(accountBalance(s, "car-acc")).toBe(500_000);
+    expect(goalSaved(s, s.goals[0])).toBe(500_000);
+    s = run(s, { type: "savings.move", id: "m3", date: "2026-10-04", amount: -100_000, note: "", toAccountId: "car-acc" });
+    expect(goalSaved(s, s.goals[0])).toBe(400_000);
+    expect(() =>
+      applyActions(s, [{ type: "savings.move", id: "m4", date: "2026-10-05", amount: -500_000, note: "", goalId: "car" }]),
+    ).toThrow(/Нельзя снять больше/);
+
+    const shared = run(s, { type: "goal.add", goal: { ...goal, id: "trip", name: "Отпуск", accountId: "car-acc" } });
+    // Счёт у двух целей: у «Машины» — только пополнение с её отметкой.
+    expect(goalSaved(shared, shared.goals[0])).toBe(200_000);
+    const detached = run(s, { type: "goal.update", id: "car", patch: { accountId: null } });
+    expect(detached.goals[0].accountId).toBeUndefined();
   });
 });

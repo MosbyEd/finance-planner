@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { diffDays, formatDay, type IsoDate } from "@/domain/dates";
 import { creditDebts, type CreditStatus } from "@/domain/accounts";
-import { goalSaved, loanRemaining, savingsTotal } from "@/domain/metrics";
+import { goalSaved, goalsReserved, loanRemaining, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Goal, Loan, LoanKind } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
@@ -80,8 +80,8 @@ function GoalsView() {
         ),
       );
     const total = savingsTotal(state, today);
-    // Деньги, отложенные на цели внутри приложения (без накопленного до него).
-    const inGoals = items.reduce((sum, { goal, pace }) => sum + goalWithdrawable(goal, pace.saved), 0);
+    // Деньги, отложенные на цели внутри приложения (без накопленного до него), и счета целей.
+    const inGoals = goalsReserved(state);
     const hasInitial = state.goals.some((g) => g.initialAmount > 0);
     return { items, total, inGoals, free: total - inGoals, hasInitial };
   }, [state, today]);
@@ -152,7 +152,8 @@ function GoalCard({ goal, pace }: { goal: Goal; pace: GoalPace }) {
   const today = useToday();
   const reached = pace.status === "reached";
   const advice = goalAdvice(pace);
-  const withdrawable = goalWithdrawable(goal, pace.saved);
+  const { state } = useSnapshot();
+  const withdrawable = goalWithdrawable(state, goal);
 
   return (
     <Card>

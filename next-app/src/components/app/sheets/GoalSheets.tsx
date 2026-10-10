@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { diffDays, formatDay, isValidIsoDate, parseIsoDate, type IsoDate } from "@/domain/dates";
-import { goalSaved } from "@/domain/metrics";
+import { activeAccounts } from "@/domain/accounts";
+import { dedicatedGoalAccount, goalAvailable, goalSaved } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
-import { LIMITS, type Goal } from "@/domain/schema";
+import { LIMITS, type Goal, type State } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { AmountInput } from "../../ui/AmountInput";
@@ -74,11 +75,11 @@ export function goalDueText(dueDate: IsoDate | null, today: IsoDate): string {
 }
 
 /**
- * Сколько можно снять с цели: только то, что откладывали в приложении.
- * Накопленное до приложения не лежит в сбережениях, поэтому его не снять.
+ * Сколько можно снять с цели: только то, что откладывали в приложении (накопленное до приложения
+ * не лежит в сбережениях, поэтому его не снять), а у цели со своим счётом — остаток счёта.
  */
-export function goalWithdrawable(goal: Goal, saved: Kopecks): Kopecks {
-  return Math.max(0, saved - goal.initialAmount);
+export function goalWithdrawable(state: State, goal: Goal): Kopecks {
+  return Math.max(0, goalAvailable(state, goal));
 }
 
 /** Подсказка, сколько ещё откладывать; null — цель достигнута. */
@@ -119,12 +120,16 @@ export function GoalSheet({ goalId }: { goalId?: string }) {
     initial: existing && existing.initialAmount > 0 ? existing.initialAmount : null,
     dueDate: existing?.dueDate ?? "",
     note: existing?.note ?? "",
+    accountId: existing?.accountId ?? null,
   }));
   const [name, setName] = useState(start.name);
   const [target, setTarget] = useState<Kopecks | null>(start.target);
   const [initial, setInitial] = useState<Kopecks | null>(start.initial);
   const [dueDate, setDueDate] = useState<string>(start.dueDate);
   const [note, setNote] = useState(start.note);
+  // Счёт цели: пополнения этого счёта — пополнения цели (и наоборот).
+  const [accountId, setAccountId] = useState<string | null>(start.accountId);
+  const savingsAccounts = activeAccounts(state).filter((a) => a.kind === "savings");
   const [errors, setErrors] = useState<GoalErrors>({});
 
   // Цель удалили (например, на другом устройстве) — окно закрывается, а не превращается в форму создания.
@@ -135,9 +140,16 @@ export function GoalSheet({ goalId }: { goalId?: string }) {
     target !== start.target ||
     initial !== start.initial ||
     dueDate !== start.dueDate ||
-    note !== start.note;
+    note !== start.note ||
+    accountId !== start.accountId;
   const clearError = (key: keyof GoalErrors) => setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
-  const saved = existing ? goalSaved(state, { ...existing, initialAmount: initial ?? 0 }) : (initial ?? 0);
+  const draftGoal = existing
+    ? { ...existing, initialAmount: initial ?? 0, ...(accountId ? { accountId } : { accountId: undefined }) }
+    : null;
+  const saved = draftGoal ? goalSaved(state, draftGoal) : (initial ?? 0);
+  // Со своим счётом накоплено — остаток счёта: отдельная сумма «до приложения» не нужна.
+  const sharedAccount = accountId !== null && state.goals.some((g) => g.id !== existing?.id && g.accountId === accountId);
+  const followsAccount = accountId !== null && !sharedAccount;
   const pace = target ? goalPace(target, saved, isValidIsoDate(dueDate) ? dueDate : null, today) : null;
 
   const save = () => {
@@ -151,14 +163,14 @@ export function GoalSheet({ goalId }: { goalId?: string }) {
     const fields = {
       name: name.trim(),
       targetAmount: target,
-      initialAmount: initial ?? 0,
+      initialAmount: followsAccount ? 0 : (initial ?? 0),
       dueDate: dueDate || null,
       note: note.trim(),
     };
     if (!existing && goalId) return;
     const ok = existing
-      ? dispatch({ type: "goal.update", id: existing.id, patch: fields })
-      : dispatch({ type: "goal.add", goal: { id: newId(), ...fields, createdAt: today } });
+      ? dispatch({ type: "goal.update", id: existing.id, patch: { ...fields, accountId } })
+      : dispatch({ type: "goal.add", goal: { id: newId(), ...fields, createdAt: today, ...(accountId ? { accountId } : {}) } });
     if (ok) close();
   };
 
@@ -222,13 +234,45 @@ export function GoalSheet({ goalId }: { goalId?: string }) {
             clearError("target");
           }}
         />
-        <AmountInput
-          label="Уже накоплено до приложения"
-          placeholder="Необязательно"
-          value={initial}
-          onChange={setInitial}
-          hint="Если копили на эту цель раньше. Сумма засчитается в прогресс цели, но не в остаток на счёте и не в сбережения — поэтому снять её через приложение нельзя."
-        />
+        {savingsAccounts.length > 0 && (
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-sm font-medium text-muted">Счёт цели</legend>
+            <div className="flex flex-wrap gap-2">
+              {[null, ...savingsAccounts.map((a) => a.id)].map((id) => {
+                const selected = accountId === id;
+                return (
+                  <button
+                    key={id ?? "none"}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setAccountId(id)}
+                    className={`h-10 rounded-full border px-3.5 text-sm transition ${
+                      selected ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
+                    }`}
+                  >
+                    {id ? (savingsAccounts.find((a) => a.id === id)?.name ?? "Счёт") : "Без счёта"}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-sm text-muted">
+              {accountId === null
+                ? "Пополнения цели идут в «Сбережения»."
+                : followsAccount
+                  ? "Накоплено на цель — остаток этого счёта: пополнили счёт (переводом, из СМС) — пополнилась цель."
+                  : "Счёт есть и у другой цели — накопленное делится по пополнениям с отметкой цели."}
+            </p>
+          </fieldset>
+        )}
+        {!followsAccount && (
+          <AmountInput
+            label="Уже накоплено до приложения"
+            placeholder="Необязательно"
+            value={initial}
+            onChange={setInitial}
+            hint="Если копили на эту цель раньше. Сумма засчитается в прогресс цели, но не в остаток на счёте и не в сбережения — поэтому снять её через приложение нельзя."
+          />
+        )}
         <div className="space-y-2">
           <DateInput
             label="Срок"
@@ -298,8 +342,9 @@ export function GoalMoneySheet({ goalId, direction }: { goalId: string; directio
   const saved = goalSaved(state, goal);
   const shown = Math.max(0, saved);
   // Снять можно только отложенное в приложении: накопленное до него не лежит в сбережениях.
-  const available = goalWithdrawable(goal, saved);
-  const notCounted = goal.initialAmount > 0 ? " — накопленное до приложения здесь не учитывается" : "";
+  const available = goalWithdrawable(state, goal);
+  const notCounted =
+    goal.initialAmount > 0 && !dedicatedGoalAccount(state, goal) ? " — накопленное до приложения здесь не учитывается" : "";
   const remaining = Math.max(0, goal.targetAmount - saved);
   const reached = remaining === 0;
   const percent = Math.floor((shown * 100) / goal.targetAmount);

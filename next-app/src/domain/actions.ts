@@ -21,7 +21,8 @@ import {
 import { formatMoney, type Kopecks } from "./money";
 import {
   balanceAt,
-  goalSaved,
+  dedicatedGoalAccount,
+  goalAvailable,
   goalsReserved,
   loanOpening,
   loanOpeningSign,
@@ -219,7 +220,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("goal.update"),
     id: idSchema,
-    patch: goalSchema.omit({ id: true, createdAt: true }).partial().strict(),
+    // accountId: null — открепить счёт.
+    patch: goalSchema.omit({ id: true, createdAt: true }).extend({ accountId: idSchema.nullable() }).partial().strict(),
   }),
   z.object({ type: z.literal("goal.delete"), id: idSchema }),
   z.object({
@@ -882,10 +884,17 @@ export function applyAction(state: State, action: Action): State {
       if (target.kind !== "savings") throw new DomainError("Откладывать можно только на накопительный счёт.");
       if (action.amount < 0) {
         const total = savingsTotal(state);
-        if (goal) {
+        // Счёт, закреплённый за целью: всё, что на нём, — деньги цели, и снимать их можно и без отметки цели.
+        const ownGoal = goal ?? state.goals.find((g) => dedicatedGoalAccount(state, g) === toId);
+        if (ownGoal && dedicatedGoalAccount(state, ownGoal) === toId) {
+          const available = goalAvailable(state, ownGoal);
+          if (available + action.amount < 0) {
+            throw new DomainError(`Нельзя снять больше, чем накоплено (${formatMoney(Math.max(0, available))}).`);
+          }
+        } else if (goal) {
           // С цели можно снять только то, что откладывали в приложении (накопленное до него не на счёте),
           // и не больше, чем всего в сбережениях.
-          const available = Math.min(goalSaved(state, goal) - goal.initialAmount, total);
+          const available = Math.min(goalAvailable(state, goal), total);
           if (available + action.amount < 0) {
             throw new DomainError(`Нельзя снять больше, чем накоплено (${formatMoney(Math.max(0, available))}).`);
           }
@@ -1051,8 +1060,18 @@ export function applyAction(state: State, action: Action): State {
 
     case "goal.update": {
       if (!state.goals.some((g) => g.id === action.id)) throw new DomainError("Цель не найдена.");
-      if (action.patch.accountId) assertSavingsAccount(state, action.patch.accountId);
-      return { ...state, goals: state.goals.map((g) => (g.id === action.id ? { ...g, ...action.patch } : g)) };
+      const { accountId, ...fields } = action.patch;
+      if (accountId) assertSavingsAccount(state, accountId);
+      return {
+        ...state,
+        goals: state.goals.map((g) => {
+          if (g.id !== action.id) return g;
+          const updated = { ...g, ...fields };
+          if (accountId === null) delete updated.accountId;
+          else if (accountId !== undefined) updated.accountId = accountId;
+          return updated;
+        }),
+      };
     }
 
     case "goal.delete": {

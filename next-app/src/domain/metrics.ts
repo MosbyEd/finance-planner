@@ -57,10 +57,27 @@ export function savingsTotal(state: State, date?: IsoDate): Kopecks {
   return sum;
 }
 
+/**
+ * Счёт цели, если он только её: тогда цель и счёт связаны в обе стороны — накоплено столько, сколько лежит
+ * на счёте (пополнили счёт любым способом — пополнилась цель). Счёт нескольких целей — null: деньги делятся
+ * по пополнениям с отметкой цели.
+ */
+export function dedicatedGoalAccount(state: State, goal: Goal): string | null {
+  if (!goal.accountId) return null;
+  return state.goals.some((g) => g.id !== goal.id && g.accountId === goal.accountId) ? null : goal.accountId;
+}
+
 export function goalSaved(state: State, goal: Goal): Kopecks {
+  const account = dedicatedGoalAccount(state, goal);
+  if (account) return Math.max(0, accountBalances(state).get(account) ?? 0);
   let sum = goal.initialAmount;
   for (const tx of state.transactions) if (tx.type === "saving" && tx.goalId === goal.id) sum += tx.amount;
   return sum;
+}
+
+/** Сколько можно снять с цели: остаток её счёта или отложенное на неё в приложении (без накопленного до него). */
+export function goalAvailable(state: State, goal: Goal): Kopecks {
+  return dedicatedGoalAccount(state, goal) ? goalSaved(state, goal) : goalSaved(state, goal) - goal.initialAmount;
 }
 
 /**
@@ -69,13 +86,20 @@ export function goalSaved(state: State, goal: Goal): Kopecks {
  */
 export function goalsReserved(state: State): Kopecks {
   const perGoal = new Map<string, Kopecks>();
-  for (const goal of state.goals) perGoal.set(goal.id, 0);
+  const inSavings = savingsAccountIds(state);
+  let dedicated = 0;
+  for (const goal of state.goals) {
+    // Цель со своим счётом: на ней всё, что лежит на счёте (из сбережений — если счёт в них учитывается).
+    const account = dedicatedGoalAccount(state, goal);
+    if (account) dedicated += inSavings.has(account) ? goalSaved(state, goal) : 0;
+    else perGoal.set(goal.id, 0);
+  }
   for (const tx of state.transactions) {
     if (tx.type !== "saving" || tx.goalId === undefined) continue;
     const sum = perGoal.get(tx.goalId);
     if (sum !== undefined) perGoal.set(tx.goalId, sum + tx.amount);
   }
-  let reserved = 0;
+  let reserved = dedicated;
   for (const sum of perGoal.values()) reserved += Math.max(0, sum);
   return reserved;
 }
