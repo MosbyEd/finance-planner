@@ -142,6 +142,12 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
         let tab = defaults.string(forKey: "BudgetDebugTab")
         let overlay = defaults.string(forKey: "BudgetDebugOverlay")
         let addSheet = defaults.bool(forKey: "BudgetDebugAdd")
+        if let sms = defaults.string(forKey: "BudgetDebugSmsDryRun") {
+            Task.detached {
+                let result = await LocalSms.shared.dryRun(text: sms)
+                NSLog("DBG-SMS %@", result)
+            }
+        }
         guard tab != nil || overlay != nil || addSheet else { return }
         Task { @MainActor in
             // Ждём, пока интерфейс загрузится и пришлёт модель Главной.

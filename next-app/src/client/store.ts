@@ -624,6 +624,37 @@ export class FinanceStore {
     return { ok: true, opIds: ops.map((op) => op.opId) };
   }
 
+  /**
+   * Изменения, сделанные без интерфейса (СМС, разобранная на телефоне), с их номерами: применяются у себя
+   * и встают в очередь отправки. Группа (одна СМС) — целиком или никак: если она уже есть в данных (пришла
+   * с сервера), пропускается — сервер её тоже не применит дважды. Возвращает, сколько групп применено.
+   */
+  ingest(groups: Op[][]): number {
+    if (this.snapshot.mode !== "account") return 0;
+    const known = new Set([...this.pending, ...(this.inflight ?? [])].map((op) => op.opId));
+    let state = this.snapshot.state;
+    const accepted: Op[] = [];
+    let applied = 0;
+    for (const group of groups) {
+      if (group.some((op) => known.has(op.opId) || this.dropped.has(op.opId))) continue;
+      try {
+        const ops = group.map((op) => ({ opId: op.opId, action: actionSchema.parse(op.action) }));
+        state = ops.reduce((current, op) => applyAction(current, op.action), state);
+        accepted.push(...ops);
+        applied += 1;
+      } catch {
+        // Уже учтена или не применима к текущим данным — пропускаем.
+      }
+    }
+    if (!accepted.length) return 0;
+    this.pending.push(...accepted);
+    this.set({ state });
+    this.writeAccountCache();
+    this.updatePendingCount();
+    queueMicrotask(() => void this.flush());
+    return applied;
+  }
+
   private recompute(): void {
     // Отправленную пачку не трогаем — её судьбу решит ответ сервера.
     const withInflight = rebase(this.base.state, this.inflight ?? []).state;

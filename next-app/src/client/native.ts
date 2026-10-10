@@ -59,6 +59,9 @@ interface BudgetNativePlugin {
   addListener(event: "tabBarAction", listener: () => void): Promise<PluginListenerHandle>;
   openShortcuts(): Promise<void>;
   addSmsShortcut(): Promise<void>;
+  stateMirror(options: { account: string; stateJson: string }): Promise<void>;
+  smsInbox(options: { account: string }): Promise<{ items: { id: string; ops: { opId: string; action: unknown }[] }[] }>;
+  ackSmsInbox(options: { ids: string[] }): Promise<void>;
   openShortcutsApp(): Promise<void>;
   siriOrb(options: { active: boolean }): Promise<void>;
   setSession(options: { apiBase: string; token: string | null; account: string | null }): Promise<void>;
@@ -205,4 +208,25 @@ export async function nativeOpenShortcutsApp(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Копия данных для разбора СМС на телефоне (команда работает без сети и без открытого интерфейса). */
+export function nativeStateMirror(account: string, stateJson: string): void {
+  if (!isNativeApp()) return;
+  plugin.stateMirror({ account, stateJson }).catch(() => {});
+}
+
+/** Операции из СМС, разобранные на телефоне и ещё не принятые интерфейсом. */
+export async function nativeSmsInbox(account: string): Promise<{ id: string; ops: { opId: string; action: unknown }[] }[]> {
+  if (!isNativeApp()) return [];
+  try {
+    return (await plugin.smsInbox({ account })).items;
+  } catch {
+    return [];
+  }
+}
+
+export function nativeAckSmsInbox(ids: string[]): void {
+  if (!ids.length) return;
+  plugin.ackSmsInbox({ ids }).catch(() => {});
 }

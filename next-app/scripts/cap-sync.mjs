@@ -42,6 +42,8 @@ if (!/^https?:\/\/[^/]+$/.test(apiBase)) {
 console.log(`Приложение будет обращаться к серверу ${apiBase}`);
 
 execSync("npx vite build --config vite.config.mts", { stdio: "inherit" });
+// Разбор СМС на телефоне (JavaScriptCore) — отдельный файл рядом с интерфейсом.
+execSync("npx vite build --config vite.engine.config.mts", { stdio: "inherit" });
 fs.writeFileSync(
   new URL("../dist-app/config.js", import.meta.url),
   `window.__BUDGET_CONFIG__ = ${JSON.stringify({ native: true, apiBase })};\n`,

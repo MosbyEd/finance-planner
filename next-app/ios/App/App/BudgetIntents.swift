@@ -4,7 +4,8 @@ import Foundation
 // Команды приложения: появляются в «Командах» и в Siri и работают без открытия приложения.
 
 /// Операция из СМС банка: в автоматизации «Когда приходит сообщение от 900» достаточно этого действия —
-/// без адреса сервера и ключа. Без сети СМС ждёт в очереди и отправится позже.
+/// без адреса сервера и ключа. СМС разбирается на телефоне (тем же кодом, что на сервере) и работает без сети;
+/// если копии данных ещё нет — уходит на разбор сервером, без сети ждёт в очереди.
 struct AddSmsOperationIntent: AppIntent {
     static let title: LocalizedStringResource = "Добавить операцию из СМС"
     static let description = IntentDescription(
@@ -20,7 +21,9 @@ struct AddSmsOperationIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let message = await SmsQueue.shared.submit(text: text, receivedAt: Date())
+        let received = Date()
+        let local = await LocalSms.shared.submit(text: text, receivedAt: received)
+        let message = if let local { local } else { await SmsQueue.shared.submit(text: text, receivedAt: received) }
         return .result(value: message, dialog: IntentDialog(stringLiteral: message))
     }
 }

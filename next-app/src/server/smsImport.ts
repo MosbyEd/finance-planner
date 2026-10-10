@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { todayLocal } from "@/domain/dates";
-import { normalizeSms, parseSberSms, planSmsImport, smsDate, smsNote } from "@/domain/sms";
+import { prepareSmsImport } from "@/domain/smsImport";
 import type { User } from "./auth";
 import { getDb } from "./db";
 import { ActionError, applyUserOps, loadState } from "./stateStore";
@@ -101,31 +101,14 @@ export function receivedTime(receivedAt: unknown, now: Date): Date {
  * Бросает StoredStateError, если состояние повреждено.
  */
 export function importSms(userId: number, text: string, now = new Date(), received = now): SmsImportResult {
-  const sms = normalizeSms(text);
-  const op = parseSberSms(sms);
-  if (!op) return { status: "ignored", message: "Не похоже на операцию — пропущено." };
-
-  const today = todayLocal(now);
-  const date = smsDate(todayLocal(received), hhmm(received), op.time);
-  // Один и тот же текст в один день — та же операция: повторный запуск автоматизации её не задвоит.
-  const hash = createHash("sha256").update(`${date}|${sms}`).digest("hex");
-  const idBase = `sms-${hash.slice(0, 24)}`;
   const { state } = loadState(userId);
-  // Та же СМС уже добавлена отдельной операцией или уже подтвердила запланированный платёж.
-  const note = smsNote(sms);
-  if (state.transactions.some((t) => t.id === idBase || (t.note === note && t.date === date))) {
-    return { status: "duplicate", message: "Эта операция уже добавлена." };
-  }
-
-  const plan = planSmsImport(state, op, { idBase, date, sms });
-  // Операция уже учтена (или это не операция) — но остаток из СМС всё равно сверяем.
-  if (plan.skip && !plan.actions.length) return plan.skip;
-  const ops = plan.actions.map((action, i) => ({ opId: `sms-${hash.slice(0, 30)}-${i}`, action }));
+  const prepared = prepareSmsImport(state, text, { day: todayLocal(received), time: hhmm(received) });
+  if (!prepared.ops.length) return { status: prepared.status, message: prepared.message };
   try {
-    const result = applyUserOps(userId, ops, today, now.getTime());
-    if (plan.skip) return plan.skip;
+    const result = applyUserOps(userId, prepared.ops, todayLocal(now), now.getTime());
+    if (prepared.status !== "added") return { status: prepared.status, message: prepared.message };
     if (!result.changed) return { status: "duplicate", message: "Эта операция уже добавлена." };
-    return { status: "added", message: plan.summary };
+    return { status: "added", message: prepared.message };
   } catch (error) {
     if (error instanceof ActionError) return { status: "failed", message: `Не добавлено: ${error.message}` };
     throw error;

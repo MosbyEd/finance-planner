@@ -22,6 +22,9 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "homeModel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "toast", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "commandResult", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stateMirror", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "smsInbox", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "ackSmsInbox", returnType: CAPPluginReturnPromise),
     ]
 
     private var orb: SiriOrbView?
@@ -87,6 +90,44 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // MARK: - Разбор СМС на телефоне
+
+    /// Копия данных для команд: по ней СМС разбирается на телефоне, даже без сети и при закрытом приложении.
+    @objc func stateMirror(_ call: CAPPluginCall) {
+        guard let account = call.getString("account"), let stateJson = call.getString("stateJson") else {
+            call.reject("Нет аккаунта или данных")
+            return
+        }
+        Task {
+            await LocalSms.shared.saveMirror(account: account, stateJson: stateJson)
+            call.resolve()
+        }
+    }
+
+    /// Операции из СМС, разобранные на телефоне, — интерфейс применяет их у себя.
+    @objc func smsInbox(_ call: CAPPluginCall) {
+        guard let account = call.getString("account") else {
+            call.reject("Нет аккаунта")
+            return
+        }
+        Task {
+            let items = await LocalSms.shared.inbox(account: account)
+            call.resolve([
+                "items": items.map { item in
+                    ["id": item.id, "ops": item.ops.map { ["opId": $0.opId, "action": $0.action.foundation] }] as [String: Any]
+                },
+            ])
+        }
+    }
+
+    @objc func ackSmsInbox(_ call: CAPPluginCall) {
+        let ids = call.getArray("ids", String.self) ?? []
+        Task {
+            await LocalSms.shared.acknowledge(ids)
+            call.resolve()
+        }
+    }
+
     func emitCommand(requestId: String, command: JSONValue) {
         notifyListeners("command", data: ["requestId": requestId, "command": command.foundation])
     }
@@ -127,6 +168,7 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         if token == nil {
             BudgetStore.summary = nil
             DispatchQueue.main.async { HomeStore.shared.clear() }
+            Task { await LocalSms.shared.clearMirror() }
         }
         call.resolve()
         if token != nil { Task { await SmsQueue.shared.flush() } }

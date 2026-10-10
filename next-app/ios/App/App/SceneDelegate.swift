@@ -18,7 +18,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     /// Приложение снова на экране — отправляем СМС, которые ждали в очереди без сети.
     func sceneDidBecomeActive(_ scene: UIScene) {
-        Task { await SmsQueue.shared.flush() }
+        Task {
+            await LocalSms.shared.flush()
+            await SmsQueue.shared.flush()
+        }
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

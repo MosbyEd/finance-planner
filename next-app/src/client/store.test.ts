@@ -238,6 +238,26 @@ describe("аккаунт", () => {
     expect(store.getSnapshot().version).toBe(4);
   });
 
+  it("операции из СМС, разобранные на телефоне: применяет с их номерами, уже учтённые сервером пропускает", async () => {
+    const { store } = newStore();
+    await store.init();
+    // Первую СМС телефон уже отправил на сервер сам (тот же номер изменения).
+    const first: Op = { opId: "sms-aaa-0", action: income("sms-1") };
+    applyOps({ baseVersion: server.version, ops: [first] });
+    const second: Op = { opId: "sms-bbb-0", action: income("sms-2") };
+    server.online = false;
+    expect(store.ingest([[first], [second]])).toBe(2);
+    expect(ids(store).sort()).toEqual(["sms-1", "sms-2"]);
+    server.online = true;
+    await store.resume();
+    await settle();
+    // На сервере обе — по одному разу: первая не применилась повторно.
+    expect(serverIds().sort()).toEqual(["sms-1", "sms-2"]);
+    expect(store.getSnapshot().sync).toMatchObject({ status: "synced", pending: 0 });
+    // Повторный приём тех же операций — ничего не меняет.
+    expect(store.ingest([[first], [second]])).toBe(0);
+  });
+
   it("без сети копит изменения и отправляет их после восстановления связи", async () => {
     const { store } = newStore();
     await store.init();
