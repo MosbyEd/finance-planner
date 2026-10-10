@@ -1,0 +1,10 @@
+[Unit]
+Description=Ежедневный бэкап базы планировщика бюджета
+
+[Timer]
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

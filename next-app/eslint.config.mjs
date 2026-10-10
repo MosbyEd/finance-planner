@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Сборки: пакет для сервера, интерфейс iOS-приложения и его копия в Xcode-проекте.
+    ".next-deploy/**",
+    "dist-app/**",
+    "ios/**",
   ]),
 ]);
 

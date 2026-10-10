@@ -1,0 +1,31 @@
+[Unit]
+Description=Планировщик бюджета (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=budget-app
+Group=budget-app
+WorkingDirectory=/opt/budget/current
+EnvironmentFile=/etc/budget/env
+ExecStart=/usr/local/bin/node server.js
+Restart=always
+RestartSec=3
+MemoryMax=1200M
+
+# Служба пишет только в каталог базы.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/budget
+
+[Install]
+WantedBy=multi-user.target

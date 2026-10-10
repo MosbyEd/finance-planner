@@ -1,0 +1,14 @@
+[Unit]
+Description=Бэкап базы планировщика бюджета
+
+[Service]
+Type=oneshot
+User=budget-app
+UMask=0027
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Чтение базы в режиме WAL требует записи в её файл -shm.
+ReadWritePaths=/var/backups/budget /var/lib/budget
+# Снимок через SQLite .backup — согласованный, даже пока сервер пишет. Храним 30 дней.
+ExecStart=/bin/sh -c 'f=/var/backups/budget/finance-$(date +%%F).sqlite; sqlite3 /var/lib/budget/finance.sqlite ".backup $f" && gzip -f "$f" && find /var/backups/budget -name "finance-*.sqlite.gz" -mtime +30 -delete'

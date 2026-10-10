@@ -1,6 +1,7 @@
 // Собирает интерфейс iOS-приложения (Vite → dist-app), прописывает адрес сервера и синхронизирует проект.
-//   npm run ios:sync                                         — сервер этого компьютера в локальной сети
-//   CAP_API_BASE=https://budget.example.ru npm run ios:sync — сервер в интернете
+//   npm run ios:sync                                         — сервер из .env.deploy (DEPLOY_URL), если он задан,
+//                                                              иначе сервер этого компьютера в локальной сети
+//   CAP_API_BASE=https://budget.example.ru npm run ios:sync — явно указанный сервер
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,7 +24,17 @@ function bonjourName() {
   }
 }
 
-const apiBase = (process.env.CAP_API_BASE ?? `http://${bonjourName() ?? lanAddress()}:3001`).replace(/\/+$/, "");
+/** Адрес сервера в облаке из .env.deploy — тот же, куда выкладывает scripts/deploy.sh. */
+function deployUrl() {
+  try {
+    const text = fs.readFileSync(new URL("../.env.deploy", import.meta.url), "utf8");
+    return /^DEPLOY_URL=(.+)$/m.exec(text)?.[1].trim().replace(/^["']|["']$/g, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+const apiBase = (process.env.CAP_API_BASE ?? deployUrl() ?? `http://${bonjourName() ?? lanAddress()}:3001`).replace(/\/+$/, "");
 if (!/^https?:\/\/[^/]+$/.test(apiBase)) {
   console.error(`Некорректный адрес сервера: ${apiBase}`);
   process.exit(1);

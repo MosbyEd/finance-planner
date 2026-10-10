@@ -1,0 +1,6 @@
+{{DOMAIN}} {
+	encode zstd gzip
+	header -Server
+	# Caddy сам выставляет X-Forwarded-For с адресом клиента — сервер читает его при TRUST_PROXY=true.
+	reverse_proxy 127.0.0.1:3001
+}
