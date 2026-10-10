@@ -43,8 +43,19 @@ export function Segmented<T extends string>({
       aria-label={label}
       aria-disabled={disabled || undefined}
       onKeyDown={onKeyDown}
-      className={`flex rounded-xl bg-surface-2 p-1 ${disabled ? "opacity-70" : ""}`}
+      className={`relative isolate flex rounded-full bg-fill p-1 ${disabled ? "opacity-70" : ""}`}
     >
+      {/* «Линза» под выбранным вариантом: варианты одной ширины, поэтому она просто сдвигается на свою долю. */}
+      {selectedIndex >= 0 && (
+        <span
+          aria-hidden
+          className="glass-lens pointer-events-none absolute inset-y-1 left-1 -z-10 rounded-full transition-transform duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none"
+          style={{
+            width: `calc((100% - 0.5rem) / ${options.length})`,
+            transform: `translateX(${selectedIndex * 100}%)`,
+          }}
+        />
+      )}
       {options.map((o, i) => {
         const checked = value === o.value;
         const focusable = checked || (selectedIndex < 0 && i === 0);
@@ -59,8 +70,8 @@ export function Segmented<T extends string>({
             onClick={() => {
               if (!disabled) onChange(o.value);
             }}
-            className={`min-w-0 flex-1 rounded-lg px-2 font-medium leading-tight transition ${size === "sm" ? "min-h-10 py-1 text-sm" : "min-h-10 py-1.5 text-[15px]"} ${
-              checked ? "bg-surface text-text shadow-sm" : "text-muted enabled:hover:text-text"
+            className={`min-w-0 flex-1 rounded-full px-2 font-medium leading-tight transition-colors ${size === "sm" ? "min-h-10 py-1 text-sm" : "min-h-10 py-1.5 text-[15px]"} ${
+              checked ? "text-text" : "text-muted enabled:hover:text-text"
             }`}
           >
             {o.label}
@@ -115,7 +126,7 @@ export function Switch({
         className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${checked ? "bg-accent" : "bg-border-strong"}`}
       >
         <span
-          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${checked ? "left-[22px]" : "left-0.5"}`}
+          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.2),0_3px_8px_-2px_rgb(0_0_0/0.2)] transition-all ${checked ? "left-[22px]" : "left-0.5"}`}
         />
       </button>
     </label>
@@ -192,7 +203,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={`rounded-3xl border border-border bg-surface p-4 sm:p-5 ${className}`}>
+    <section className={`surface-card rounded-[28px] p-4 sm:p-5 ${className}`}>
       {(title || action) && (
         <div className="mb-3 flex items-center gap-2">
           {title && <h2 className="min-w-0 flex-1 text-[15px] font-semibold">{title}</h2>}
@@ -206,7 +217,7 @@ export function Card({
 
 export function EmptyState({ title, text, action }: { title: string; text?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="rounded-3xl border border-dashed border-border px-6 py-10 text-center">
+    <div className="rounded-[28px] border border-dashed border-border-strong/50 bg-card/50 px-6 py-10 text-center">
       <p className="font-medium">{title}</p>
       {text && <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{text}</p>}
       {action && <div className="mt-4 flex justify-center">{action}</div>}
@@ -230,7 +241,7 @@ export function Notice({
     positive: "bg-positive-soft text-text",
   };
   return (
-    <div className={`flex flex-col gap-3 rounded-2xl px-4 py-3 text-sm sm:flex-row sm:items-center ${styles[tone]}`}>
+    <div className={`flex flex-col gap-3 rounded-[20px] px-4 py-3 text-sm sm:flex-row sm:items-center ${styles[tone]}`}>
       <div className="flex-1">{children}</div>
       {action && <div className="flex shrink-0 gap-2">{action}</div>}
     </div>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyActions } from "./actions";
 import { savingsTotal } from "./metrics";
 import { parseSberSms, planSmsImport, smsDate } from "./sms";
-import { stateWith, tx } from "./test-utils";
+import { stateWith, template, tx } from "./test-utils";
 
 const NBSP = " ";
 
@@ -169,5 +169,78 @@ describe("операции из СМС", () => {
     const text = "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р";
     const actions = plan(stateWith(), text).actions;
     expect(() => applyActions(stateWith(), actions)).toThrow(/Нельзя снять больше/);
+  });
+});
+
+describe("сопоставление с запланированными платежами", () => {
+  const salary = template({ id: "salary", kind: "income", title: "Зарплата", category: "Зарплата", amount: 9_000_000, dayOfMonth: 25, startDate: "2026-10-01" });
+  const phone = template({ id: "phone", kind: "expense", title: "Связь", category: "Связь и интернет", amount: 90_000, dayOfMonth: 20, startDate: "2026-10-01" });
+  const rent = template({ id: "rent", kind: "expense", title: "Аренда", category: "Аренда", amount: 4_500_000, dayOfMonth: 20, startDate: "2026-10-01" });
+
+  function importSms(state: ReturnType<typeof stateWith>, sms: string, date: string, idBase = "sms-x") {
+    const plan = planSmsImport(state, parseSberSms(sms)!, { idBase, date, sms });
+    return { plan, state: applyActions(state, plan.actions) };
+  }
+
+  it("зарплата раньше срока: начисление месяца создаётся с фактической суммой, синхронизация его не задваивает", () => {
+    const s = stateWith({ templates: [salary] });
+    const { plan, state } = importSms(s, "СЧЁТ5804 16:14 Зачисление зарплаты 61 848.91р Баланс: 62 381.16р", "2026-10-24");
+    expect(plan.actions[0]).toMatchObject({ type: "occurrence.confirm", templateId: "salary", month: "2026-10", amount: 6_184_891 });
+    expect(plan.summary.replace(/\s/g, " ")).toBe("Доход 61 848,91 ₽ · Зарплата — регулярный (по плану 90 000 ₽)");
+
+    const after = applyActions(state, [{ type: "recurring.sync", today: "2026-10-26" }]);
+    const occurrences = after.transactions.filter((t) => t.templateId === "salary");
+    expect(occurrences).toEqual([
+      expect.objectContaining({ id: "salary.2026-10", amount: 6_184_891, date: "2026-10-24", occurrenceMonth: "2026-10", review: true }),
+    ]);
+    // Автоотчисление с зарплаты — от фактической суммы.
+    expect(after.transactions.find((t) => t.linkedTo === "salary.2026-10")?.amount).toBe(927_700);
+  });
+
+  it("уже начисленный платёж исправляется на сумму из СМС, второй операции нет", () => {
+    const s = applyActions(stateWith({ templates: [phone] }), [{ type: "recurring.sync", today: "2026-10-20" }]);
+    expect(s.transactions.find((t) => t.id === "phone.2026-10")?.amount).toBe(90_000);
+    const { state } = importSms(s, "СЧЁТ5804 18:00 Оплата 950р Билайн Баланс: 1000р", "2026-10-21");
+    const phoneTx = state.transactions.filter((t) => t.templateId === "phone");
+    expect(phoneTx).toEqual([expect.objectContaining({ amount: 95_000, date: "2026-10-21", review: true })]);
+    expect(state.transactions.filter((t) => t.type === "expense")).toHaveLength(1);
+  });
+
+  it("в следующем месяце узнаёт тот же магазин, даже если сумма сильно другая", () => {
+    let s = stateWith({ templates: [phone] });
+    s = importSms(s, "СЧЁТ5804 18:00 Оплата 950р Билайн Баланс: 1000р", "2026-10-20").state;
+    const next = importSms(s, "СЧЁТ5804 18:00 Оплата 1800р Билайн Баланс: 1000р", "2026-11-19", "sms-y");
+    expect(next.plan.actions[0]).toMatchObject({ type: "occurrence.confirm", templateId: "phone", month: "2026-11", amount: 180_000 });
+  });
+
+  it("перевод на ту же сумму в день аренды — оплата аренды; покупка без плана — отдельная операция", () => {
+    const s = stateWith({ templates: [rent, phone] });
+    expect(importSms(s, "СЧЁТ5804 10:00 перевод 45000р Баланс: 100р", "2026-10-20").plan.actions[0]).toMatchObject({
+      type: "occurrence.confirm",
+      templateId: "rent",
+    });
+    expect(importSms(s, "Счёт карты MIR-7759 19:29 Покупка 162.38р Перекрёсток Баланс: 5097.76р", "2026-10-20").plan.actions[0]).toMatchObject({
+      type: "tx.add",
+    });
+  });
+
+  it("подтверждённое СМС начисление второй СМС не перезаписывается; далёкая дата не сопоставляется", () => {
+    let s = stateWith({ templates: [salary] });
+    s = importSms(s, "СЧЁТ5804 16:14 Зачисление зарплаты 61 848.91р Баланс: 1р", "2026-10-24").state;
+    expect(importSms(s, "СЧЁТ5804 17:00 Зачисление зарплаты 1000р Баланс: 2р", "2026-10-25", "sms-z").plan.actions[0]).toMatchObject({
+      type: "tx.add",
+    });
+    expect(importSms(stateWith({ templates: [salary] }), "СЧЁТ5804 16:14 Зачисление зарплаты 5000р Баланс: 1р", "2026-10-05").plan.actions[0]).toMatchObject({
+      type: "tx.add",
+    });
+  });
+
+  it("проверка: правка снимает отметку, tx.reviewed снимает её у списка", () => {
+    const { state } = importSms(stateWith(), "Счёт карты MIR-7759 19:29 Покупка 162.38р Перекрёсток Баланс: 5097.76р", "2026-10-20");
+    expect(state.transactions.find((t) => t.id === "sms-x")?.review).toBe(true);
+    const edited = applyActions(state, [{ type: "tx.update", id: "sms-x", patch: { category: "Кафе и рестораны" } }]);
+    expect(edited.transactions.find((t) => t.id === "sms-x")?.review).toBeUndefined();
+    const confirmed = applyActions(state, [{ type: "tx.reviewed", ids: ["sms-x"] }]);
+    expect(confirmed.transactions.find((t) => t.id === "sms-x")).not.toHaveProperty("review");
   });
 });

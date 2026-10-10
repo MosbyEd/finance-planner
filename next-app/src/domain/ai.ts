@@ -16,18 +16,32 @@ import {
 import { isReservedKey } from "./records";
 import { nextOccurrence } from "./recurring";
 import { autoSavingByDefault } from "./savings";
+import { suggestCategory } from "./sms";
 import { LIMITS, type State } from "./schema";
 
 // ---------- снимок данных для модели ----------
 
 const rub = (k: Kopecks) => kopecksToRubles(k);
 
-/** Компактный снимок финансов (суммы в рублях), который сервер передаёт модели. */
-export function buildAiSnapshot(state: State, today: IsoDate) {
+/**
+ * Насколько подробный снимок передавать модели. full — для DeepSeek и больших моделей; compact и minimal —
+ * для модели Apple на телефоне с маленьким контекстом (если данные не влезли, запрос повторяется с более сжатым).
+ */
+export type AiDetail = "full" | "compact" | "minimal";
+
+const DETAIL: Record<AiDetail, { recent: number; upcoming: number; previousMonths: number; templates: boolean; categories: number }> = {
+  full: { recent: 150, upcoming: 100, previousMonths: 3, templates: true, categories: 100 },
+  compact: { recent: 25, upcoming: 15, previousMonths: 2, templates: true, categories: 15 },
+  minimal: { recent: 0, upcoming: 6, previousMonths: 0, templates: false, categories: 8 },
+};
+
+/** Компактный снимок финансов (суммы в рублях), который передаётся модели. */
+export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail = "full") {
+  const d = DETAIL[detail];
   const month = monthKeyOf(today);
   const m = monthMetrics(state, month, today);
   const sts = safeToSpend(state, today);
-  const previous = [1, 2, 3].map((i) => {
+  const previous = [1, 2, 3].slice(0, d.previousMonths).map((i) => {
     const key = addMonths(month, -i);
     const t = periodTotals(state, firstDayOfMonth(key), lastDayOfMonth(key));
     return {
@@ -41,7 +55,7 @@ export function buildAiSnapshot(state: State, today: IsoDate) {
   const recent = [...state.transactions]
     .filter((t) => t.date <= today)
     .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 150)
+    .slice(0, d.recent)
     .map((t) => ({
       date: t.date,
       type: t.type === "expense" ? (t.mandatory ? "mandatory_expense" : "expense") : t.type,
@@ -81,20 +95,20 @@ export function buildAiSnapshot(state: State, today: IsoDate) {
       daysLeft: m.daysLeft,
       warnings: m.warnings,
     },
-    expensesByCategoryThisMonth: categoryBreakdown(state, firstDayOfMonth(month), today, "expense").map((r) => ({
+    expensesByCategoryThisMonth: categoryBreakdown(state, firstDayOfMonth(month), today, "expense").slice(0, d.categories).map((r) => ({
       category: r.category,
       spent: rub(r.amount),
       limit: r.limit === null ? null : rub(r.limit),
     })),
     previousMonths: previous,
-    upcoming30Days: upcomingEvents(state, today, addDays(today, 30)).map((e) => ({
+    upcoming30Days: upcomingEvents(state, today, addDays(today, 30)).slice(0, d.upcoming).map((e) => ({
       date: e.date,
       title: e.title,
       amount: rub(e.effect),
       kind: e.type,
       balanceAfter: rub(e.balanceAfter),
     })),
-    templates: state.templates.map((t) => ({
+    templates: (d.templates ? state.templates : []).map((t) => ({
       kind: t.kind,
       title: t.title,
       category: t.category,
@@ -129,8 +143,8 @@ export function buildAiSnapshot(state: State, today: IsoDate) {
   };
 }
 
-export function buildAiSystemPrompt(state: State, today: IsoDate): string {
-  const snapshot = buildAiSnapshot(state, today);
+export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDetail = "full"): string {
+  const snapshot = buildAiSnapshot(state, today, detail);
   return [
     "Ты — финансовый помощник в приложении личного бюджета. Отвечай по-русски, коротко и по делу, простым языком.",
     "Пиши обычным текстом. Можно короткие списки через «- », без таблиц, заголовков и Markdown-разметки.",
@@ -154,6 +168,8 @@ export function buildAiSystemPrompt(state: State, today: IsoDate): string {
     '- templates (ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31}',
     '- categoryLimits: {"Категория": лимит в рублях на месяц}',
     `Используй существующие категории. Дата по умолчанию — сегодня (${today}).`,
+    "В AI_CMDS — только то, о чём просил пользователь: просил операцию — только operations, без лимитов и регулярных платежей.",
+    "Только когда пишешь AI_CMDS: одной фразой скажи, что предлагаешь добавить; поля и JSON в тексте не повторяй.",
     "Если ничего добавлять не нужно — не пиши AI_CMDS. Не пиши AI_CMDS, если пользователь об этом не просил.",
     "",
     `Данные пользователя на ${today} (JSON):`,
@@ -378,4 +394,30 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
     actions.push({ type: "category.setLimit", name: limit.category, amount: limit.amount });
   }
   return actions;
+}
+
+// ---------- модель на телефоне ----------
+
+/** Просьба что-то добавить или изменить: только тогда принимаем предложения модели на телефоне. */
+const CHANGE_REQUEST =
+  /(добав|запиш|запис|внес|внеси|занес|потратил|купил|заплатил|оплатил|получил|пришл|перевел|перевёл|отлож|лимит|регулярн|каждый месяц|ежемесячн|постав)/i;
+
+/**
+ * Страховка для небольшой модели Apple на телефоне: она бывает непоследовательна — придумывает операции
+ * в ответ на обычный вопрос и путает категории. Предложение принимаем, только если пользователь просил
+ * что-то добавить; категорию операций подбираем тем же способом, что для СМС (история и подсказки магазинов),
+ * а категорию модели оставляем, только если подсказать нечего и такая категория у пользователя есть.
+ */
+export function refineLocalProposal(proposal: AiProposal | null, question: string, state: State): AiProposal | null {
+  if (!proposal || !CHANGE_REQUEST.test(question)) return null;
+  const known = (name: string) =>
+    [...state.categories.income, ...state.categories.mandatory, ...state.categories.flexible].find(
+      (c) => c.toLocaleLowerCase("ru") === name.toLocaleLowerCase("ru"),
+    );
+  const operations = proposal.operations.map((op) => {
+    const fallback = known(op.category) ?? (op.type === "income" ? "Прочие доходы" : "Другое");
+    const suggested = suggestCategory(state, op.type, op.title || op.category, { fallback });
+    return { ...op, category: suggested.category, mandatory: op.type === "expense" && suggested.mandatory };
+  });
+  return { ...proposal, operations };
 }

@@ -75,6 +75,11 @@ export const transactionSchema = z
      * Остальные корректировки этого долга — платежи по нему (loan.payment), см. loanPaid.
      */
     loanOpening: z.literal(true).optional(),
+    /**
+     * Добавлена автоматически (из СМС банка, командой Siri) и ещё не проверена: при запуске приложение
+     * показывает такие операции списком, чтобы подтвердить или поправить. Любая правка снимает отметку.
+     */
+    review: z.literal(true).optional(),
   })
   .superRefine((tx, ctx) => {
     if ((tx.type === "income" || tx.type === "expense") && tx.amount <= 0) {

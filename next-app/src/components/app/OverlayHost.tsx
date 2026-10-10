@@ -4,6 +4,7 @@ import { AiChatSheet } from "./sheets/AiChatSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
 import { LimitSheet } from "./sheets/LimitSheet";
+import { ReviewSheet } from "./sheets/ReviewSheet";
 import { LoanPaymentSheet, LoanSheet } from "./sheets/LoanSheets";
 import { BalanceSheet, ExplainSheet, PlannedSheet, SavingsSheet } from "./sheets/MoneySheets";
 import { TemplateSheet } from "./sheets/TemplateSheet";
@@ -41,5 +42,7 @@ export function OverlayHost() {
       return <AuthSheet mode={overlay.mode ?? "login"} />;
     case "limit":
       return <LimitSheet key={overlay.category ?? "new"} category={overlay.category} />;
+    case "review":
+      return <ReviewSheet />;
   }
 }

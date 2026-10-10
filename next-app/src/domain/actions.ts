@@ -71,6 +71,8 @@ const txInputSchema = z.object({
    * startDate — с какой даты начислять следующие (обычно сегодня), чтобы не создать платежи задним числом.
    */
   repeat: z.object({ templateId: idSchema, startDate: isoDateSchema }).optional(),
+  /** Добавлена автоматически — показать пользователю на проверку (см. Transaction.review). */
+  review: z.boolean().optional(),
 });
 export type TxInput = z.infer<typeof txInputSchema>;
 
@@ -105,6 +107,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     amount: kopecksSchema.refine((v) => v !== 0, "Сумма не может быть нулевой"),
     note: noteSchema,
     goalId: idSchema.optional(),
+    review: z.boolean().optional(),
   }),
   z.object({ type: z.literal("template.add"), template: templateSchema }),
   z.object({
@@ -116,6 +119,21 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("template.setActive"), id: idSchema, active: z.boolean(), today: isoDateSchema }),
   z.object({ type: z.literal("occurrence.skip"), templateId: idSchema, month: monthKeySchema }),
   z.object({ type: z.literal("occurrence.unskip"), templateId: idSchema, month: monthKeySchema }),
+  /**
+   * Начисление регулярного платежа за месяц произошло на самом деле (например, пришла СМС банка):
+   * фактические сумма и дата. Если операции за этот месяц ещё нет — создаётся, иначе исправляется.
+   */
+  z.object({
+    type: z.literal("occurrence.confirm"),
+    templateId: idSchema,
+    month: monthKeySchema,
+    amount: positiveKopecksSchema,
+    date: isoDateSchema,
+    note: noteSchema,
+    review: z.boolean().optional(),
+  }),
+  /** Пользователь проверил автоматически добавленные операции — снять отметку review. */
+  z.object({ type: z.literal("tx.reviewed"), ids: z.array(idSchema).min(1).max(500) }),
   z.object({ type: z.literal("recurring.sync"), today: isoDateSchema }),
   z.object({ type: z.literal("category.add"), group: categoryGroupSchema, name: categoryNameSchema }),
   z.object({ type: z.literal("category.remove"), group: categoryGroupSchema, name: categoryNameSchema }),
@@ -377,6 +395,7 @@ export function applyAction(state: State, action: Action): State {
         note: input.note,
         autoSaving: input.autoSaving,
         ...(input.type === "expense" ? { mandatory: input.mandatory } : {}),
+        ...(input.review ? { review: true as const } : {}),
       };
       let next = ensureCategory(state, groupFor(input.type, input.mandatory), input.category);
       if (input.repeat) {
@@ -419,6 +438,8 @@ export function applyAction(state: State, action: Action): State {
           ? action.patch
           : { ...action.patch, category: canonicalCategory(state, action.patch.category) };
       const updated: Transaction = { ...current, ...patch, type };
+      // Пользователь поправил операцию — значит, проверил её.
+      delete updated.review;
       if (type === "income") delete updated.mandatory;
       else updated.mandatory = action.patch.mandatory ?? current.mandatory ?? false;
       let next = ensureCategory(state, groupFor(type, Boolean(updated.mandatory)), updated.category);
@@ -431,6 +452,20 @@ export function applyAction(state: State, action: Action): State {
         updated.category !== current.category ||
         Boolean(updated.autoSaving) !== Boolean(current.autoSaving);
       return savingInputsChanged ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
+    }
+
+    case "tx.reviewed": {
+      const ids = new Set(action.ids);
+      if (!state.transactions.some((t) => t.review && ids.has(t.id))) return state;
+      return {
+        ...state,
+        transactions: state.transactions.map((t) => {
+          if (!t.review || !ids.has(t.id)) return t;
+          const reviewed = { ...t };
+          delete reviewed.review;
+          return reviewed;
+        }),
+      };
     }
 
     case "tx.delete": {
@@ -540,6 +575,7 @@ export function applyAction(state: State, action: Action): State {
         title: clipTitle(title),
         note: action.note,
         ...(goal ? { goalId: goal.id } : {}),
+        ...(action.review ? { review: true as const } : {}),
       };
       return { ...state, transactions: [...state.transactions, tx] };
     }
@@ -591,6 +627,44 @@ export function applyAction(state: State, action: Action): State {
 
     case "occurrence.unskip":
       return removeSkip(state, action.templateId, action.month);
+
+    case "occurrence.confirm": {
+      const template = findTemplate(state, action.templateId);
+      const current = state.transactions.find((t) => t.templateId === template.id && t.occurrenceMonth === action.month);
+      if (current) {
+        const updated: Transaction = {
+          ...current,
+          amount: action.amount,
+          date: action.date,
+          note: action.note,
+          ...(action.review ? { review: true as const } : {}),
+        };
+        const next = { ...state, transactions: state.transactions.map((t) => (t.id === current.id ? updated : t)) };
+        return updated.amount !== current.amount ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
+      }
+      const id = occurrenceTxId(template.id, action.month);
+      assertNewId(state, id);
+      assertTxCapacity(state, 2);
+      const tx: Transaction = {
+        id,
+        type: template.kind,
+        amount: action.amount,
+        date: action.date,
+        category: template.category,
+        title: template.title,
+        note: action.note,
+        templateId: template.id,
+        occurrenceMonth: action.month,
+        ...(action.review ? { review: true as const } : {}),
+        // Как у начислений из recurring.sync: расход по шаблону обязательный и без «копилки с покупок».
+        ...(template.kind === "expense"
+          ? { mandatory: true, autoSaving: false }
+          : { autoSaving: salarySavingAmount(action.amount, template.category, state.settings) > 0 }),
+      };
+      // Платёж всё-таки был — месяц больше не считается пропущенным.
+      const next = removeSkip({ ...state, transactions: [...state.transactions, tx] }, template.id, action.month);
+      return syncLinkedSaving(next, tx);
+    }
 
     case "recurring.sync":
       return materialize(state, action.today);

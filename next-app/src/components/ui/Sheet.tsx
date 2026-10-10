@@ -8,7 +8,7 @@ import { useConfirm } from "./feedback";
 let openSheets = 0;
 
 /**
- * Модальное окно: на телефоне выезжает снизу, на широком экране — по центру.
+ * Модальное окно из «стекла»: на телефоне выезжает снизу, на широком экране — по центру.
  * Закрывается по Esc и по клику на фон; фокус переходит внутрь и возвращается обратно.
  */
 export function Sheet({
@@ -118,13 +118,13 @@ export function Sheet({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         onKeyDown={onPanelKeyDown}
-        className={`relative flex w-full flex-col overflow-hidden rounded-t-3xl bg-surface shadow-2xl outline-none animate-sheet sm:rounded-3xl ${width} ${height}`}
+        className={`glass-strong relative flex w-full flex-col overflow-hidden rounded-t-[32px] border-b-0 outline-none animate-sheet sm:rounded-[32px] sm:border-b ${width} ${height}`}
       >
         <div className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 id={titleId} className="flex-1 text-[17px] font-semibold">
             {title}
           </h2>
-          <IconButton icon="close" label="Закрыть" onClick={() => void requestClose()} size={40} />
+          <IconButton icon="close" label="Закрыть" variant="secondary" onClick={() => void requestClose()} size={40} />
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {description && (

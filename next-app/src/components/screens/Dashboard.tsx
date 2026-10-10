@@ -43,6 +43,26 @@ function statusBadge(sts: SafeToSpend): { text: string; tone: string } {
 
 const SKIP_MANDATORY_KEY = "fp:onboarding-skip-mandatory";
 
+/** Операции из СМС и Siri, которые ещё не проверены: вернуться к списку после «Позже». */
+function ReviewNotice() {
+  const { state } = useSnapshot();
+  const { open } = useUi();
+  const count = useMemo(() => state.transactions.filter((t) => t.review).length, [state]);
+  if (!count) return null;
+  return (
+    <Notice
+      action={
+        <Button size="sm" onClick={() => open({ kind: "review" })}>
+          Проверить
+        </Button>
+      }
+    >
+      {count} {plural(count, ["новая операция", "новые операции", "новых операций"])} из СМС и Siri{" "}
+      {plural(count, ["ждёт", "ждут", "ждут"])} проверки.
+    </Notice>
+  );
+}
+
 export function Dashboard() {
   const snapshot = useSnapshot();
   const { state } = snapshot;
@@ -99,6 +119,7 @@ export function Dashboard() {
   return (
     <div className="space-y-4">
       <Banners />
+      <ReviewNotice />
       {data.rollover && <RolloverNotice month={data.rollover.month} amount={data.rollover.amount} />}
 
       {!hasData ? (
@@ -112,7 +133,7 @@ export function Dashboard() {
             <button
               type="button"
               onClick={() => open({ kind: "balance" })}
-              className="flex min-w-0 flex-col items-start rounded-3xl border border-border bg-surface p-4 text-left transition hover:bg-surface-2"
+              className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
             >
               <span className="flex items-center gap-1.5 text-sm text-muted">
                 <Icon name="wallet" size={16} /> На счёте
@@ -127,7 +148,7 @@ export function Dashboard() {
             <button
               type="button"
               onClick={() => open({ kind: "savings", direction: "in" })}
-              className="flex min-w-0 flex-col items-start rounded-3xl border border-border bg-surface p-4 text-left transition hover:bg-surface-2"
+              className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
             >
               <span className="flex items-center gap-1.5 text-sm text-muted">
                 <Icon name="piggy" size={16} /> Сбережения
@@ -175,7 +196,7 @@ export function Dashboard() {
 function BalancePrompt() {
   const { open } = useUi();
   return (
-    <section className="rounded-3xl bg-accent-soft p-5">
+    <section className="rounded-[28px] bg-accent-soft p-5">
       <p className="text-[15px] font-medium">
         Укажите, сколько сейчас денег на счёте, — и приложение посчитает лимит на день
       </p>
@@ -191,7 +212,7 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
   const status = statusBadge(sts);
   const over = sts.leftToday < 0;
   return (
-    <section className="rounded-3xl bg-accent p-5 text-accent-text shadow-sm">
+    <section className="surface-accent rounded-[28px] p-5 text-accent-text">
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 flex-1 text-sm opacity-90">
           {over ? "Сегодня потрачено сверх лимита" : "Сегодня можно потратить"}
@@ -384,7 +405,7 @@ function Onboarding({
   const { open, setTab } = useUi();
   const done = [progress.balance, progress.income, progress.mandatory].filter(Boolean).length;
   return (
-    <section className="rounded-3xl border border-border bg-surface p-5 sm:p-6" aria-labelledby="onboarding-title">
+    <section className="surface-card rounded-[28px] p-5 sm:p-6" aria-labelledby="onboarding-title">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="onboarding-title" className="text-xl font-semibold">
           Начнём планировать

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { todayLocal } from "@/domain/dates";
-import { normalizeSms, parseSberSms, planSmsImport, smsDate } from "@/domain/sms";
+import { normalizeSms, parseSberSms, planSmsImport, smsDate, smsNote } from "@/domain/sms";
 import type { User } from "./auth";
 import { getDb } from "./db";
 import { ActionError, applyUserOps, loadState } from "./stateStore";
@@ -45,10 +45,18 @@ export function smsKeyStatus(userId: number): SmsKeyStatus | null {
   return row ? { createdAt: row.created_at, lastUsedAt: row.last_used_at } : null;
 }
 
-/** Ключ из заголовка Authorization: Bearer sms_… */
+/**
+ * Ключ из заголовка Authorization. Команды собирают вручную или через Siri, поэтому формат прощаем:
+ * «Bearer sms_…», просто «sms_…», кавычки и «ёлочки» вокруг, лишние пробелы.
+ */
 export function smsKeyFromHeader(header: string | null): string | null {
-  const match = /^Bearer (\S+)$/.exec(header ?? "");
-  return match && KEY_RE.test(match[1]) ? match[1] : null;
+  const value = (header ?? "")
+    .trim()
+    .replace(/^["'«“]+|["'»”]+$/g, "")
+    .replace(/^bearer\s+/i, "")
+    .replace(/^["'«“]+|["'»”]+$/g, "")
+    .trim();
+  return KEY_RE.test(value) ? value : null;
 }
 
 /** Пользователь по ключу; отмечает время использования. */
@@ -74,19 +82,40 @@ function hhmm(now: Date): string {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Разбирает СМС и добавляет операцию пользователю. Бросает StoredStateError, если состояние повреждено. */
-export function importSms(userId: number, text: string, now = new Date()): SmsImportResult {
+/** Самое раннее время получения, которому верим: столько СМС может пролежать в очереди телефона без сети. */
+const MAX_QUEUE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * Когда пришла СМС. Команда приложения отправляет СМС из очереди позже (не было сети) и сообщает время
+ * получения; время из будущего или слишком старое не принимаем — тогда считаем, что СМС пришла сейчас.
+ */
+export function receivedTime(receivedAt: unknown, now: Date): Date {
+  if (typeof receivedAt !== "string") return now;
+  const ms = Date.parse(receivedAt);
+  if (!Number.isFinite(ms) || ms > now.getTime() + 5 * 60_000 || ms < now.getTime() - MAX_QUEUE_AGE_MS) return now;
+  return new Date(ms);
+}
+
+/**
+ * Разбирает СМС и добавляет операцию пользователю. received — когда СМС пришла на телефон (по умолчанию — сейчас).
+ * Бросает StoredStateError, если состояние повреждено.
+ */
+export function importSms(userId: number, text: string, now = new Date(), received = now): SmsImportResult {
   const sms = normalizeSms(text);
   const op = parseSberSms(sms);
   if (!op) return { status: "ignored", message: "Не похоже на операцию — пропущено." };
 
   const today = todayLocal(now);
-  const date = smsDate(today, hhmm(now), op.time);
+  const date = smsDate(todayLocal(received), hhmm(received), op.time);
   // Один и тот же текст в один день — та же операция: повторный запуск автоматизации её не задвоит.
   const hash = createHash("sha256").update(`${date}|${sms}`).digest("hex");
   const idBase = `sms-${hash.slice(0, 24)}`;
   const { state } = loadState(userId);
-  if (state.transactions.some((t) => t.id === idBase)) return { status: "duplicate", message: "Эта операция уже добавлена." };
+  // Та же СМС уже добавлена отдельной операцией или уже подтвердила запланированный платёж.
+  const note = smsNote(sms);
+  if (state.transactions.some((t) => t.id === idBase || (t.note === note && t.date === date))) {
+    return { status: "duplicate", message: "Эта операция уже добавлена." };
+  }
 
   const plan = planSmsImport(state, op, { idBase, date, sms });
   const ops = plan.actions.map((action, i) => ({ opId: `sms-${hash.slice(0, 30)}-${i}`, action }));

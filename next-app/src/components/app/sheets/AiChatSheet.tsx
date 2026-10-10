@@ -14,7 +14,10 @@ import { z } from "zod";
 import { proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney } from "@/domain/money";
+import type { State } from "@/domain/schema";
 import { ApiError, api, type AiChatMessage } from "@/client/api";
+import { AppleAiError, askApple, pickAppleModel } from "@/client/appleAi";
+import type { AppleModel } from "@/client/native";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { Button, IconButton } from "../../ui/Button";
 import { EmptyState, Money, Notice, Segmented } from "../../ui/controls";
@@ -28,7 +31,8 @@ import { plural } from "@/domain/text";
 
 // ---------- модель чата ----------
 
-type ChatMode = "fast" | "reasoning";
+/** fast и reasoning — DeepSeek на сервере; apple — модель Apple Intelligence (на телефоне или в Private Cloud Compute). */
+type ChatMode = "fast" | "reasoning" | "apple";
 type ProposalStatus = "pending" | "applied" | "dismissed";
 
 interface UserMessage {
@@ -114,9 +118,15 @@ const storedMessageSchema = z.discriminatedUnion("role", [
 ]);
 
 const storedChatSchema = z.object({
-  mode: z.enum(["fast", "reasoning"]).catch("fast"),
+  mode: z.enum(["fast", "reasoning", "apple"]).catch("fast"),
   messages: z.array(z.unknown()),
 });
+
+/**
+ * Новый чат — на модели Apple на телефоне: без интернета и без передачи данных. Где её нет (браузер,
+ * выключена Apple Intelligence), окно само переключится на DeepSeek.
+ */
+const DEFAULT_MODE: ChatMode = "apple";
 
 function storageKey(login: string): string {
   return `fp:ai-chat:${login}`;
@@ -125,9 +135,9 @@ function storageKey(login: string): string {
 function loadChat(key: string): Pick<ChatSnapshot, "messages" | "mode"> {
   try {
     const raw = globalThis.sessionStorage?.getItem(key);
-    if (!raw) return { messages: [], mode: "fast" };
+    if (!raw) return { messages: [], mode: DEFAULT_MODE };
     const parsed = storedChatSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) return { messages: [], mode: "fast" };
+    if (!parsed.success) return { messages: [], mode: DEFAULT_MODE };
     const messages: ChatMessage[] = [];
     for (const item of parsed.data.messages) {
       const message = storedMessageSchema.safeParse(item);
@@ -139,7 +149,7 @@ function loadChat(key: string): Pick<ChatSnapshot, "messages" | "mode"> {
     }
     return { messages, mode: parsed.data.mode };
   } catch {
-    return { messages: [], mode: "fast" };
+    return { messages: [], mode: DEFAULT_MODE };
   }
 }
 
@@ -206,12 +216,12 @@ class ChatSession {
     this.update({ mode });
   }
 
-  send(text: string, today: IsoDate): void {
+  send(text: string, today: IsoDate, state: State): void {
     const content = text.trim().slice(0, MAX_CONTENT);
     if (!content || this.snapshot.pendingSince !== null) return;
     const messages = this.snapshot.messages.filter((m) => m.role !== "error");
     this.update({ messages: [...messages, { id: newId(), role: "user", content }] });
-    void this.request(today);
+    void this.request(today, state);
   }
 
   canRetry(): boolean {
@@ -219,10 +229,10 @@ class ChatSession {
     return this.snapshot.pendingSince === null && messages.at(-1)?.role === "user";
   }
 
-  retry(today: IsoDate): void {
+  retry(today: IsoDate, state: State): void {
     if (!this.canRetry()) return;
     this.update({ messages: this.snapshot.messages.filter((m) => m.role !== "error") });
-    void this.request(today);
+    void this.request(today, state);
   }
 
   setStatus(id: string, status: ProposalStatus): void {
@@ -236,12 +246,18 @@ class ChatSession {
     this.update({ messages: [], pendingSince: null });
   }
 
-  private async request(today: IsoDate): Promise<void> {
+  /** state — данные бюджета на устройстве: модель Apple отвечает по ним, без сервера. */
+  private async request(today: IsoDate, state: State): Promise<void> {
     const epoch = this.epoch;
     this.update({ pendingSince: Date.now() });
     let reply: ChatMessage;
     try {
-      const response = await api.aiChat(buildHistory(this.snapshot.messages), this.snapshot.mode, today);
+      const mode = this.snapshot.mode;
+      const history = buildHistory(this.snapshot.messages);
+      const response =
+        mode === "apple"
+          ? { ...(await askApple(history, state, today)), reasoning: null }
+          : await api.aiChat(history, mode, today);
       reply = {
         id: newId(),
         role: "assistant",
@@ -255,7 +271,10 @@ class ChatSession {
       reply = {
         id: newId(),
         role: "error",
-        content: error instanceof ApiError ? error.message : "Не удалось получить ответ. Попробуйте ещё раз.",
+        content:
+          error instanceof ApiError || error instanceof AppleAiError
+            ? error.message
+            : "Не удалось получить ответ. Попробуйте ещё раз.",
       };
     }
     // Чат очистили (или вышли из аккаунта), пока ждали ответа.
@@ -311,15 +330,31 @@ function useOnline(): boolean {
 
 const OFFLINE_TEXT = "Нет связи — помощник ответит, когда интернет вернётся";
 
+/** Какая модель Apple доступна в этом приложении (null — нет; в браузере всегда null). */
+function useAppleModel(): AppleModel | null {
+  const [model, setModel] = useState<AppleModel | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void pickAppleModel().then((picked) => {
+      if (!cancelled) setModel(picked?.model ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return model;
+}
+
 // ---------- окно ----------
 
 export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
   const snapshot = useSnapshot();
   const online = useOnline();
+  const appleModel = useAppleModel();
   const { close, open } = useUi();
 
   // Без сети сервер мог не сообщить, включён ли AI, поэтому «недоступен» показываем только при связи.
-  if (!snapshot.aiEnabled && online) {
+  if (!snapshot.aiEnabled && online && !appleModel) {
     return (
       <Sheet open onClose={close} title="AI-помощник">
         <EmptyState title="AI-помощник сейчас недоступен" text="Остальные функции работают как обычно." />
@@ -350,12 +385,38 @@ export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
     );
   }
 
-  return <Chat key={snapshot.user.login} login={snapshot.user.login} initialPrompt={initialPrompt} online={online} />;
+  return (
+    <Chat
+      key={snapshot.user.login}
+      login={snapshot.user.login}
+      initialPrompt={initialPrompt}
+      online={online}
+      appleModel={appleModel}
+      deepseek={snapshot.aiEnabled}
+    />
+  );
 }
 
-function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?: string; online: boolean }) {
+function Chat({
+  login,
+  initialPrompt,
+  online,
+  appleModel,
+  deepseek,
+}: {
+  login: string;
+  initialPrompt?: string;
+  online: boolean;
+  appleModel: AppleModel | null;
+  /** Включён ли на сервере DeepSeek. */
+  deepseek: boolean;
+}) {
   const [session] = useState(() => getSession(login));
-  const chat = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
+  const snapshotChat = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
+  // Выбранный режим недоступен (модель Apple выключили или DeepSeek отключён на сервере) — берём доступный.
+  const fallbackMode: ChatMode = deepseek ? "fast" : "apple";
+  const modeAvailable = snapshotChat.mode === "apple" ? appleModel !== null : deepseek;
+  const chat = modeAvailable ? snapshotChat : { ...snapshotChat, mode: fallbackMode };
   const { state, sync, sessionExpired } = useSnapshot();
   const { close, open } = useUi();
   const today = useToday();
@@ -366,6 +427,8 @@ function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?:
   const endRef = useRef<HTMLDivElement>(null);
   const scrolledOnce = useRef(false);
   const pending = chat.pendingSince !== null;
+  // Модель на телефоне отвечает и без интернета.
+  const canAsk = online || (chat.mode === "apple" && appleModel === "device");
 
   // Прокрутка к последнему сообщению: при открытии сразу, дальше — плавно.
   useEffect(() => {
@@ -375,8 +438,9 @@ function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?:
   }, [chat.messages.length, pending]);
 
   const send = (text: string) => {
-    if (pending || !online || !text.trim()) return;
-    session.send(text, today);
+    if (pending || !canAsk || !text.trim()) return;
+    if (chat.mode !== snapshotChat.mode) session.setMode(chat.mode);
+    session.send(text, today, state);
     setInput("");
   };
 
@@ -412,16 +476,24 @@ function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?:
           onChange={setInput}
           onSend={() => send(input)}
           pending={pending}
-          offline={!online}
+          offline={!canAsk}
           mode={chat.mode}
           onModeChange={(mode) => session.setMode(mode)}
+          appleModel={appleModel}
+          deepseek={deepseek}
         />
       }
     >
       <div className="flex min-h-full flex-col gap-4">
-        {!online ? (
+        {!canAsk ? (
           <Notice tone="warning">
             <span role="status">{OFFLINE_TEXT}</span>
+          </Notice>
+        ) : chat.mode === "apple" ? (
+          <Notice>
+            {appleModel === "device"
+              ? "Отвечает Apple Intelligence прямо на iPhone: данные не покидают телефон, интернет не нужен."
+              : "Отвечает Apple Intelligence в Private Cloud Compute: данные не сохраняются и недоступны Apple."}
           </Notice>
         ) : sessionExpired ? (
           <Notice
@@ -449,7 +521,7 @@ function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?:
         )}
 
         {chat.messages.length === 0 && !pending ? (
-          <Intro onPick={send} disabled={!online} />
+          <Intro onPick={send} disabled={!canAsk} />
         ) : (
           <ol aria-live="polite" aria-relevant="additions" aria-label="Переписка с помощником" className="flex flex-col gap-3">
             {chat.messages.map((m) => (
@@ -466,7 +538,7 @@ function Chat({ login, initialPrompt, online }: { login: string; initialPrompt?:
                 {m.role === "error" && (
                   <ErrorBubble
                     message={m}
-                    onRetry={m.id === lastId && online && session.canRetry() ? () => session.retry(today) : undefined}
+                    onRetry={m.id === lastId && canAsk && session.canRetry() ? () => session.retry(today, state) : undefined}
                   />
                 )}
               </li>
@@ -725,6 +797,13 @@ function ProposalRow({ title, subtitle, amount }: { title: string; subtitle: str
 
 // ---------- поле ввода ----------
 
+const MODE_HINTS: Record<ChatMode | "appleCloud", string> = {
+  apple: "Apple Intelligence на телефоне, без интернета",
+  appleCloud: "Apple Intelligence, Private Cloud Compute",
+  fast: "DeepSeek, ответ за несколько секунд",
+  reasoning: "DeepSeek, дольше — до 2–3 минут",
+};
+
 function Composer({
   value,
   onChange,
@@ -733,6 +812,8 @@ function Composer({
   offline,
   mode,
   onModeChange,
+  appleModel,
+  deepseek,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -741,9 +822,20 @@ function Composer({
   offline: boolean;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
+  appleModel: AppleModel | null;
+  deepseek: boolean;
 }) {
   const id = useId();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const options: { value: ChatMode; label: string }[] = [
+    ...(appleModel ? [{ value: "apple" as const, label: appleModel === "device" ? "iPhone" : "Apple" }] : []),
+    ...(deepseek
+      ? [
+          { value: "fast" as const, label: "Быстро" },
+          { value: "reasoning" as const, label: "Подробно" },
+        ]
+      : []),
+  ];
 
   // Поле растёт вместе с текстом (до ~6 строк).
   useLayoutEffect(() => {
@@ -793,22 +885,14 @@ function Composer({
           disabled={pending || offline || !value.trim()}
         />
       </div>
-      <div className="flex items-center gap-3">
-        <div className="w-48 shrink-0">
-          <Segmented
-            label="Режим ответа"
-            value={mode}
-            onChange={onModeChange}
-            options={[
-              { value: "fast", label: "Быстро" },
-              { value: "reasoning", label: "Подробно" },
-            ]}
-          />
+      {options.length > 1 && (
+        <div className="flex items-center gap-3">
+          <div className={`${options.length > 2 ? "w-64" : "w-48"} shrink-0`}>
+            <Segmented label="Режим ответа" value={mode} onChange={onModeChange} options={options} />
+          </div>
+          <p className="min-w-0 text-xs text-muted">{MODE_HINTS[mode === "apple" && appleModel === "cloud" ? "appleCloud" : mode]}</p>
         </div>
-        <p className="min-w-0 text-xs text-muted">
-          {mode === "reasoning" ? "Дольше, до 2–3 минут" : "Ответ за несколько секунд"}
-        </p>
-      </div>
+      )}
     </form>
   );
 }

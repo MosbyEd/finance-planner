@@ -161,14 +161,15 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
 
   return (
     <Card title="Итоги месяца">
-      <div className="flex items-end justify-between gap-3">
+      {/* На узком экране подпись справа переносится под сумму, а не наезжает на неё. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
         <div className="min-w-0">
           <p className={`text-sm ${over ? "font-medium text-negative" : "text-muted"}`}>
             {over ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете"}
           </p>
           <Money value={Math.abs(f.left)} tone={over ? "negative" : "default"} className="text-2xl font-semibold" />
         </div>
-        <p className="shrink-0 text-right text-sm text-muted">
+        <p className="ml-auto text-right text-sm text-muted">
           из {formatMoney(Math.max(0, f.budget))}
           {f.extraSavings > 0 && (
             <>

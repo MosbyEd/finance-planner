@@ -5,6 +5,7 @@ import { dueOccurrences } from "@/domain/recurring";
 import { FinanceStore } from "@/client/store";
 import { StoreProvider, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
+import { pickAppleModel } from "@/client/appleAi";
 import { syncNotifications } from "@/client/notifications";
 import { isNativeApp } from "@/client/runtime";
 import { registerServiceWorker } from "@/client/sw";
@@ -21,6 +22,8 @@ import { useDispatch } from "./hooks";
 import { OverlayHost } from "./OverlayHost";
 import { forgetAiChat } from "./sheets/AiChatSheet";
 import { UiProvider, useUi, type Tab } from "./overlays";
+import { useNativeBridge } from "./useNativeBridge";
+import { useReviewPrompt } from "./useReviewPrompt";
 
 const TABS: { id: Exclude<Tab, "settings">; label: string; icon: IconName }[] = [
   { id: "home", label: "Главная", icon: "home" },
@@ -92,6 +95,9 @@ function Shell() {
 
   useRecurringSync();
   useNotificationSync();
+  useNativeBridge();
+  useReviewPrompt();
+  const appleAi = useAppleAiAvailable();
 
   // Офлайн-оболочка (только в production: в разработке кэш мешал бы горячей перезагрузке).
   useEffect(() => registerServiceWorker(), []);
@@ -99,11 +105,14 @@ function Shell() {
   if (snapshot.phase === "loading") return <Splash />;
 
   const showAdd = tab === "home" || tab === "history";
+  const activeTabIndex = TABS.findIndex((t) => t.id === tab);
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-3xl flex-col">
-      <header className="sticky top-0 z-30 border-b border-border/60 bg-bg/90 pt-safe backdrop-blur">
-        <div className="flex h-14 items-center gap-2 px-4">
+      {/* Шапка из стекла: содержимое под ней размывается. На телефоне — во всю ширину под статус-баром,
+          на широком экране — плавающая панель со скруглением. */}
+      <header className="glass sticky top-0 z-30 border-0 pt-safe sm:top-3 sm:mx-4 sm:mt-3 sm:rounded-[28px] sm:border">
+        <div className="flex h-14 items-center gap-2 px-4 sm:h-16 sm:px-5">
           <div className="min-w-0 flex-1">
             {/* Заголовок — название раздела. Кнопка «На главную» лежит поверх него отдельным элементом,
                 чтобы заголовок читался как есть, а не как «На главную». */}
@@ -119,26 +128,27 @@ function Shell() {
             </div>
             <SyncStatus />
           </div>
-          {snapshot.aiEnabled && (
-            <IconButton icon="sparkles" label="AI-помощник" variant="soft" onClick={() => open({ kind: "ai" })} />
+          {(snapshot.aiEnabled || appleAi) && (
+            <IconButton icon="sparkles" label="AI-помощник" variant="soft" size={44} onClick={() => open({ kind: "ai" })} />
           )}
           <IconButton
             icon="settings"
             label="Настройки"
-            variant={tab === "settings" ? "soft" : "ghost"}
+            variant={tab === "settings" ? "soft" : "secondary"}
+            size={44}
             aria-current={tab === "settings" ? "page" : undefined}
             onClick={() => setTab("settings")}
           />
         </div>
-        <nav aria-label="Разделы" className="hidden gap-1 px-3 pb-2 sm:flex">
+        <nav aria-label="Разделы" className="hidden gap-1 px-3 pb-3 sm:flex">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               aria-current={tab === t.id ? "page" : undefined}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                tab === t.id ? "bg-text text-bg" : "text-muted hover:bg-surface-2 hover:text-text"
+              className={`flex min-h-10 items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                tab === t.id ? "glass-lens text-accent" : "text-muted hover:bg-surface-2 hover:text-text"
               }`}
             >
               <Icon name={t.icon} size={16} />
@@ -150,7 +160,7 @@ function Shell() {
 
       {/* Снизу место под навигацию и плавающую кнопку «+», чтобы она не закрывала последние строки. */}
       <main
-        className={`flex-1 px-4 pt-4 ${
+        className={`flex-1 px-4 pt-4 sm:pt-5 ${
           showAdd
             ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-28"
             : "pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-12"
@@ -164,34 +174,47 @@ function Shell() {
         {tab === "settings" && <Settings />}
       </main>
 
+      {/* Кнопка «+» — отдельный круг из акцентного стекла над нижней панелью (на широком экране — в углу). */}
       {showAdd && (
         <button
           type="button"
           aria-label="Добавить операцию"
           onClick={() => open({ kind: "tx" })}
-          className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-accent-text shadow-lg transition hover:opacity-90 sm:bottom-8 sm:right-[max(1rem,calc(50%-24rem+1rem))]"
+          className="glass-tint fixed bottom-[calc(var(--dock-offset)+var(--dock-height)+0.75rem)] right-3 z-30 flex h-14 w-14 items-center justify-center rounded-full transition active:scale-95 sm:bottom-8 sm:right-[max(1rem,calc(50%-24rem+1rem))]"
         >
           <Icon name="plus" size={26} />
         </button>
       )}
 
+      {/* Нижняя панель — плавающая стеклянная капсула с отступом от краёв экрана. */}
       <nav
         aria-label="Разделы"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-safe backdrop-blur sm:hidden"
+        className="pointer-events-none fixed inset-x-0 bottom-(--dock-offset) z-30 px-3 sm:hidden"
       >
-        <div className="mx-auto flex max-w-3xl">
+        <div className="glass pointer-events-auto relative isolate mx-auto flex h-(--dock-height) max-w-md rounded-full p-1">
+          {/* «Линза» под выбранной вкладкой перетекает между пунктами. */}
+          <span
+            aria-hidden
+            className={`glass-lens pointer-events-none absolute inset-y-1 left-1 -z-10 rounded-full transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none ${
+              activeTabIndex < 0 ? "opacity-0" : ""
+            }`}
+            style={{
+              width: `calc((100% - 0.5rem) / ${TABS.length})`,
+              transform: `translateX(${Math.max(0, activeTabIndex) * 100}%)`,
+            }}
+          />
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               aria-current={tab === t.id ? "page" : undefined}
               onClick={() => setTab(t.id)}
-              className={`flex h-16 flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium ${
-                tab === t.id ? "text-accent" : "text-muted"
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10.5px] font-semibold tracking-tight transition-colors ${
+                tab === t.id ? "text-accent" : "text-text"
               }`}
             >
               <Icon name={t.icon} size={22} />
-              {t.label}
+              <span className="max-w-full truncate">{t.label}</span>
             </button>
           ))}
         </div>
@@ -217,6 +240,22 @@ function SyncStatus() {
       {map.text}
     </span>
   );
+}
+
+/** Есть ли на этом iPhone модель Apple Intelligence для помощника (тогда он работает и без DeepSeek на сервере). */
+function useAppleAiAvailable(): boolean {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    let cancelled = false;
+    void pickAppleModel().then((picked) => {
+      if (!cancelled) setAvailable(picked !== null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return available;
 }
 
 /** Создаёт операции по регулярным платежам, когда наступает их день. */

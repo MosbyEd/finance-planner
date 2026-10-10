@@ -2,6 +2,7 @@
 
 import { AboutSection } from "./settings/AboutSection";
 import { AccountSection } from "./settings/AccountSection";
+import { AppleAiSection } from "./settings/AppleAiSection";
 import { CategoriesSection } from "./settings/CategoriesSection";
 import { DataSection } from "./settings/DataSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
@@ -14,6 +15,7 @@ export function Settings() {
     <div className="space-y-4">
       <AccountSection />
       <SmsImportSection />
+      <AppleAiSection />
       <NotificationsSection />
       <SavingsSection />
       <CategoriesSection />

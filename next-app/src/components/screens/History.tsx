@@ -217,9 +217,7 @@ export function History() {
               aria-pressed={type === f.value}
               onClick={() => setType(f.value)}
               className={`h-10 rounded-full border px-4 text-sm font-medium transition ${
-                type === f.value
-                  ? "border-accent bg-accent text-accent-text"
-                  : "border-border bg-surface text-text hover:bg-surface-2"
+                type === f.value ? "sheen border-accent bg-accent text-accent-text" : "glass-control text-text"
               }`}
             >
               {f.label}
@@ -457,7 +455,10 @@ function OperationList({
   return (
     <div className="space-y-5">
       {visiblePlanned.length > 0 && (
-        <section aria-labelledby={plannedId} className="space-y-3 rounded-3xl border border-dashed border-border p-3 sm:p-4">
+        <section
+          aria-labelledby={plannedId}
+          className="space-y-3 rounded-[32px] border border-dashed border-border-strong/50 bg-card/40 p-3 sm:p-4"
+        >
           <div className="px-1">
             <h2 id={plannedId} className="flex items-center gap-1.5 text-[15px] font-semibold text-muted">
               <Icon name="calendar" size={16} /> Запланировано
@@ -514,7 +515,7 @@ function DayGroups({
               )}
             </div>
             <ul
-              className={`rounded-3xl border px-4 py-1 ${muted ? "border-border/70 bg-surface/60" : "border-border bg-surface"}`}
+              className={`surface-card rounded-[28px] px-4 py-1 ${muted ? "bg-card/60" : ""}`}
             >
               {g.items.map((tx) => (
                 <li key={tx.id}>

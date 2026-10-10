@@ -52,15 +52,13 @@ async function newKey(token: string): Promise<string> {
   return (await res.json()).key as string;
 }
 
-function sendSms(key: string, body: string, contentType = "application/json") {
-  return importSmsRoute(
-    request("/api/import/sms", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": contentType }, body }),
-  );
+function sendSms(key: string, body: string, contentType = "application/json", authorization = `Bearer ${key}`) {
+  return importSmsRoute(request("/api/import/sms", { method: "POST", headers: { authorization, "content-type": contentType }, body }));
 }
 
 async function transactions(token: string) {
   const res = await getState(request("/api/state", { headers: { ...APP, authorization: `Bearer ${token}` } }));
-  return (await res.json()).state.transactions as { type: string; amount: number; category: string; title: string }[];
+  return (await res.json()).state.transactions as { type: string; amount: number; category: string; title: string; date: string }[];
 }
 
 const PURCHASE = "Счёт карты MIR-7759 19:29 Покупка 162.38р Перекрёсток Баланс: 5097.76р";
@@ -95,11 +93,15 @@ describe("операции из СМС", () => {
     expect(await ad.json()).toMatchObject({ status: "ignored" });
   });
 
-  it("без ключа, с чужим или отозванным ключом — 401; сессионный токен ключом не является", async () => {
+  it("без ключа, с чужим или отозванным ключом — 401", async () => {
     const token = await signUp();
     const key = await newKey(token);
     expect((await sendSms("sms_" + "x".repeat(32), JSON.stringify({ text: PURCHASE }))).status).toBe(401);
-    expect((await sendSms(token, JSON.stringify({ text: PURCHASE }))).status).toBe(401);
+    const missing = await importSmsRoute(
+      request("/api/import/sms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: PURCHASE }) }),
+    );
+    expect(missing.status).toBe(401);
+    expect((await missing.json()).message).toMatch(/нет ключа/);
 
     const status = await keyStatus(request("/api/account/sms-key", { headers: { ...APP, authorization: `Bearer ${token}` } }));
     expect((await status.json()).key).toMatchObject({ createdAt: expect.any(Number) });
@@ -108,6 +110,27 @@ describe("операции из СМС", () => {
     const revoked = await sendSms(key, JSON.stringify({ text: PURCHASE }));
     expect(revoked.status).toBe(401);
     expect((await revoked.json()).message).toMatch(/Ключ не подходит/);
+  });
+
+  it("ключ в «ёлочках», в кавычках и без слова Bearer тоже подходит", async () => {
+    const key = await newKey(await signUp());
+    const variants = [`«Bearer ${key}»`, `"Bearer ${key}"`, key, `  bearer   ${key} `, `Bearer «${key}»`];
+    for (const [i, authorization] of variants.entries()) {
+      const text = `Счёт карты MIR-7759 1${i}:00 Покупка 10${i}р Перекрёсток Баланс: 100р`;
+      const res = await sendSms(key, JSON.stringify({ text }), "application/json", authorization);
+      expect(res.status, authorization).toBe(200);
+    }
+  });
+
+  it("команда приложения входит токеном сессии и передаёт время получения СМС", async () => {
+    const token = await signUp();
+    const received = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    received.setHours(19, 40, 0, 0);
+    const res = await sendSms(token, JSON.stringify({ text: PURCHASE, receivedAt: received.toISOString() }));
+    expect((await res.json()).status).toBe("added");
+    const [added] = (await transactions(token)).filter((t) => t.type === "expense");
+    const local = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    expect(added.date).toBe(local(received));
   });
 
   it("новый ключ заменяет прежний", async () => {

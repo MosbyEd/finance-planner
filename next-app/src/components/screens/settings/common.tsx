@@ -31,7 +31,7 @@ export function ToggleChip({ label, pressed, onToggle }: { label: string; presse
       aria-pressed={pressed}
       onClick={onToggle}
       className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
-        pressed ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-text hover:bg-surface-2"
+        pressed ? "border-accent bg-accent-soft text-accent" : "glass-control text-text"
       }`}
     >
       {pressed && <Icon name="check" size={14} />}
@@ -97,9 +97,7 @@ export function ChoiceChips<T extends string>({
             aria-checked={value === o.value}
             onClick={() => onChange(o.value)}
             className={`h-10 rounded-full border px-3.5 text-sm transition ${
-              value === o.value
-                ? "border-accent bg-accent text-accent-text"
-                : "border-border bg-surface text-text hover:bg-surface-2"
+              value === o.value ? "sheen border-accent bg-accent text-accent-text" : "glass-control text-text"
             }`}
           >
             {o.label}

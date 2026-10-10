@@ -9,7 +9,8 @@
   --surface-2: #f0efeb;
   --surface-3: #e7e5e0;
   --text: #1c1b19;
-  --muted: #6b6862;
+  /* Чуть темнее прежнего: подписи остаются ≥ 4.5:1 и на цветной подложке, и на стекле. */
+  --muted: #5f5c56;
   --border: #e3e1dc;
   /* Границы полей ввода и выключенного переключателя: контраст ≥ 3:1 с фоном (WCAG 1.4.11). */
   --border-strong: #949088;
@@ -24,7 +25,47 @@
   --negative-soft: #fbe7ea;
   --warning: #965a00;
   --warning-soft: #fdf1dc;
-  --overlay: rgb(20 19 17 / 0.45);
+  --overlay: rgb(20 19 17 / 0.34);
+
+  /* ---------- Liquid Glass ---------- */
+  /* Полупрозрачные заливки (как системные fill в iOS): дорожка переключателя, наведение, бегунок на стекле. */
+  --fill: rgb(118 118 128 / 0.12);
+  --fill-strong: rgb(118 118 128 / 0.2);
+  --separator: rgb(60 60 67 / 0.16);
+  /* Выбранный вариант в переключателе — «линза» над дорожкой; на стекле навигации — мягкая серая линза. */
+  --lens: #ffffff;
+  --lens-soft: rgb(118 118 128 / 0.18);
+  --lens-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 2px rgb(24 26 48 / 0.08), 0 4px 12px -4px rgb(24 26 48 / 0.18);
+  /* Карточки с содержимым: без размытия (дорого на iPhone), только мягкая полупрозрачность. */
+  --card: rgb(255 255 255 / 0.74);
+  --card-border: rgb(255 255 255 / 0.8);
+  --card-shadow: 0 0 0 0.5px rgb(24 26 48 / 0.06), 0 1px 2px rgb(24 26 48 / 0.04), 0 12px 32px -18px rgb(24 26 48 / 0.2);
+  /* Стекло навигации и диалогов. */
+  --glass-bg: rgb(255 255 255 / 0.68);
+  --glass-bg-strong: rgb(250 250 252 / 0.86);
+  --glass-border: rgb(255 255 255 / 0.65);
+  --glass-sheen: linear-gradient(to bottom, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0) 55%);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -0.5px 0 rgb(255 255 255 / 0.4);
+  --glass-shadow: 0 0 0 0.5px rgb(24 26 48 / 0.08), 0 2px 6px -1px rgb(24 26 48 / 0.06), 0 14px 36px -14px rgb(24 26 48 / 0.26);
+  --glass-filter: blur(24px) saturate(180%);
+  /* Стекло, подкрашенное акцентом (кнопка «+»): плотное, чтобы белая иконка читалась. */
+  --glass-tint: rgb(63 81 217 / 0.9);
+  --accent-2: #5a3fd6;
+  --accent-glow: rgb(63 81 217 / 0.45);
+  /* Кнопки и чипы «из стекла» внутри содержимого — без размытия. */
+  --control-bg: rgb(255 255 255 / 0.72);
+  --control-bg-hover: rgb(255 255 255 / 0.96);
+  --control-border: rgb(24 26 48 / 0.1);
+  --control-highlight: inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --sheen-shadow: 0 1px 2px rgb(24 26 48 / 0.1), 0 6px 16px -8px rgb(24 26 48 / 0.35);
+  /* Мягкие цветные пятна на фоне — стеклу есть что преломлять. */
+  --glow-1: rgb(99 115 240 / 0.16);
+  --glow-2: rgb(56 189 170 / 0.12);
+  --glow-3: rgb(240 140 170 / 0.12);
+
+  /* Нижняя плавающая панель: отступ от края экрана и высота — по ним считаются кнопка «+» и уведомления. */
+  --dock-offset: max(0.75rem, calc(env(safe-area-inset-bottom) - 0.5rem));
+  --dock-height: 4rem;
   color-scheme: light;
 }
 
@@ -48,8 +89,73 @@
     --negative-soft: #3a1c22;
     --warning: #f0a83a;
     --warning-soft: #3a2a12;
-    --overlay: rgb(0 0 0 / 0.6);
+    --overlay: rgb(0 0 0 / 0.5);
+
+    --fill: rgb(118 118 128 / 0.24);
+    --fill-strong: rgb(118 118 128 / 0.32);
+    --separator: rgb(255 255 255 / 0.1);
+    --lens: rgb(255 255 255 / 0.18);
+    --lens-soft: rgb(118 118 128 / 0.2);
+    --lens-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 12px -4px rgb(0 0 0 / 0.45);
+    --card: rgb(30 30 32 / 0.72);
+    --card-border: rgb(255 255 255 / 0.07);
+    --card-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 32px -18px rgb(0 0 0 / 0.6);
+    --glass-bg: rgb(40 40 44 / 0.66);
+    --glass-bg-strong: rgb(30 30 33 / 0.86);
+    --glass-border: rgb(255 255 255 / 0.1);
+    --glass-sheen: linear-gradient(to bottom, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0) 55%);
+    --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 -0.5px 0 rgb(255 255 255 / 0.05);
+    --glass-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.5), 0 2px 6px -1px rgb(0 0 0 / 0.3), 0 14px 36px -14px rgb(0 0 0 / 0.7);
+    --glass-tint: rgb(135 150 255 / 0.92);
+    --accent-2: #a08cff;
+    --accent-glow: rgb(135 150 255 / 0.3);
+    --control-bg: rgb(255 255 255 / 0.08);
+    --control-bg-hover: rgb(255 255 255 / 0.14);
+    --control-border: rgb(255 255 255 / 0.12);
+    --control-highlight: inset 0 1px 0 rgb(255 255 255 / 0.08);
+    --sheen-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 16px -8px rgb(0 0 0 / 0.6);
+    --glow-1: rgb(110 120 255 / 0.18);
+    --glow-2: rgb(40 170 160 / 0.1);
+    --glow-3: rgb(200 90 160 / 0.1);
     color-scheme: dark;
+  }
+}
+
+/*
+ * «Уменьшение прозрачности» и повышенный контраст в настройках системы: стекло становится сплошным,
+ * без размытия и цветных пятен. Значения ссылаются на токены темы, поэтому работают и в тёмной.
+ */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root {
+    --glass-filter: none;
+    --glass-bg: var(--surface);
+    --glass-bg-strong: var(--surface);
+    --glass-tint: var(--accent);
+    --glass-sheen: none;
+    --card: var(--surface);
+    --control-bg: var(--surface);
+    --control-bg-hover: var(--surface-2);
+    --glow-1: transparent;
+    --glow-2: transparent;
+    --glow-3: transparent;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --card-border: var(--border-strong);
+    --glass-border: var(--border-strong);
+    --control-border: var(--border-strong);
+    --separator: var(--border-strong);
+  }
+}
+
+/* Браузер без backdrop-filter: полупрозрачная панель без размытия мешала бы читать — делаем её сплошной. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-bg: var(--surface);
+    --glass-bg-strong: var(--surface);
+    --glass-tint: var(--accent);
   }
 }
 
@@ -73,6 +179,10 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-overlay: var(--overlay);
+  --color-fill: var(--fill);
+  --color-fill-strong: var(--fill-strong);
+  --color-separator: var(--separator);
+  --color-card: var(--card);
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
 }
@@ -87,6 +197,19 @@
     color: var(--text);
     font-family: var(--font-sans);
     font-feature-settings: "tnum" 1;
+  }
+  /* Неподвижная подложка с мягкими пятнами цвета. Отдельный слой, а не background-attachment: fixed —
+     в iOS Safari фиксированный фон не работает. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(70vmax 55vmax at 0% 0%, var(--glow-1), transparent 70%),
+      radial-gradient(55vmax 50vmax at 100% 35%, var(--glow-2), transparent 70%),
+      radial-gradient(65vmax 55vmax at 25% 100%, var(--glow-3), transparent 70%);
   }
   /* iOS не зумит поле, если шрифт ≥ 16px */
   input,
@@ -103,6 +226,92 @@
   }
   button:disabled {
     cursor: default;
+  }
+}
+
+/*
+ * Liquid Glass. Стекло — только для слоя управления поверх содержимого (шапка, нижняя панель, «+», листы,
+ * уведомления). Карточки с цифрами остаются плотными и без размытия: так их легко читать, а WKWebView
+ * не пересчитывает размытие под каждой строкой при прокрутке.
+ * Классы лежат в слое components — обычные утилиты Tailwind (bg-*, border-*) их перекрывают.
+ */
+@layer components {
+  .glass,
+  .glass-strong,
+  .glass-tint {
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    background-image: var(--glass-sheen);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-highlight), var(--glass-shadow);
+  }
+  /* Внутри стекла «серые» подложки и разделители — полупрозрачные, чтобы не выглядеть заплатками. */
+  .glass,
+  .glass-strong {
+    --surface-2: var(--fill);
+    --surface-3: var(--fill-strong);
+    --border: var(--separator);
+  }
+  /* Навигация: шапка, нижняя панель. Выбранный пункт здесь — мягкая линза, а не белый бегунок. */
+  .glass {
+    background-color: var(--glass-bg);
+    --lens: var(--lens-soft);
+    --lens-shadow: var(--control-highlight);
+  }
+  /* Листы, диалоги, уведомления: плотнее, чтобы текст и поля читались. */
+  .glass-strong {
+    background-color: var(--glass-bg-strong);
+  }
+  /* Акцентное стекло для главного действия. */
+  .glass-tint {
+    background-color: var(--glass-tint);
+    background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0) 60%);
+    border-color: rgb(255 255 255 / 0.25);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      0 0 0 0.5px rgb(24 26 48 / 0.1),
+      0 10px 28px -8px var(--accent-glow);
+    color: var(--accent-text);
+  }
+
+  /* Выбранный вариант: «линза» над дорожкой переключателя или пунктом навигации. */
+  .glass-lens {
+    background-color: var(--lens);
+    box-shadow: var(--lens-shadow);
+  }
+
+  /* Второстепенные кнопки и чипы: светлое «стекло» без размытия. */
+  .glass-control {
+    background-color: var(--control-bg);
+    border: 1px solid var(--control-border);
+    box-shadow: var(--control-highlight), 0 1px 2px rgb(24 26 48 / 0.05);
+  }
+  @media (hover: hover) {
+    .glass-control:hover:not(:disabled) {
+      background-color: var(--control-bg-hover);
+    }
+  }
+
+  /* Блик на сплошной цветной кнопке (основная, удаление, выбранный чип). */
+  .sheen {
+    background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0) 55%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), var(--sheen-shadow);
+  }
+
+  /* Карточка с содержимым. */
+  .surface-card {
+    background-color: var(--card);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--card-shadow);
+  }
+
+  /* Главная карточка «Сегодня можно потратить»: акцентная заливка с лёгким бликом. */
+  .surface-accent {
+    background-color: var(--accent);
+    background-image:
+      radial-gradient(120% 90% at 0% 0%, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0) 55%),
+      linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 16px 36px -18px var(--accent-glow);
   }
 }
 
@@ -142,6 +351,7 @@
   animation: fade-in 150ms ease-out;
 }
 
+/* Без анимаций: линзы переключателей и навигации перескакивают сразу, листы не выезжают. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

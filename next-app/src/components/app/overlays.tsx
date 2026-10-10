@@ -18,7 +18,9 @@ export type Overlay =
   | { kind: "planned"; templateId: string; month: MonthKey }
   | { kind: "ai"; prompt?: string }
   | { kind: "auth"; mode?: "login" | "register" }
-  | { kind: "limit"; category?: string };
+  | { kind: "limit"; category?: string }
+  /** Новые операции из СМС и Siri — подтвердить или поправить. */
+  | { kind: "review" };
 
 export type Tab = "home" | "history" | "plans" | "goals" | "analytics" | "settings";
 

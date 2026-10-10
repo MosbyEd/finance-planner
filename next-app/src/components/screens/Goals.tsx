@@ -278,7 +278,7 @@ function DebtsView() {
 
 function TotalTile({ label, value, tone }: { label: string; value: Kopecks; tone: "positive" | "negative" }) {
   return (
-    <div className="rounded-3xl border border-border bg-surface p-4">
+    <div className="surface-card rounded-[28px] p-4">
       <p className="text-sm text-muted">{label}</p>
       <Money value={value} tone={value > 0 ? tone : "default"} className="mt-1 block text-lg font-semibold" />
     </div>

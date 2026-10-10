@@ -1,7 +1,7 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 const CONTROL =
-  "w-full rounded-xl border border-border-strong bg-surface px-3.5 text-text placeholder:text-muted/70 outline-none transition focus:border-accent aria-[invalid=true]:border-negative disabled:opacity-60";
+  "w-full rounded-2xl border border-border-strong bg-surface px-3.5 text-text placeholder:text-muted/70 outline-none transition focus:border-accent aria-[invalid=true]:border-negative disabled:opacity-60";
 
 /** id подсказки или ошибки под полем — для aria-describedby у самого поля. */
 export function fieldMessageId(controlId: string): string {

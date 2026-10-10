@@ -70,7 +70,7 @@ export function CategoryPicker({
             aria-pressed={c === value}
             onClick={() => onChange(c)}
             className={`h-10 rounded-full border px-3.5 text-sm transition ${
-              c === value ? "border-accent bg-accent text-accent-text" : "border-border bg-surface hover:bg-surface-2"
+              c === value ? "sheen border-accent bg-accent text-accent-text" : "glass-control"
             }`}
           >
             {c}
@@ -106,7 +106,7 @@ export function CategoryPicker({
             ref={addButtonRef}
             type="button"
             onClick={startAdding}
-            className="inline-flex h-10 items-center gap-1 rounded-full border border-dashed border-border-strong px-3.5 text-sm text-muted hover:text-text"
+            className="inline-flex h-10 items-center gap-1 rounded-full border border-dashed border-border-strong bg-card/50 px-3.5 text-sm text-muted hover:text-text"
           >
             <Icon name="plus" size={14} /> Своя
           </button>

@@ -40,24 +40,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={show}>
       {children}
-      {/* На телефоне — над нижней навигацией и слева от кнопки «+», на широком экране — по центру снизу. */}
+      {/* Стеклянные капсулы. На телефоне — над нижней панелью и слева от кнопки «+», на широком экране — по центру снизу. */}
       <div
-        className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[60] flex flex-col items-start gap-2 pl-4 pr-20 sm:bottom-6 sm:items-center sm:pr-4"
+        className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--dock-offset)+var(--dock-height)+0.75rem)] z-[60] flex flex-col items-start gap-2 pl-3 pr-20 sm:bottom-6 sm:items-center sm:pr-4"
         aria-live="polite"
       >
         {toasts.map((t) => (
           <div
             key={t.id}
             role={t.kind === "error" ? "alert" : "status"}
-            className={`pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-lg animate-sheet ${
-              t.kind === "error" ? "bg-negative-strong text-white" : "bg-text text-bg"
+            className={`pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-3xl px-4 py-3 text-sm font-medium animate-sheet ${
+              t.kind === "error" ? "bg-negative-strong text-white sheen" : "glass-strong text-text"
             }`}
           >
             <span className="flex-1">{t.message}</span>
             {t.action && (
               <button
                 type="button"
-                className="-my-2 min-h-10 shrink-0 px-1 font-semibold underline-offset-2 hover:underline"
+                className={`-my-2 min-h-10 shrink-0 px-1 font-semibold underline-offset-2 hover:underline ${
+                  t.kind === "error" ? "" : "text-accent"
+                }`}
                 onClick={() => {
                   t.action?.onClick();
                   dismiss(t.id);

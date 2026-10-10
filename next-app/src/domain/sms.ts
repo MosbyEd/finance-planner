@@ -1,7 +1,8 @@
 import type { Action } from "./actions";
-import { addDays, type IsoDate } from "./dates";
+import { addDays, addMonths, diffDays, monthKeyOf, type IsoDate, type MonthKey } from "./dates";
 import { OTHER_CATEGORY } from "./defaults";
 import { formatMoney, MAX_KOPECKS, type Kopecks } from "./money";
+import { isSkipped, occurrenceDate } from "./recurring";
 import { autoSavingByDefault } from "./savings";
 import { LIMITS, type State, type Transaction } from "./schema";
 
@@ -282,6 +283,24 @@ function isMandatoryCategory(state: State, category: string): boolean {
   return inGroup(state.categories.mandatory) && !inGroup(state.categories.flexible);
 }
 
+/**
+ * Категория для новой операции без явной категории: как у прошлой операции с тем же названием
+ * (пользователь мог её поправить), иначе по подсказкам магазинов, иначе fallback. Обязательность —
+ * как у прошлой операции или по группе категории.
+ */
+export function suggestCategory(
+  state: State,
+  kind: "income" | "expense",
+  title: string,
+  options: { fallback: string; hintFrom?: string; useHistory?: boolean },
+): { category: string; mandatory: boolean } {
+  const learned = options.useHistory === false ? null : learnedCategory(state, kind, title);
+  if (learned) return { category: learned.category, mandatory: kind === "expense" && Boolean(learned.mandatory) };
+  if (kind === "income") return { category: findCategory(state, options.fallback) ?? options.fallback, mandatory: false };
+  const category = hintedCategory(state, options.hintFrom ?? title) ?? findCategory(state, options.fallback) ?? options.fallback;
+  return { category, mandatory: isMandatoryCategory(state, category) };
+}
+
 function titleOf(op: Extract<SmsOperation, { kind: "income" | "expense" }>): string {
   const who = op.counterparty;
   switch (op.via) {
@@ -307,6 +326,89 @@ function titleOf(op: Extract<SmsOperation, { kind: "income" | "expense" }>): str
   }
 }
 
+// ---------- сопоставление с планом ----------
+
+/** На сколько дней раньше или позже плана может прийти доход или пройти платёж. */
+const MATCH_WINDOW_DAYS = { income: 10, expense: 7 } as const;
+
+export interface PlannedMatch {
+  templateId: string;
+  month: MonthKey;
+  title: string;
+  /** Плановая сумма (из шаблона). */
+  planned: Kopecks;
+}
+
+/**
+ * Регулярный доход или платёж, которому соответствует операция из СМС. Суммы могут отличаться от плана,
+ * поэтому сопоставляем прежде всего по смыслу и дате:
+ *  - этот шаблон уже подтверждали СМС с тем же магазином или отправителем;
+ *  - зарплата, аванс или премия — шаблон с той же категорией;
+ *  - название шаблона совпадает с магазином (сумма — в пределах ±60 %);
+ *  - та же категория (сумма — в пределах ±40 %);
+ *  - сумма совпадает до копейки и дата — в пределах 3 дней;
+ *  - перевод без получателя на ту же сумму (±10 %) в пределах 3 дней.
+ * Из подходящих выбирается самый уверенный, затем ближайший по сумме и дате. Уже подтверждённые СМС
+ * и пропущенные месяцы не рассматриваются.
+ */
+export function matchPlanned(
+  state: State,
+  op: Extract<SmsOperation, { kind: "income" | "expense" }>,
+  date: IsoDate,
+  category: string,
+): PlannedMatch | null {
+  const counterparty = normalizeName(op.counterparty);
+  const smsMonth = monthKeyOf(date);
+  const months = [addMonths(smsMonth, -1), smsMonth, addMonths(smsMonth, 1)];
+  const occurrences = new Map<string, Transaction>();
+  const confirmedNotes = new Map<string, string[]>();
+  for (const t of state.transactions) {
+    if (!t.templateId || !t.occurrenceMonth) continue;
+    occurrences.set(`${t.templateId}|${t.occurrenceMonth}`, t);
+    if (t.note.startsWith(SMS_NOTE_PREFIX)) {
+      const list = confirmedNotes.get(t.templateId) ?? [];
+      list.push(normalizeName(t.note));
+      confirmedNotes.set(t.templateId, list);
+    }
+  }
+  const payroll = op.kind === "income" && (op.via === "salary" || op.via === "advance" || op.via === "bonus");
+
+  let best: { match: PlannedMatch; score: number } | null = null;
+  for (const template of state.templates) {
+    if (!template.active || template.kind !== op.kind) continue;
+    const learned = counterparty.length >= 3 && (confirmedNotes.get(template.id) ?? []).some((n) => n.includes(counterparty));
+    const titleKey = normalizeName(template.title);
+    const titleMatch =
+      counterparty.length >= 3 && titleKey.length >= 3 && (counterparty.includes(titleKey) || titleKey.includes(counterparty));
+    const categoryMatch = normalizeName(template.category) === normalizeName(category);
+    const diff = Math.abs(op.amount - template.amount) / template.amount;
+
+    for (const month of months) {
+      const planned = occurrenceDate(template, month);
+      if (planned < template.startDate) continue;
+      const distance = Math.abs(diffDays(planned, date));
+      if (distance > MATCH_WINDOW_DAYS[op.kind] || isSkipped(state, template.id, month)) continue;
+      const existing = occurrences.get(`${template.id}|${month}`);
+      if (existing?.note.startsWith(SMS_NOTE_PREFIX)) continue;
+
+      let strength = 0;
+      if (learned && diff <= 2) strength = 5;
+      else if (payroll && categoryMatch) strength = 4;
+      else if (titleMatch && diff <= 0.6) strength = 3;
+      else if (categoryMatch && diff <= 0.4) strength = 2;
+      else if (diff === 0 && distance <= 3) strength = 2;
+      else if (op.via === "transfer" && !counterparty && diff <= 0.1 && distance <= 3) strength = 1;
+      if (!strength) continue;
+
+      const score = strength * 1000 - diff * 100 - distance;
+      if (!best || score > best.score) {
+        best = { match: { templateId: template.id, month, title: template.title, planned: template.amount }, score };
+      }
+    }
+  }
+  return best?.match ?? null;
+}
+
 export interface SmsPlan {
   actions: Action[];
   /** Что добавлено — для уведомления «Команд». */
@@ -317,14 +419,21 @@ export interface SmsPlan {
  * Действия для операции из СМС. idBase — устойчивый id (по тексту СМС): повторная отправка той же СМС
  * не создаст вторую операцию.
  */
+/** Заметка операции из СМС: сам текст СМС. По ней же узнаём повторно присланную СМС и уже подтверждённые начисления. */
+export const SMS_NOTE_PREFIX = "СМС: ";
+
+export function smsNote(sms: string): string {
+  return `${SMS_NOTE_PREFIX}${normalizeSms(sms)}`.slice(0, LIMITS.note).trim();
+}
+
 export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
-  const note = `СМС: ${normalizeSms(ctx.sms)}`.slice(0, LIMITS.note).trim();
+  const note = smsNote(ctx.sms);
   const money = formatMoney(op.amount);
 
   if (op.kind === "toSavings" || op.kind === "fromSavings") {
     const amount = op.kind === "toSavings" ? op.amount : -op.amount;
     return {
-      actions: [{ type: "savings.move", id: ctx.idBase, date: ctx.date, amount, note }],
+      actions: [{ type: "savings.move", id: ctx.idBase, date: ctx.date, amount, note, review: true }],
       summary: op.kind === "toSavings" ? `В сбережения ${money}` : `Из сбережений ${money}`,
     };
   }
@@ -346,27 +455,40 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
             note,
             mandatory: false,
             autoSaving: false,
+            review: true,
           },
         },
-        { type: "savings.move", id: `${ctx.idBase}.m`, date: ctx.date, amount: op.amount, note },
+        { type: "savings.move", id: `${ctx.idBase}.m`, date: ctx.date, amount: op.amount, note, review: true },
       ],
       summary: `Проценты ${money} → в сбережения`,
     };
   }
 
   const title = titleOf(op).slice(0, LIMITS.title).trim();
-  const learned = op.counterparty || op.via === "transfer" ? learnedCategory(state, op.kind, title) : null;
-  let category: string;
-  let mandatory = false;
-  if (learned) {
-    category = learned.category;
-    mandatory = op.kind === "expense" && Boolean(learned.mandatory);
-  } else if (op.kind === "income") {
-    category = findCategory(state, INCOME_CATEGORY[op.via]) ?? INCOME_CATEGORY[op.via];
-  } else {
-    const fallback = EXPENSE_FALLBACK[op.via];
-    category = hintedCategory(state, op.counterparty) ?? findCategory(state, fallback) ?? fallback;
-    mandatory = isMandatoryCategory(state, category);
+  const useHistory = Boolean(op.counterparty) || op.via === "transfer";
+  const { category, mandatory } =
+    op.kind === "income"
+      ? suggestCategory(state, "income", title, { fallback: INCOME_CATEGORY[op.via], useHistory })
+      : suggestCategory(state, "expense", title, { fallback: EXPENSE_FALLBACK[op.via], hintFrom: op.counterparty, useHistory });
+
+  // Запланированный регулярный платёж или доход: отмечаем его фактическими суммой и датой, а не добавляем второй раз.
+  const planned = matchPlanned(state, op, ctx.date, category);
+  if (planned) {
+    const differs = planned.planned !== op.amount ? ` (по плану ${formatMoney(planned.planned)})` : "";
+    return {
+      actions: [
+        {
+          type: "occurrence.confirm",
+          templateId: planned.templateId,
+          month: planned.month,
+          amount: op.amount,
+          date: ctx.date,
+          note,
+          review: true,
+        },
+      ],
+      summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${planned.title} — регулярный${differs}`,
+    };
   }
 
   // «Копилка с покупок» — только с покупок картой: переводы, платежи (банку, за услуги) и снятие наличных не покупки.
@@ -376,7 +498,7 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
     actions: [
       {
         type: "tx.add",
-        tx: { id: ctx.idBase, type: op.kind, amount: op.amount, date: ctx.date, category, title, note, mandatory, autoSaving },
+        tx: { id: ctx.idBase, type: op.kind, amount: op.amount, date: ctx.date, category, title, note, mandatory, autoSaving, review: true },
       },
     ],
     summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${title} → ${category}`,

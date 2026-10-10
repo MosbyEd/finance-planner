@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyActions, actionSchema } from "./actions";
-import { buildAiSystemPrompt, parseAiReply, proposalToActions } from "./ai";
+import { buildAiSystemPrompt, parseAiReply, proposalToActions, refineLocalProposal } from "./ai";
+import { emptyState } from "./defaults";
 import { stateWith, testId, tx } from "./test-utils";
 
 describe("разбор ответа модели", () => {
@@ -77,5 +78,28 @@ describe("системный промпт", () => {
     const prompt = buildAiSystemPrompt(s, "2026-03-15");
     expect(prompt).toContain('"balanceOnAccount":12345');
     expect(prompt).toContain("AI_CMDS");
+  });
+});
+
+describe("страховка для модели на телефоне", () => {
+  const state = stateWith({ categories: { ...emptyState().categories, mandatory: ["Подписки", "Аренда"] } });
+  const today = "2026-10-10";
+
+  it("на обычный вопрос придуманное предложение отбрасывается", () => {
+    const reply =
+      'Сегодня можно потратить 773 рубля.\n\nAI_CMDS: {"operations":[{"type":"expense","amount":773,"category":"Продукты","title":"Деньги на сегодня","date":"2026-10-10"}]}';
+    const parsed = parseAiReply(reply, state, today);
+    expect(parsed.proposal).not.toBeNull();
+    expect(refineLocalProposal(parsed.proposal, "Сколько можно тратить до зарплаты?", state)).toBeNull();
+  });
+
+  it("на просьбу добавить — категория по подсказкам, а не та, что выбрала модель", () => {
+    const reply =
+      'Предлагаю добавить расход на кофе.\n\nAI_CMDS: {"operations":[{"type":"expense","amount":300,"category":"Подписки","title":"Кофе","date":"2026-10-10","mandatory":true}]}';
+    const parsed = parseAiReply(reply, state, today);
+    const refined = refineLocalProposal(parsed.proposal, "Добавь расход 300 рублей на кофе сегодня", state);
+    expect(refined?.operations).toEqual([
+      expect.objectContaining({ amount: 30_000, title: "Кофе", category: "Кафе и рестораны", mandatory: false }),
+    ]);
   });
 });
