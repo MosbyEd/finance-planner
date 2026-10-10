@@ -74,9 +74,10 @@ private enum Palette {
         UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 
-    static let accent = dynamic(0x3F51D9, 0x8796FF)
-    static let accent2 = dynamic(0x5A3FD6, 0xA08CFF)
-    static let accentText = dynamic(0xFFFFFF, 0x0F1120)
+    // Фон виджета. В тёмной теме — глубокий индиго (как у карточки лимита в приложении), текст в обеих — белый.
+    static let accent = dynamic(0x3F51D9, 0x2E3BA6)
+    static let accent2 = dynamic(0x5A3FD6, 0x45309F)
+    static let accentText = Color.white
 
     static func statusColor(_ tone: String) -> Color {
         switch tone {

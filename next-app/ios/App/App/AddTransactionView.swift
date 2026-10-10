@@ -104,8 +104,8 @@ struct AddTransactionView: View {
                                         .font(.subheadline.weight(selected ? .semibold : .regular))
                                         .padding(.horizontal, 14)
                                         .frame(minHeight: 40)
-                                        .foregroundStyle(selected ? Theme.accentText : Theme.text)
-                                        .background(selected ? Theme.accent : Theme.fill, in: .capsule)
+                                        .foregroundStyle(selected ? .white : Theme.text)
+                                        .background(selected ? Theme.action : Theme.fill, in: .capsule)
                                 }
                                 .buttonStyle(PressableStyle())
                                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -166,7 +166,7 @@ struct AddTransactionView: View {
                     .frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(.glassProminent)
-                .tint(Theme.accent)
+                .tint(Theme.action)
                 .disabled(!canSave)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)

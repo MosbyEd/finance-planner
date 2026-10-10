@@ -19,14 +19,16 @@ enum Theme {
     }
 
     static let accentUI = dynamic(0x3F51D9, 0x8796FF)
+    /// Заливка основных кнопок («+», «Добавить», «Отложить»): в тёмной теме — глубокий индиго под белым текстом,
+    /// а не светлый accent (светло-сиреневая заливка на тёмном фоне выглядит блёкло).
+    static let actionUI = dynamic(0x3F51D9, 0x4655DB)
+    static let action = Color(actionUI)
     static let bgUI = dynamic(0xF4F4F1, 0x111110)
 
     static let accent = Color(accentUI)
     static let accent2 = Color(dynamic(0x5A3FD6, 0xA08CFF))
     static let accentSoft = Color(dynamic(0xE9EBFC, 0x262B4D))
-    static let accentText = Color(dynamic(0xFFFFFF, 0x0F1120))
     static let bg = Color(bgUI)
-    static let card = Color(dynamic(0xFFFFFF, 0x1E1E20, lightAlpha: 0.74, darkAlpha: 0.72))
     static let surface2 = Color(dynamic(0xF0EFEB, 0x242421))
     static let surface3 = Color(dynamic(0xE7E5E0, 0x2F2F2B))
     static let text = Color(dynamic(0x1C1B19, 0xF1F0EC))
@@ -40,9 +42,12 @@ enum Theme {
     static let negativeStrongUI = dynamic(0xB8293D, 0xC93A4F)
     static let warning = Color(dynamic(0x965A00, 0xF0A83A))
     static let warningSoft = Color(dynamic(0xFDF1DC, 0x3A2A12))
-    static let glow1 = Color(dynamic(0x6373F0, 0x6E78FF, lightAlpha: 0.16, darkAlpha: 0.18))
-    static let glow2 = Color(dynamic(0x38BDAA, 0x28AAA0, lightAlpha: 0.12, darkAlpha: 0.1))
-    static let glow3 = Color(dynamic(0xF08CAA, 0xC85AA0, lightAlpha: 0.12, darkAlpha: 0.1))
+    // Пятна фона. В тёмной теме ярче, чем в вебе: карточки здесь стеклянные, им нужно что преломлять.
+    static let glow1 = Color(dynamic(0x6373F0, 0x6E78FF, lightAlpha: 0.16, darkAlpha: 0.3))
+    static let glow2 = Color(dynamic(0x38BDAA, 0x28AAA0, lightAlpha: 0.12, darkAlpha: 0.18))
+    static let glow3 = Color(dynamic(0xF08CAA, 0xC85AA0, lightAlpha: 0.12, darkAlpha: 0.18))
+    /// Оттенок стекла карточки лимита в тёмной теме — глубокий индиго под белым текстом.
+    static let heroTint = Color(dynamic(0x3F51D9, 0x3A4BD0, lightAlpha: 0.9, darkAlpha: 0.62))
 
     /// Цвет текста/значка и мягкая подложка смыслового тона.
     static func color(_ tone: Tone) -> Color {

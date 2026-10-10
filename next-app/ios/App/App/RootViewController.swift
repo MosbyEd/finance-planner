@@ -48,7 +48,7 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
 
         var add = UIButton.Configuration.prominentGlass()
         add.image = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold))
-        add.baseBackgroundColor = Theme.accentUI
+        add.baseBackgroundColor = Theme.actionUI
         add.cornerStyle = .capsule
         addButton.configuration = add
         addButton.accessibilityLabel = "Добавить операцию"

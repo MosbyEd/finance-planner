@@ -25,6 +25,14 @@ describe("разбор СМС Сбербанка", () => {
       { kind: "expense", via: "purchase", amount: 19_900, time: "01:49", counterparty: "PODPISKA PAKET" },
     ],
     [
+      "Счёт карты MIR-7759 19:22 Покупка по СБП 1234р Ташир - Пицца Баланс: 5000.50р",
+      { kind: "expense", via: "purchase", amount: 123_400, time: "19:22", counterparty: "Ташир - Пицца" },
+    ],
+    [
+      "Счёт карты MIR-7759 09:10 Оплата по QR-коду СБП 350р KOFEMANIYA Баланс: 4650.50р",
+      { kind: "expense", via: "payment", amount: 35_000, counterparty: "KOFEMANIYA" },
+    ],
+    [
       "СЧЁТ5804 19:31 Перевод 800р от Валерия В. Баланс: 5897.76р",
       { kind: "income", via: "transfer", amount: 80_000, time: "19:31", counterparty: "Валерия В." },
     ],
@@ -143,6 +151,30 @@ describe("операции из СМС", () => {
     });
     const result = plan(s, "Счёт карты MIR-7759 19:35 Покупка 1440р CHESTNYJ LOSOS Баланс: 4457.76р");
     expect(result.actions[0]).toMatchObject({ tx: { category: "Кафе и рестораны" } });
+  });
+
+  it("название и категорию берёт из прошлой проверенной операции с тем же магазином — как пользователь её записал", () => {
+    const past = "Счёт карты MIR-7759 08:40 Покупка 20р IP KASYANOV A.A Баланс: 4000р";
+    const s = stateWith({
+      transactions: [
+        // Пользователь переименовал операцию из СМС и поставил свою категорию — отметка «на проверку» снята.
+        tx({ type: "expense", amount: 2_000, date: "2026-10-09", title: "Кофе у дома", category: "Кафе и рестораны", note: `СМС: ${past}` }),
+      ],
+    });
+    const result = plan(s, "Счёт карты MIR-7759 08:35 Покупка по СБП 20р IP KASYANOV A.A Баланс: 3980р");
+    expect(result.actions[0]).toMatchObject({ tx: { title: "Кофе у дома", category: "Кафе и рестораны", review: true } });
+    expect(result.summary).toContain("Кофе у дома → Кафе и рестораны");
+  });
+
+  it("непроверенную догадку не запоминает: название — из СМС", () => {
+    const past = "Счёт карты MIR-7759 08:40 Покупка 20р IP KASYANOV A.A Баланс: 4000р";
+    const s = stateWith({
+      transactions: [
+        tx({ type: "expense", amount: 2_000, date: "2026-10-09", title: "Что-то", category: "Подарки", note: `СМС: ${past}`, review: true }),
+      ],
+    });
+    const result = plan(s, "Счёт карты MIR-7759 08:35 Покупка 20р IP KASYANOV A.A Баланс: 3980р");
+    expect(result.actions[0]).toMatchObject({ tx: { title: "IP KASYANOV A.A", category: "Другое" } });
   });
 
   it("подписка — обязательный расход, если такая категория у пользователя обязательная", () => {

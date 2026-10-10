@@ -111,8 +111,18 @@ struct HomeCard<Content: View, Trailing: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: .rect(cornerRadius: 28, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 14, y: 8)
+        .glassCard()
+    }
+}
+
+extension View {
+    /// Подложка карточки — полупрозрачное системное стекло Liquid Glass. При «Уменьшить прозрачность»
+    /// система сама делает его плотным.
+    func glassCard(tint: Color? = nil, interactive: Bool = false) -> some View {
+        var glass = Glass.regular
+        if let tint { glass = glass.tint(tint) }
+        if interactive { glass = glass.interactive() }
+        return glassEffect(glass, in: .rect(cornerRadius: 28, style: .continuous))
     }
 }
 
@@ -150,8 +160,8 @@ struct ActionButton: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14)
                 .frame(minHeight: 36)
-                .foregroundStyle(action.primary ? Theme.accentText : Theme.text)
-                .background(action.primary ? Theme.accent : Theme.fill, in: .capsule)
+                .foregroundStyle(action.primary ? .white : Theme.text)
+                .background(action.primary ? Theme.action : Theme.fill, in: .capsule)
         }
         .buttonStyle(.plain)
         .frame(minHeight: 44)
@@ -172,6 +182,7 @@ struct PressableStyle: ButtonStyle {
 
 private struct TodayCard: View {
     let today: HomeModel.Today
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -221,13 +232,28 @@ private struct TodayCard: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(Theme.accentText)
-        .background(
-            LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: .rect(cornerRadius: 28, style: .continuous)
-        )
-        .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 10)
+        .foregroundStyle(.white)
+        .modifier(HeroSurface(dark: colorScheme == .dark))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Подложка карточки лимита. Светлая тема — фирменный градиент; тёмная — стекло с глубоким индиго-оттенком:
+/// светлый сиреневый градиент на тёмном фоне выглядел блёкло.
+private struct HeroSurface: ViewModifier {
+    let dark: Bool
+
+    func body(content: Content) -> some View {
+        if dark {
+            content.glassCard(tint: Theme.heroTint)
+        } else {
+            content
+                .background(
+                    LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: .rect(cornerRadius: 28, style: .continuous)
+                )
+                .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 10)
+        }
     }
 }
 
@@ -242,7 +268,7 @@ private struct CardButton: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14)
                 .frame(minHeight: 40)
-                .background(Theme.accentText.opacity(0.15), in: .capsule)
+                .background(.white.opacity(0.16), in: .capsule)
         }
         .buttonStyle(PressableStyle())
         .frame(minHeight: 44)
@@ -262,14 +288,14 @@ private struct BalancePrompt: View {
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 16)
                     .frame(minHeight: 44)
-                    .foregroundStyle(Theme.accentText)
-                    .background(Theme.accent, in: .capsule)
+                    .foregroundStyle(.white)
+                    .background(Theme.action, in: .capsule)
             }
             .buttonStyle(PressableStyle())
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.accentSoft, in: .rect(cornerRadius: 28, style: .continuous))
+        .glassCard(tint: Theme.accent.opacity(0.18))
     }
 }
 
@@ -401,7 +427,7 @@ private struct OnboardingCard: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: .rect(cornerRadius: 28, style: .continuous))
+        .glassCard()
     }
 }
 
@@ -492,10 +518,10 @@ private struct Tile: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: .rect(cornerRadius: 28, style: .continuous))
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 8)
+            .contentShape(.rect(cornerRadius: 28, style: .continuous))
+            .glassCard(interactive: true)
         }
-        .buttonStyle(PressableStyle())
+        .buttonStyle(.plain)
     }
 }
 

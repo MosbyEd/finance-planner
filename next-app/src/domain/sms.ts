@@ -48,6 +48,8 @@ export function normalizeSms(text: string): string {
 const AMOUNT = String.raw`(\d{1,3}(?: \d{3})+|\d+)(?:[.,](\d{1,2}))?\s?(?:руб\.?|р\.?|₽|RUB)(?![а-яё])`;
 /** Остаток строки — магазин или получатель (текст уже без «Баланс…»). */
 const TAIL = String.raw`(?:\s+(.+))?$`;
+/** Способ оплаты между словом и суммой: «Покупка по СБП 350р», «Оплата по QR-коду СБП 500р». */
+const VIA_SBP = String.raw`(?:\s+по\s+(?:QR-?коду(?:\s+СБП)?|СБП))?`;
 
 function amountOf(rubles: string, fraction: string | undefined): Kopecks | null {
   const whole = Number(rubles.replace(/ /g, ""));
@@ -146,10 +148,10 @@ export function parseSberSms(raw: string): SmsOperation | null {
   m = on(String.raw`Перевод(?:\s+по\s+СБП)?(?:\s+(?:с|из)\s+.+?)?\s+\+${AMOUNT}(?:\s+от)?${TAIL}`);
   if (m) return income("transfer", m, m[3]);
 
-  m = on(String.raw`Покупка\s+${AMOUNT}${TAIL}`);
+  m = on(String.raw`Покупка${VIA_SBP}\s+${AMOUNT}${TAIL}`);
   if (m) return expense("purchase", m, m[3]);
 
-  m = on(String.raw`Оплата(?:\s+услуг)?\s+${AMOUNT}${TAIL}`);
+  m = on(String.raw`Оплата(?:\s+услуг)?${VIA_SBP}\s+${AMOUNT}${TAIL}`);
   if (m) return expense("payment", m, m[3]);
 
   m = on(String.raw`Выдача(?:\s+наличных)?\s+${AMOUNT}${TAIL}`);
@@ -164,7 +166,7 @@ export function parseSberSms(raw: string): SmsOperation | null {
     return expense("transfer", m, to);
   }
 
-  m = on(String.raw`Списание\s+${AMOUNT}${TAIL}`);
+  m = on(String.raw`Списание${VIA_SBP}\s+${AMOUNT}${TAIL}`);
   if (m) return expense("writeoff", m, m[3]);
 
   return null;
@@ -269,6 +271,24 @@ function learnedCategory(state: State, type: "income" | "expense", title: string
   for (let i = state.transactions.length - 1; i >= 0; i--) {
     const t = state.transactions[i];
     if (t.type === type && t.category && normalizeName(t.title) === key) return t;
+  }
+  return null;
+}
+
+/**
+ * Как пользователь записал такую операцию в прошлый раз: последняя проверенная им операция из СМС
+ * с тем же магазином или отправителем. Её название и категория важнее всего: он мог переименовать
+ * «IP KASYANOV A.A» в «Кофе у дома» и поставить свою категорию. Непроверенные не учитываются —
+ * ошибочная догадка не должна закрепляться; начисления регулярных платежей — тоже (у них название шаблона).
+ */
+function rememberedOperation(state: State, op: Extract<SmsOperation, { kind: "income" | "expense" }>): Transaction | null {
+  const key = normalizeName(op.counterparty);
+  if (key.length < 2) return null;
+  for (let i = state.transactions.length - 1; i >= 0; i--) {
+    const t = state.transactions[i];
+    if (t.review || t.type !== op.kind || t.templateId || !t.category || !t.note.startsWith(SMS_NOTE_PREFIX)) continue;
+    const past = parseSberSms(t.note.slice(SMS_NOTE_PREFIX.length));
+    if (past && past.kind === op.kind && normalizeName(past.counterparty) === key) return t;
   }
   return null;
 }
@@ -486,10 +506,13 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
     };
   }
 
-  const title = titleOf(op).slice(0, LIMITS.title).trim();
+  // Название и категория — как пользователь записал такую операцию в прошлый раз, иначе из СМС и подсказок.
+  const remembered = rememberedOperation(state, op);
+  const title = (remembered?.title || titleOf(op)).slice(0, LIMITS.title).trim();
   const useHistory = Boolean(op.counterparty) || op.via === "transfer";
-  const { category, mandatory } =
-    op.kind === "income"
+  const { category, mandatory } = remembered
+    ? { category: remembered.category, mandatory: op.kind === "expense" && Boolean(remembered.mandatory) }
+    : op.kind === "income"
       ? suggestCategory(state, "income", title, { fallback: INCOME_CATEGORY[op.via], useHistory })
       : suggestCategory(state, "expense", title, { fallback: EXPENSE_FALLBACK[op.via], hintFrom: op.counterparty, useHistory });
 
