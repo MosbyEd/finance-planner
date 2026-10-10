@@ -8,7 +8,7 @@ import type { Overlay, Tab } from "../overlays";
  */
 export type NativeCommand =
   | { type: "open"; overlay: Overlay }
-  | { type: "tab"; tab: Tab }
+  | { type: "tab"; tab: Tab; section?: string }
   | { type: "rollover"; month: string; amount: number; decision: "saved" | "dismissed" }
   | { type: "guestImport"; accept: boolean }
   | { type: "legacyImport"; accept: boolean }
@@ -63,7 +63,7 @@ const isoDate = z.string().refine((v) => isValidIsoDate(v), "Некоррект�
 export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("type", [
   // Окна приходят из модели, которую построил этот же код, — проверяем только вид окна.
   z.object({ type: z.literal("open"), overlay: z.looseObject({ kind: z.enum(OVERLAY_KINDS) }) as unknown as z.ZodType<Overlay> }),
-  z.object({ type: z.literal("tab"), tab: z.enum(TABS) }),
+  z.object({ type: z.literal("tab"), tab: z.enum(TABS), section: z.string().max(40).optional() }),
   z.object({
     type: z.literal("rollover"),
     month: z.string(),

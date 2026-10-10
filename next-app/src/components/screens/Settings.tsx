@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { activeAccounts } from "@/domain/accounts";
 import { useSnapshot } from "@/client/react";
 import { isNativeApp } from "@/client/runtime";
@@ -14,7 +14,8 @@ import { NotificationsSection } from "./settings/NotificationsSection";
 import { ProfileSection } from "./settings/ProfileSection";
 import { SavingsSection } from "./settings/SavingsSection";
 import { SmsImportSection } from "./settings/SmsImportSection";
-import { SettingsGroup, SettingsRow, type RowIconName, type RowSummary } from "./settings/SettingsList";
+import { useUi } from "../app/overlays";
+import { SettingsGroup, SettingsRow, SettingsSection, type RowIconName, type RowSummary } from "./settings/SettingsList";
 
 interface Row {
   id: string;
@@ -37,7 +38,18 @@ interface Group {
  */
 export function Settings() {
   const { mode, user, state, sessionExpired } = useSnapshot();
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { settingsSection, openSettings } = useUi();
+  // Состояние, которое разделы сообщают сами (СМС, уведомления, черновик формы), — для их строк.
+  const [reported, setReported] = useState<Record<string, RowSummary | null>>({});
+  // Одинаковое состояние (по тексту и тону) не перерисовывает список. Функция постоянная: раздел
+  // подписывается на неё в эффекте (см. SettingsSection).
+  const report = useCallback((id: string, summary: RowSummary | null) => {
+    setReported((current) => {
+      const prev = current[id] ?? null;
+      if (prev?.text === summary?.text && prev?.tone === summary?.tone) return current;
+      return { ...current, [id]: summary };
+    });
+  }, []);
   const native = isNativeApp();
   // Те же условия, что внутри разделов: где раздел ничего не рисует, строки нет.
   const signedIn = mode !== "guest" && user !== null;
@@ -104,29 +116,47 @@ export function Settings() {
     },
   ];
 
+  const allRows = groups.flatMap((g) => g.rows.filter((r): r is Row => r !== false));
+  const current = allRows.find((r) => r.id === settingsSection) ?? null;
+
   return (
     <div className="space-y-4">
-      {groups.map((group) => {
-        const rows = group.rows.filter((r): r is Row => r !== false);
-        if (!rows.length) return null;
-        return (
-          <SettingsGroup key={group.label} label={group.label}>
-            {rows.map((row, i) => (
-              <SettingsRow
-                key={row.id}
-                icon={row.icon}
-                title={row.title}
-                summary={typeof row.summary === "string" ? { text: row.summary } : row.summary}
-                open={openId === row.id}
-                onToggle={() => setOpenId((current) => (current === row.id ? null : row.id))}
-                divider={i > 0}
-              >
-                {row.content}
-              </SettingsRow>
-            ))}
-          </SettingsGroup>
-        );
-      })}
+      {/* Список разделов. Открыт раздел — список скрыт, раздел показан отдельной страницей. */}
+      <div hidden={current !== null} className="space-y-4">
+        {groups.map((group) => {
+          const rows = group.rows.filter((r): r is Row => r !== false);
+          if (!rows.length) return null;
+          return (
+            <SettingsGroup key={group.label} label={group.label}>
+              {rows.map((row, i) => {
+                const summary = reported[row.id] ?? (typeof row.summary === "string" ? { text: row.summary } : row.summary);
+                return (
+                  <SettingsRow
+                    key={row.id}
+                    icon={row.icon}
+                    title={row.title}
+                    summary={summary}
+                    onOpen={() => openSettings(row.id)}
+                    divider={i > 0}
+                  />
+                );
+              })}
+            </SettingsGroup>
+          );
+        })}
+      </div>
+      {allRows.map((row) => (
+        <SettingsSection
+          key={row.id}
+          title={row.title}
+          open={current?.id === row.id}
+          onBack={() => openSettings(null)}
+          id={row.id}
+          onReport={report}
+        >
+          {row.content}
+        </SettingsSection>
+      ))}
     </div>
   );
 }

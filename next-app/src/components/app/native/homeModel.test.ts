@@ -117,3 +117,19 @@ describe("расхождение остатка с банком", () => {
     expect(model(s).attention.some((r) => r.id === "bank:main")).toBe(false);
   });
 });
+
+describe("счета на Главной", () => {
+  it("три самых важных: просроченная кредитка, затем крупные счета для трат; всего — отдельно", () => {
+    const s = applyActions(base(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 100_000 },
+      { type: "account.add", account: { id: "cash", name: "Наличные", kind: "cash", spending: true } },
+      { type: "balance.set", id: "c", date: "2026-10-01", actual: 900_000, accountId: "cash" },
+      { type: "account.add", account: { id: "dep", name: "Вклад", kind: "savings", spending: false } },
+      { type: "account.add", account: { id: "cc", name: "Кредитка", kind: "credit", spending: false, graceDays: 5 } },
+      { type: "tx.add", tx: { id: "buy", type: "expense", amount: 50_000, date: "2026-09-01", category: "Продукты", title: "", note: "", mandatory: false, autoSaving: false, accountId: "cc" } },
+    ]);
+    const m = model(s);
+    expect(m.accountsTotal).toBe(5); // с «Основным счётом» и «Сбережениями» по умолчанию
+    expect(m.accounts.map((a) => a.id)).toEqual(["cc", "cash", "main"]);
+  });
+});

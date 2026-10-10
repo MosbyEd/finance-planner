@@ -116,6 +116,35 @@ export function templateRoute(state: State, t: { accountId?: string; toAccountId
   return from;
 }
 
+/** Группа счёта на экране «Счета». */
+export type AccountGroup = "spending" | "savings" | "credit" | "other";
+
+export const ACCOUNT_GROUPS: { id: AccountGroup; title: string }[] = [
+  { id: "spending", title: "Для трат" },
+  { id: "savings", title: "Накопления" },
+  { id: "credit", title: "Кредитки" },
+  { id: "other", title: "Другие" },
+];
+
+export function accountGroup(account: Account): AccountGroup {
+  if (account.kind === "credit") return "credit";
+  if (isSpendingAccount(account)) return "spending";
+  if (account.kind === "savings") return "savings";
+  return "other";
+}
+
+/**
+ * Самые важные счета для Главной: кредитка с прошедшим льготным периодом, кредитки с долгом, крупные счета
+ * для трат, затем остальные. Остальное — на экране «Счета».
+ */
+export function previewAccountRows(rows: AccountRow[], limit = 3): AccountRow[] {
+  const rank = (row: AccountRow) =>
+    row.overdue ? 0 : row.account.kind === "credit" && row.negative ? 1 : accountGroup(row.account) === "spending" ? 2 : 3;
+  return [...rows]
+    .sort((a, b) => rank(a) - rank(b) || (rank(a) === 2 ? b.balance - a.balance : 0))
+    .slice(0, limit);
+}
+
 /** Карта последней операции по этому счёту — её предлагаем по умолчанию. */
 export function lastCardOf(state: State, accountId: string): string | null {
   const account = findAccount(state, accountId);

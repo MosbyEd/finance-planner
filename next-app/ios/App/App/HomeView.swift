@@ -83,7 +83,7 @@ private struct HomeContent: View {
                 Tiles(tiles: tiles)
             }
             if let accounts = model.accounts, !accounts.isEmpty {
-                AccountsCard(accounts: accounts)
+                AccountsCard(accounts: accounts, total: model.accountsTotal ?? accounts.count)
             }
             if let month = model.month {
                 MonthCard(month: month)
@@ -570,12 +570,16 @@ private struct Tile: View {
 
 // MARK: - Счета
 
+/// Три самых важных счёта; все — на экране «Счета» (Настройки → Счета).
 private struct AccountsCard: View {
     let accounts: [HomeModel.Account]
+    let total: Int
 
     var body: some View {
         HomeCard(title: "Счета") {
-            LinkButton(title: "Перевод") { AppShell.shared.open(["kind": .string("transfer")]) }
+            LinkButton(title: total > accounts.count ? "Все \(total)" : "Все счета") {
+                Task { await AppShell.shared.perform(.command("tab", ["tab": .string("settings"), "section": .string("accounts")])) }
+            }
         } content: {
             VStack(spacing: 0) {
                 ForEach(accounts) { account in

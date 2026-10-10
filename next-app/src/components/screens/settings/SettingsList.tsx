@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Card } from "../../ui/controls";
 import { Icon, type IconName } from "../../ui/Icon";
 
@@ -85,86 +85,91 @@ export function SettingsGroup({ label, children }: { label: string; children: Re
   );
 }
 
-/**
- * Строка раздела: значок, название и краткое состояние; нажатие раскрывает раздел на месте.
- * Содержимое смонтировано и в свёрнутом виде (скрыто): черновики форм не теряются, а разделы
- * сами сообщают состояние для строки.
- */
+/** Строка раздела: значок, название, краткое состояние и «›»; нажатие открывает раздел отдельной страницей. */
 export function SettingsRow({
   icon,
   title,
   summary,
-  open,
-  onToggle,
+  onOpen,
   divider,
-  children,
 }: {
   icon: RowIconName;
   title: string;
   summary?: RowSummary | null;
-  open: boolean;
-  onToggle: () => void;
+  onOpen: () => void;
   /** Разделитель сверху — у всех строк группы, кроме первой. */
   divider: boolean;
-  children: ReactNode;
 }) {
-  const [reported, setReported] = useState<RowSummary | null>(null);
-  const shown = reported ?? summary ?? null;
-  const id = useId();
-  const buttonId = `${id}-button`;
-  const titleId = `${id}-title`;
-  const panelId = `${id}-panel`;
-  const headerRef = useRef<HTMLHeadingElement>(null);
-
-  // Раскрытый раздел — к началу экрана, если его строка ушла под шапку (выше свернулся длинный раздел)
-  // или открылась у нижнего края и содержимое не видно.
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!open || !header) return;
-    const top = header.getBoundingClientRect().top;
-    const margin = parseFloat(getComputedStyle(header).scrollMarginTop) || 0;
-    if (top >= margin && top <= window.innerHeight * 0.6) return;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    header.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
-  }, [open]);
-
   return (
     <li className="relative">
       {divider && <span aria-hidden="true" className="absolute left-16 right-0 top-0 h-px bg-separator" />}
-      <h2 ref={headerRef} className="scroll-mt-[calc(4.5rem+env(safe-area-inset-top))] sm:scroll-mt-36">
-        <button
-          id={buttonId}
-          type="button"
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={onToggle}
-          className="flex min-h-[3.25rem] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:-outline-offset-2 sm:px-5"
-        >
-          <RowIcon name={icon} />
-          {/* Название не переносится; не помещается — сокращается состояние (например, длинный логин). */}
-          <span id={titleId} className="max-w-[70%] shrink-0 text-[15px] font-medium leading-snug">
-            {title}
-          </span>
-          <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-            {shown && (
-              <span className="min-w-0 truncate text-[15px]">
-                <span className="sr-only">, </span>
-                <span className={shown.tone === "warning" ? "text-warning" : "text-muted"}>{shown.text}</span>
-              </span>
-            )}
-            <Icon
-              name="chevronDown"
-              size={18}
-              className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
-            />
-          </span>
-        </button>
-      </h2>
-      <div id={panelId} role="region" aria-labelledby={titleId} hidden={!open} className="px-4 pb-5 sm:px-5">
-        <div className="border-t border-separator pt-4">
-          <RowContext.Provider value={setReported}>{children}</RowContext.Provider>
-        </div>
-      </div>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-[3.25rem] w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:-outline-offset-2 sm:px-5"
+      >
+        <RowIcon name={icon} />
+        {/* Название не переносится; не помещается — сокращается состояние (например, длинный логин). */}
+        <span className="max-w-[70%] shrink-0 text-[15px] font-medium leading-snug">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          {summary && (
+            <span className="min-w-0 truncate text-[15px]">
+              <span className="sr-only">, </span>
+              <span className={summary.tone === "warning" ? "text-warning" : "text-muted"}>{summary.text}</span>
+            </span>
+          )}
+          <Icon name="chevronRight" size={18} className="shrink-0 text-muted" />
+        </span>
+      </button>
     </li>
+  );
+}
+
+/**
+ * Раздел настроек — отдельная страница: «‹ Настройки» и название сверху. Разделы смонтированы и скрыты,
+ * пока закрыты: черновики форм не теряются, а разделы сами сообщают состояние для своей строки (onReport).
+ */
+export function SettingsSection({
+  id,
+  title,
+  open,
+  onBack,
+  onReport,
+  children,
+}: {
+  id: string;
+  title: string;
+  open: boolean;
+  onBack: () => void;
+  /** Постоянная функция: раздел сообщает через неё состояние для своей строки. */
+  onReport: (id: string, summary: RowSummary | null) => void;
+  children: ReactNode;
+}) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const report = useCallback((summary: RowSummary | null) => onReport(id, summary), [id, onReport]);
+  useEffect(() => {
+    if (!open) return;
+    window.scrollTo({ top: 0 });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [open]);
+  return (
+    <section hidden={!open} aria-labelledby={`settings-${id}`} className="space-y-4">
+      <div className="space-y-1">
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-2 inline-flex min-h-11 items-center gap-0.5 rounded-full px-2 text-[15px] font-medium text-accent hover:bg-fill"
+        >
+          <Icon name="chevronLeft" size={20} />
+          Настройки
+        </button>
+        <h2 ref={headingRef} id={`settings-${id}`} tabIndex={-1} className="px-1 text-[22px] font-bold leading-tight outline-none">
+          {title}
+        </h2>
+      </div>
+      <Card>
+        <RowContext.Provider value={report}>{children}</RowContext.Provider>
+      </Card>
+    </section>
   );
 }

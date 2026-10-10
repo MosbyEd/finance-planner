@@ -35,6 +35,10 @@ interface UiContextValue {
   tab: Tab;
   /** Переключает вкладку. Если на текущей есть несохранённый черновик, сначала спросит подтверждение. */
   setTab: (tab: Tab) => void;
+  /** Открытый раздел настроек (отдельная страница); null — список разделов. */
+  settingsSection: string | null;
+  /** Открывает настройки на разделе (или списке, если раздел не указан). */
+  openSettings: (section?: string | null) => void;
   /** Проверка «есть несохранённые изменения» перед уходом с вкладки. Возвращает функцию, снимающую проверку. */
   registerLeaveGuard: (key: string, isDirty: () => boolean) => () => void;
   unregisterLeaveGuard: (key: string) => void;
@@ -46,6 +50,7 @@ export function UiProvider({ children, initialTab = "home" }: { children: ReactN
   const confirm = useConfirm();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [tab, setTabState] = useState<Tab>(initialTab);
+  const [settingsSection, setSettingsSection] = useState<string | null>(null);
   const guards = useRef(new Map<string, () => boolean>());
 
   const unregisterLeaveGuard = useCallback((key: string) => {
@@ -62,6 +67,8 @@ export function UiProvider({ children, initialTab = "home" }: { children: ReactN
   const setTab = useCallback(
     (next: Tab) => {
       const go = () => {
+        // Повторное касание «Настроек» — к списку разделов, как у вкладок iOS.
+        if (next === "settings" && tab === "settings") setSettingsSection(null);
         setTabState(next);
         window.scrollTo({ top: 0 });
       };
@@ -88,6 +95,12 @@ export function UiProvider({ children, initialTab = "home" }: { children: ReactN
     close: () => setOverlay(null),
     tab,
     setTab,
+    settingsSection,
+    openSettings: (section) => {
+      setSettingsSection(section ?? null);
+      setTabState("settings");
+      window.scrollTo({ top: 0 });
+    },
     registerLeaveGuard,
     unregisterLeaveGuard,
   };

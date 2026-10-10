@@ -21,6 +21,7 @@ import {
   bankMismatches,
   bankTransferOverlay,
   hasOwnAccounts,
+  previewAccountRows,
   lastAccountId,
   lastCardOf,
   payableAccounts,
@@ -152,8 +153,10 @@ export interface HomeModel {
   onboarding: OnboardingModel | null;
   quick: QuickModel[];
   tiles: { balanceLabel: string; balance: string; balanceNegative: boolean; balanceHint: string; savings: string } | null;
-  /** Счета с остатками — когда пользователь завёл свои (иначе пусто). */
+  /** Самые важные счета (до трёх) — когда пользователь завёл свои (иначе пусто); все — на экране «Счета». */
   accounts: AccountModel[];
+  /** Сколько счетов всего. */
+  accountsTotal: number;
   month: MonthModel | null;
   upcoming: UpcomingModel[];
   recent: RecentModel[];
@@ -446,6 +449,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       quick: [],
       tiles: null,
       accounts: [],
+      accountsTotal: 0,
       month: null,
       upcoming: [],
       recent: [],
@@ -501,8 +505,9 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       balanceHint: steps.balance ? "Сверить остаток" : "Указать остаток",
       savings: formatMoney(savingsTotal(state, today), { whole: true }),
     },
+    accountsTotal: ownAccounts ? accountRows(state, today).length : 0,
     accounts: ownAccounts
-      ? accountRows(state, today).map((row) => ({
+      ? previewAccountRows(accountRows(state, today)).map((row) => ({
           id: row.account.id,
           name: row.account.name,
           symbol: ACCOUNT_KINDS[row.account.kind].symbol,

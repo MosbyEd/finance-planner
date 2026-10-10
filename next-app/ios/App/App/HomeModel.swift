@@ -241,6 +241,7 @@ struct HomeModel: Codable, Equatable, Sendable {
     var quick: [Quick]
     var tiles: Tiles?
     var accounts: [Account]?
+    var accountsTotal: Int?
     var month: Month?
     var upcoming: [Upcoming]
     var recent: [Recent]

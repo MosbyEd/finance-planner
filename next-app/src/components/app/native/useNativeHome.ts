@@ -100,7 +100,8 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           currentUi.open(command.overlay);
           return { ok: true };
         case "tab":
-          currentUi.setTab(command.tab);
+          if (command.tab === "settings" && command.section) currentUi.openSettings(command.section);
+          else currentUi.setTab(command.tab);
           return { ok: true };
         case "rollover": {
           const result = store.dispatch({

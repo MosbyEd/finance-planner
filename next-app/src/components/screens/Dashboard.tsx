@@ -22,7 +22,15 @@ import { SKIP_MANDATORY_KEY } from "../app/native/homeModel";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
 import { quickPicks, type QuickPick } from "../app/quickPicks";
-import { ACCOUNT_KINDS, accountRows, bankMismatches, bankResolveActions, bankTransferOverlay, hasOwnAccounts } from "../app/accounts";
+import {
+  ACCOUNT_KINDS,
+  accountRows,
+  bankMismatches,
+  bankResolveActions,
+  bankTransferOverlay,
+  hasOwnAccounts,
+  previewAccountRows,
+} from "../app/accounts";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
@@ -451,18 +459,22 @@ export function Dashboard() {
   );
 }
 
-/** Счета с остатками; у кредитки — долг и беспроцентный период. Нажатие открывает счёт. */
+/**
+ * Три самых важных счёта (кредитка с прошедшим льготным периодом, долги, крупные счета для трат);
+ * все — на экране «Счета» (Настройки → Счета). Нажатие открывает счёт.
+ */
 function AccountsCard() {
   const { state } = useSnapshot();
   const today = useToday();
-  const { open } = useUi();
-  const rows = accountRows(state, today);
+  const { open, openSettings } = useUi();
+  const all = accountRows(state, today);
+  const rows = previewAccountRows(all);
   return (
     <Card
       title="Счета"
       action={
-        <Button variant="ghost" size="sm" onClick={() => open({ kind: "transfer" })}>
-          Перевод
+        <Button variant="ghost" size="sm" onClick={() => openSettings("accounts")}>
+          {all.length > rows.length ? `Все ${all.length}` : "Все счета"}
         </Button>
       }
     >
