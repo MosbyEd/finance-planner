@@ -7,26 +7,41 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		021051AC686C37550E6565AB /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
+		3DCA238646210F616325015F /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */; };
+		48C3271800E63486EFDAF540 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F51C0C8567B79CB7B06B26C /* HomeView.swift */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
+		4DF588FAAA479B83DA387319 /* RootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AF3CD19C55241895A0C692C /* RootViewController.swift */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		5196A028580B34A74F952BBD /* BudgetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA830F8C116E0FFD1178E20 /* BudgetWidget.swift */; };
+		650C3749ECD0C2440B160FA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 334B1B02A204B7E174D799AE /* Theme.swift */; };
+		70ED7CD1B5E2005D5EEF7E6A /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DA5F05393A2D44F8489DAB /* ToastCenter.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		AA810F8D15C92F6047E65F18 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DF6152F9F5E000FA5538617 /* Foundation.framework */; };
 		B0D6E0022FF0000100A1B2C3 /* BudgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0012FF0000100A1B2C3 /* BudgetStore.swift */; };
 		B0D6E0042FF0000100A1B2C3 /* BudgetNativePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */; };
 		B0D6E0062FF0000100A1B2C3 /* BudgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */; };
 		B0D6E0082FF0000100A1B2C3 /* BudgetViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */; };
-		B0D6E00A2FF0000100A1B2C3 /* GlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */; };
 		B0D6E00C2FF0000100A1B2C3 /* ShortcutsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */; };
 		B0D6E00E2FF0000100A1B2C3 /* SiriOrbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E00D2FF0000100A1B2C3 /* SiriOrbView.swift */; };
+		B46E9CA8D66491194704BBBC /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8BBEDE33F8E204F817B452 /* AppShell.swift */; };
+		E6443106F3F4F2E4F3507FEF /* HomeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56599AF6B58426CDDCBDCB90 /* HomeModel.swift */; };
+		EB8EE50E6952DBF240187936 /* AddTransactionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		1DF6152F9F5E000FA5538617 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
+		334B1B02A204B7E174D799AE /* Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		4799331368D164CAE12ED554 /* BudgetWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4AA830F8C116E0FFD1178E20 /* BudgetWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BudgetWidget.swift; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -35,18 +50,34 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		56599AF6B58426CDDCBDCB90 /* HomeModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeModel.swift; sourceTree = "<group>"; };
+		68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AddTransactionView.swift; sourceTree = "<group>"; };
+		7AF3CD19C55241895A0C692C /* RootViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RootViewController.swift; sourceTree = "<group>"; };
+		80A186C082CBE0ED31FEC74C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		89DA5F05393A2D44F8489DAB /* ToastCenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastCenter.swift; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		9F51C0C8567B79CB7B06B26C /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		A045312969732F31ED4B8F30 /* BudgetWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = BudgetWidget.entitlements; sourceTree = "<group>"; };
+		A069B7F3E0F2B16473FE86C4 /* App.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		B0D6E0012FF0000100A1B2C3 /* BudgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetStore.swift; sourceTree = "<group>"; };
 		B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetNativePlugin.swift; sourceTree = "<group>"; };
 		B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetIntents.swift; sourceTree = "<group>"; };
 		B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetViewController.swift; sourceTree = "<group>"; };
-		B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTabBar.swift; sourceTree = "<group>"; };
 		B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSheet.swift; sourceTree = "<group>"; };
 		B0D6E00D2FF0000100A1B2C3 /* SiriOrbView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriOrbView.swift; sourceTree = "<group>"; };
+		EB8BBEDE33F8E204F817B452 /* AppShell.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		102A8BE0CFD57A66312312D7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA810F8D15C92F6047E65F18 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -64,6 +95,8 @@
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				504EC3051FED79650016851F /* Products */,
+				A6C68B809A51B4C9F06EC79E /* Frameworks */,
+				99EB5C02564B44038339993A /* BudgetWidget */,
 			);
 			sourceTree = "<group>";
 		};
@@ -71,6 +104,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				4799331368D164CAE12ED554 /* BudgetWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,7 +117,6 @@
 				B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */,
 				B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */,
 				B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */,
-				B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */,
 				B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */,
 				B0D6E00D2FF0000100A1B2C3 /* SiriOrbView.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
@@ -94,8 +127,44 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				334B1B02A204B7E174D799AE /* Theme.swift */,
+				56599AF6B58426CDDCBDCB90 /* HomeModel.swift */,
+				1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */,
+				EB8BBEDE33F8E204F817B452 /* AppShell.swift */,
+				89DA5F05393A2D44F8489DAB /* ToastCenter.swift */,
+				7AF3CD19C55241895A0C692C /* RootViewController.swift */,
+				9F51C0C8567B79CB7B06B26C /* HomeView.swift */,
+				68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */,
+				A069B7F3E0F2B16473FE86C4 /* App.entitlements */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		557404C141283E5AB05BE66A /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				1DF6152F9F5E000FA5538617 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		99EB5C02564B44038339993A /* BudgetWidget */ = {
+			isa = PBXGroup;
+			children = (
+				4AA830F8C116E0FFD1178E20 /* BudgetWidget.swift */,
+				80A186C082CBE0ED31FEC74C /* Info.plist */,
+				A045312969732F31ED4B8F30 /* BudgetWidget.entitlements */,
+			);
+			name = BudgetWidget;
+			path = BudgetWidget;
+			sourceTree = "<group>";
+		};
+		A6C68B809A51B4C9F06EC79E /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				557404C141283E5AB05BE66A /* iOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -120,6 +189,23 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E31A4135F8BF5162CBF783C8 /* BudgetWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E3BEDD4A741BCF1BA3453C2 /* Build configuration list for PBXNativeTarget "BudgetWidget" */;
+			buildPhases = (
+				48462D740CB7519406A99057 /* Sources */,
+				102A8BE0CFD57A66312312D7 /* Frameworks */,
+				87BBF09D7434A321F709104E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BudgetWidget;
+			productName = BudgetWidget;
+			productReference = 4799331368D164CAE12ED554 /* BudgetWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -155,6 +241,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				E31A4135F8BF5162CBF783C8 /* BudgetWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -173,9 +260,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		87BBF09D7434A321F709104E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		48462D740CB7519406A99057 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5196A028580B34A74F952BBD /* BudgetWidget.swift in Sources */,
+				3DCA238646210F616325015F /* WidgetSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -186,9 +289,16 @@
 				B0D6E0042FF0000100A1B2C3 /* BudgetNativePlugin.swift in Sources */,
 				B0D6E0062FF0000100A1B2C3 /* BudgetIntents.swift in Sources */,
 				B0D6E0082FF0000100A1B2C3 /* BudgetViewController.swift in Sources */,
-				B0D6E00A2FF0000100A1B2C3 /* GlassTabBar.swift in Sources */,
 				B0D6E00C2FF0000100A1B2C3 /* ShortcutsSheet.swift in Sources */,
 				B0D6E00E2FF0000100A1B2C3 /* SiriOrbView.swift in Sources */,
+				650C3749ECD0C2440B160FA8 /* Theme.swift in Sources */,
+				E6443106F3F4F2E4F3507FEF /* HomeModel.swift in Sources */,
+				021051AC686C37550E6565AB /* WidgetSnapshot.swift in Sources */,
+				B46E9CA8D66491194704BBBC /* AppShell.swift in Sources */,
+				70ED7CD1B5E2005D5EEF7E6A /* ToastCenter.swift in Sources */,
+				4DF588FAAA479B83DA387319 /* RootViewController.swift in Sources */,
+				48C3271800E63486EFDAF540 /* HomeView.swift in Sources */,
+				EB8EE50E6952DBF240187936 /* AddTransactionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -214,6 +324,34 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		1248CD34CE22214937B6E084 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = BudgetWidget/BudgetWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = A3AQ5X62W5;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BudgetWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ru.ekinosian.budget.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -379,9 +517,45 @@
 			};
 			name = Release;
 		};
+		5CC130C7FE82B8067FB9441B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = BudgetWidget/BudgetWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = A3AQ5X62W5;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BudgetWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ru.ekinosian.budget.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1E3BEDD4A741BCF1BA3453C2 /* Build configuration list for PBXNativeTarget "BudgetWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1248CD34CE22214937B6E084 /* Release */,
+				5CC130C7FE82B8067FB9441B /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

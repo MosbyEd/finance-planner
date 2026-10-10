@@ -22,6 +22,7 @@ import { useDispatch } from "./hooks";
 import { OverlayHost } from "./OverlayHost";
 import { forgetAiChat } from "./sheets/AiChatSheet";
 import { UiProvider, useUi, type Tab } from "./overlays";
+import { useNativeHome, useNativeShell } from "./native/useNativeHome";
 import { useNativeBridge } from "./useNativeBridge";
 import { useNativeTabBar } from "./useNativeTabBar";
 import { useReviewPrompt } from "./useReviewPrompt";
@@ -99,6 +100,14 @@ function Shell() {
   useNativeBridge();
   useReviewPrompt();
   const appleAi = useAppleAiAvailable();
+  // В iOS-приложении Главная — нативная (SwiftUI), панель вкладок — системная; интерфейс считает данные для неё
+  // и рисует остальные вкладки и окна.
+  const nativeShell = useNativeShell();
+  useNativeHome(nativeShell, snapshot.aiEnabled || appleAi);
+  const nativeHome = nativeShell && tab === "home";
+  useEffect(() => {
+    document.documentElement.classList.toggle("native-home", nativeHome);
+  }, [nativeHome]);
   // В iOS-приложении панель вкладок и «+» — нативные, из системного стекла Liquid Glass.
   const nativeBar = useNativeTabBar({
     enabled: snapshot.phase === "ready",
@@ -112,6 +121,8 @@ function Shell() {
   // Офлайн-оболочка (только в production: в разработке кэш мешал бы горячей перезагрузке).
   useEffect(() => registerServiceWorker(), []);
 
+  // Под нативной Главной — пустая прозрачная страница: видны только окна, открытые с неё.
+  if (nativeHome) return <OverlayHost />;
   if (snapshot.phase === "loading") return <Splash />;
 
   const showAdd = tab === "home" || tab === "history";
@@ -180,9 +191,12 @@ function Shell() {
       {/* Снизу место под навигацию и плавающую кнопку «+», чтобы она не закрывала последние строки. */}
       <main
         className={`flex-1 px-4 pt-4 sm:pt-5 ${
-          showAdd
-            ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-28"
-            : "pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-12"
+          nativeShell
+            ? // Системная панель вкладок входит в безопасную зону WebView — отступ уже учитывает её.
+              "pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+            : showAdd
+              ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-28"
+              : "pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-12"
         }`}
       >
         {tab === "home" && <Dashboard />}

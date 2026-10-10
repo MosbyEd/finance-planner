@@ -69,8 +69,19 @@ ssh $DEPLOY_HOST 'sudo bash deploy/server-setup.sh <IP через дефисы>.
 
 ## iPhone-приложение
 
-Интерфейс собран внутрь приложения (Capacitor), с сервером оно общается по API с токеном.
-Без сети изменения копятся на телефоне и отправляются, когда связь появится.
+Приложение переезжает на SwiftUI по частям. Сейчас нативные:
+- корень с системной панелью вкладок Liquid Glass и кнопкой «+» (`ios/App/App/RootViewController.swift`);
+- Главная (`HomeView.swift`);
+- окно «Новый расход» (`AddTransactionView.swift`);
+- уведомления (`ToastCenter.swift`).
+
+Остальные вкладки и окна пока рисует веб-интерфейс, собранный внутрь приложения (Capacitor). Логика расчётов одна
+на всех: интерфейс считает модель Главной (`src/components/app/native/homeModel.ts`) и выполняет команды
+нативных экранов (`commands.ts`, `useNativeHome.ts`), Swift её только рисует. С сервером приложение общается
+по API с токеном. Без сети изменения копятся на телефоне и отправляются, когда связь появится.
+
+Виджет «Лимит на сегодня» (`ios/App/BudgetWidget`) получает цифру через общую папку App Group. Для его подписи
+в Xcode должен быть выполнен вход личным Apple ID (Settings → Accounts).
 
 ```bash
 npm run ios:sync    # адрес сервера — DEPLOY_URL из .env.deploy, иначе этот компьютер в локальной сети (*.local:3001)
@@ -85,6 +96,15 @@ xcrun devicectl device install app --device <UDID> <путь к App.app из Der
 ```
 
 С бесплатной подписью приложение работает 7 дней — затем повторите сборку и установку.
+
+Проверка сборки на телефоне: параметры запуска открывают нужную вкладку, окно интерфейса или окно добавления,
+`devicectl device capture screenshot` снимает экран.
+
+```bash
+xcrun devicectl device process launch --terminate-existing --device <UDID> ru.ekinosian.budget -- -BudgetDebugTab history
+xcrun devicectl device process launch --terminate-existing --device <UDID> ru.ekinosian.budget -- -BudgetDebugOverlay explain
+xcrun devicectl device process launch --terminate-existing --device <UDID> ru.ekinosian.budget -- -BudgetDebugAdd YES
+```
 
 ## Как считается лимит на день
 

@@ -14,8 +14,8 @@ const SYMBOLS: Record<string, [string, string]> = {
 };
 
 /**
- * В iOS-приложении нижняя панель — нативная, из системного стекла Liquid Glass (ios/App/App/GlassTabBar.swift).
- * Пока открыто окно интерфейса (оно выезжает снизу), панель прячется. Возвращает true, если нативная панель
+ * В iOS-приложении нижняя панель — системная, Liquid Glass (ios/App/App/RootViewController.swift).
+ * Пока открыто окно интерфейса (оно выезжает снизу), панель прячется. Возвращает true, если системная панель
  * показана — тогда панель и кнопку «+» интерфейса рисовать не нужно.
  */
 export function useNativeTabBar({
@@ -34,6 +34,9 @@ export function useNativeTabBar({
   onAdd: () => void;
 }): boolean {
   const [active, setActive] = useState(false);
+  // Каждое нажатие на нативной панели: после него ещё раз сообщаем свою вкладку — если переход не состоялся
+  // (несохранённые настройки), панель вернётся к ней.
+  const [selectRevision, setSelectRevision] = useState(0);
   const handlers = useRef({ onSelect, onAdd, tab, showAdd });
   useEffect(() => {
     handlers.current = { onSelect, onAdd, tab, showAdd };
@@ -61,6 +64,7 @@ export function useNativeTabBar({
     return onNativeTabBar(
       (id) => {
         if (tabs.some((t) => t.id === id)) handlers.current.onSelect(id as Tab);
+        setSelectRevision((n) => n + 1);
       },
       () => handlers.current.onAdd(),
     );
@@ -68,7 +72,7 @@ export function useNativeTabBar({
 
   useEffect(() => {
     if (active) nativeTabBarUpdate({ selected: tab, action: showAdd });
-  }, [active, tab, showAdd]);
+  }, [active, tab, showAdd, selectRevision]);
 
   // Окна интерфейса (и подтверждения) — элементы с aria-modal: пока такое есть в разметке, панель спрятана.
   useEffect(() => {

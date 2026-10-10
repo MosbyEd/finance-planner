@@ -8,8 +8,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = BudgetViewController()
+        window?.rootViewController = RootViewController()
         window?.makeKeyAndVisible()
+        // Открыли из виджета (budget://add, budget://home).
+        if let url = connectionOptions.urlContexts.first?.url { openBudgetURL(url) }
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
@@ -20,7 +22,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        if let url = URLContexts.first?.url, url.scheme == "budget" {
+            openBudgetURL(url)
+            return
+        }
         SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
+    }
+
+    private func openBudgetURL(_ url: URL) {
+        guard url.scheme == "budget", let root = window?.rootViewController as? RootViewController else { return }
+        root.open(link: url.host() ?? "")
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {

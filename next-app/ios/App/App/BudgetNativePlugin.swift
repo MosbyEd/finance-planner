@@ -16,10 +16,82 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "tabBarUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openShortcuts", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "siriOrb", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "shellInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "homeModel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "toast", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "commandResult", returnType: CAPPluginReturnPromise),
     ]
 
-    private var tabBar: GlassTabBar?
     private var orb: SiriOrbView?
+
+    override public func load() {
+        DispatchQueue.main.async { AppShell.shared.plugin = self }
+    }
+
+    // MARK: - Нативная оболочка
+
+    /// Есть ли нативная Главная и системная панель вкладок (иначе интерфейс рисует всё сам).
+    @objc func shellInfo(_ call: CAPPluginCall) {
+        call.resolve(["nativeHome": true])
+    }
+
+    /// Модель Главной: посчитана интерфейсом, нативный экран её только рисует.
+    @objc func homeModel(_ call: CAPPluginCall) {
+        guard let raw = call.getObject("model"),
+              let data = try? JSONSerialization.data(withJSONObject: raw),
+              let model = try? JSONDecoder().decode(HomeModel.self, from: data)
+        else {
+            call.reject("Некорректная модель Главной")
+            return
+        }
+        DispatchQueue.main.async {
+            HomeStore.shared.update(model)
+            call.resolve()
+        }
+    }
+
+    /// Уведомление интерфейса — показывает оболочка, над панелью вкладок.
+    @objc func toast(_ call: CAPPluginCall) {
+        guard let message = call.getString("message") else {
+            call.reject("Нет текста уведомления")
+            return
+        }
+        let id = call.getInt("id") ?? 0
+        let kind: ToastCenter.Kind = call.getString("kind") == "error" ? .error : .info
+        let actionLabel = call.getString("actionLabel")
+        DispatchQueue.main.async {
+            let action = actionLabel.map { label in
+                ToastCenter.Action(label: label) {
+                    Task { await AppShell.shared.perform(.command("toastAction", ["id": .number(Double(id))]), quiet: true) }
+                }
+            }
+            ToastCenter.shared.show(message, kind: kind, action: action)
+            call.resolve()
+        }
+    }
+
+    /// Ответ интерфейса на команду нативного экрана.
+    @objc func commandResult(_ call: CAPPluginCall) {
+        guard let requestId = call.getString("requestId") else {
+            call.reject("Нет requestId")
+            return
+        }
+        let raw = call.getObject("result") ?? [:]
+        let result = (try? JSONSerialization.data(withJSONObject: raw))
+            .flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) } ?? .object(["ok": .bool(false)])
+        DispatchQueue.main.async {
+            AppShell.shared.resolve(requestId: requestId, result: result)
+            call.resolve()
+        }
+    }
+
+    func emitCommand(requestId: String, command: JSONValue) {
+        notifyListeners("command", data: ["requestId": requestId, "command": command.foundation])
+    }
+
+    func notifyTabSelected(_ id: String) {
+        notifyListeners("tabBarSelect", data: ["id": id])
+    }
 
     /// Стеклянный «шар» Siri сверху экрана, пока помощник думает (active: true/false).
     @objc func siriOrb(_ call: CAPPluginCall) {
@@ -50,7 +122,10 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let token = call.getString("token")
         BudgetStore.token = token
         if token != nil { BudgetStore.account = call.getString("account") }
-        if token == nil { BudgetStore.summary = nil }
+        if token == nil {
+            BudgetStore.summary = nil
+            DispatchQueue.main.async { HomeStore.shared.clear() }
+        }
         call.resolve()
         if token != nil { Task { await SmsQueue.shared.flush() } }
     }
@@ -69,68 +144,27 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve()
     }
 
-    // MARK: - Нижняя панель Liquid Glass
+    // MARK: - Панель вкладок
 
-    /// Показывает нативную панель вкладок: items — [{id, title, symbol, selectedSymbol}], selected, action (кнопка «+»).
-    /// Нажатия приходят событиями tabBarSelect {id} и tabBarAction.
+    /// Интерфейс показал вкладку (selected) — системная панель (RootViewController) переключается следом.
+    /// Список вкладок фиксирован в оболочке; кнопка «+» видна всегда.
     @objc func tabBarShow(_ call: CAPPluginCall) {
-        let items = (call.getArray("items", JSObject.self) ?? []).compactMap { raw -> GlassTabBar.Item? in
-            guard let id = raw["id"] as? String, let title = raw["title"] as? String, let symbol = raw["symbol"] as? String else {
-                return nil
-            }
-            return GlassTabBar.Item(id: id, title: title, symbol: symbol, selectedSymbol: raw["selectedSymbol"] as? String ?? symbol)
-        }
         let selected = call.getString("selected")
-        let action = call.getBool("action") ?? false
         DispatchQueue.main.async {
-            guard let view = self.bridge?.viewController?.view else {
-                call.reject("Нет экрана приложения")
-                return
-            }
-            let bar = self.tabBar ?? self.makeTabBar(in: view)
-            bar.setItems(items)
-            bar.select(selected, animated: false)
-            bar.setActionVisible(action, animated: false)
-            bar.setHiddenByApp(false, animated: false)
+            AppShell.shared.root?.applyWebState(selected: selected, overlay: false)
             call.resolve()
         }
     }
 
-    /// Меняет выбранную вкладку, кнопку «+» и видимость панели (hidden — пока открыто окно интерфейса).
+    /// Вкладка интерфейса и открыто ли его окно (hidden): пока окно открыто, панель спрятана, а WebView —
+    /// поверх нативной Главной.
     @objc func tabBarUpdate(_ call: CAPPluginCall) {
         let selected = call.getString("selected")
-        let action = call.getBool("action")
         let hidden = call.getBool("hidden")
         DispatchQueue.main.async {
-            guard let bar = self.tabBar else {
-                call.reject("Панель не показана")
-                return
-            }
-            if let selected { bar.select(selected, animated: true) }
-            if let action { bar.setActionVisible(action, animated: true) }
-            if let hidden { bar.setHiddenByApp(hidden, animated: true) }
+            AppShell.shared.root?.applyWebState(selected: selected, overlay: hidden)
             call.resolve()
         }
-    }
-
-    private func makeTabBar(in view: UIView) -> GlassTabBar {
-        let bar = GlassTabBar()
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bar)
-        // Как у системной панели: над индикатором «Домой», не ниже 12 pt от края на экранах без него.
-        let toSafeArea = bar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: 8)
-        toSafeArea.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            bar.heightAnchor.constraint(equalToConstant: 64),
-            bar.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -12),
-            toSafeArea,
-        ])
-        bar.onSelect = { [weak self] id in self?.notifyListeners("tabBarSelect", data: ["id": id]) }
-        bar.onAction = { [weak self] in self?.notifyListeners("tabBarAction", data: [:]) }
-        tabBar = bar
-        return bar
     }
 
     // MARK: - Apple Intelligence

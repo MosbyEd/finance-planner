@@ -18,6 +18,7 @@ import { plural } from "@/domain/text";
 import { newId, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
 import { useDispatch } from "../app/hooks";
+import { SKIP_MANDATORY_KEY } from "../app/native/homeModel";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
 import { quickPicks, type QuickPick } from "../app/quickPicks";
@@ -42,8 +43,6 @@ function statusBadge(sts: SafeToSpend): { text: string; tone: string } {
   if (sts.status === "tight" && sts.horizon.reason === "month-end") return { ...base, text: "До конца месяца впритык" };
   return base;
 }
-
-const SKIP_MANDATORY_KEY = "fp:onboarding-skip-mandatory";
 
 /** Строка «Требует внимания»: значок в цветном круге, короткий текст и одно-два действия. */
 function AttentionRow({

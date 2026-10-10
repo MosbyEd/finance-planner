@@ -21,6 +21,25 @@ export function useToast(): ShowToast {
   return useContext(ToastContext);
 }
 
+/** Куда отдавать уведомления вместо своих капсул: в iOS-приложении их показывает нативная оболочка. */
+export type ToastSink = (toast: { id: number; message: string; kind: "info" | "error"; actionLabel?: string }) => void;
+
+let toastSink: ToastSink | null = null;
+const sinkActions = new Map<number, () => void>();
+
+export function setToastSink(sink: ToastSink | null): void {
+  toastSink = sink;
+}
+
+/** Нажали кнопку уведомления, показанного через setToastSink. */
+export function runToastAction(id: number): boolean {
+  const action = sinkActions.get(id);
+  if (!action) return false;
+  sinkActions.delete(id);
+  action();
+  return true;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counter = useRef(0);
@@ -31,6 +50,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message, options = {}) => {
       counter.current += 1;
       const id = counter.current;
+      if (toastSink) {
+        if (options.action) {
+          const onClick = options.action.onClick;
+          sinkActions.set(id, onClick);
+          // Кнопка уведомления живёт недолго — не держим замыкание дольше.
+          setTimeout(() => {
+            if (sinkActions.get(id) === onClick) sinkActions.delete(id);
+          }, 30_000);
+        }
+        toastSink({ id, message, kind: options.kind ?? "info", actionLabel: options.action?.label });
+        return;
+      }
       setToasts((list) => [...list.slice(-2), { id, message, kind: options.kind ?? "info", action: options.action }]);
       setTimeout(() => dismiss(id), options.action ? 6000 : options.kind === "error" ? 6000 : 3500);
     },

@@ -38,7 +38,21 @@ export interface TabBarItem {
   selectedSymbol: string;
 }
 
+/** Уведомление интерфейса, которое показывает нативная оболочка (над панелью вкладок). */
+export interface NativeToast {
+  id: number;
+  message: string;
+  kind: "info" | "error";
+  /** Подпись кнопки («Отменить»); нажатие вернётся командой toastAction с этим id. */
+  actionLabel?: string;
+}
+
 interface BudgetNativePlugin {
+  shellInfo(): Promise<{ nativeHome: boolean }>;
+  homeModel(options: { model: unknown }): Promise<void>;
+  toast(options: NativeToast): Promise<void>;
+  commandResult(options: { requestId: string; result: unknown }): Promise<void>;
+  addListener(event: "command", listener: (data: { requestId: string; command: unknown }) => void): Promise<PluginListenerHandle>;
   tabBarShow(options: { items: TabBarItem[]; selected: string; action: boolean }): Promise<void>;
   tabBarUpdate(options: { selected?: string; action?: boolean; hidden?: boolean }): Promise<void>;
   addListener(event: "tabBarSelect", listener: (data: { id: string }) => void): Promise<PluginListenerHandle>;
@@ -132,4 +146,39 @@ export async function nativeSiriOrb(active: boolean): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Нативная оболочка iOS: системная панель вкладок и Главная на SwiftUI. false — браузер или старая сборка,
+ * где Главная рисуется интерфейсом.
+ */
+export async function nativeShellInfo(): Promise<{ nativeHome: boolean }> {
+  if (!isNativeApp()) return { nativeHome: false };
+  try {
+    return await plugin.shellInfo();
+  } catch {
+    return { nativeHome: false };
+  }
+}
+
+/** Модель нативной Главной: всё посчитано и отформатировано в интерфейсе, Swift только рисует. */
+export function nativeHomeModel(model: unknown): void {
+  plugin.homeModel({ model }).catch(() => {});
+}
+
+export function nativeToast(toast: NativeToast): void {
+  plugin.toast(toast).catch(() => {});
+}
+
+/** Команды нативного экрана: обработчик возвращает результат, он уходит обратно в Swift. */
+export function onNativeCommand(handler: (command: unknown) => Promise<unknown>): () => void {
+  const handle = plugin.addListener("command", ({ requestId, command }) => {
+    void handler(command)
+      .catch((error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : "Не получилось." }))
+      .then((result) => plugin.commandResult({ requestId, result }))
+      .catch(() => {});
+  });
+  return () => {
+    void handle.then((h) => h.remove()).catch(() => {});
+  };
 }

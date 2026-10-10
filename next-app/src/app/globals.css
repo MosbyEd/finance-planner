@@ -211,6 +211,15 @@
       radial-gradient(55vmax 50vmax at 100% 35%, var(--glow-2), transparent 70%),
       radial-gradient(65vmax 55vmax at 25% 100%, var(--glow-3), transparent 70%);
   }
+  /* iOS-приложение: Главная нативная (SwiftUI) и лежит под WebView. Окна интерфейса открываются поверх неё
+     на прозрачной странице — под затемнением видна нативная Главная. */
+  html.native-home,
+  html.native-home body {
+    background: transparent;
+  }
+  html.native-home body::before {
+    display: none;
+  }
   /* iOS не зумит поле, если шрифт ≥ 16px */
   input,
   select,
