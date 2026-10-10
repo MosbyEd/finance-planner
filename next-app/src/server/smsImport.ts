@@ -118,6 +118,7 @@ export function importSms(userId: number, text: string, now = new Date(), receiv
   }
 
   const plan = planSmsImport(state, op, { idBase, date, sms });
+  if (plan.skip) return plan.skip;
   const ops = plan.actions.map((action, i) => ({ opId: `sms-${hash.slice(0, 30)}-${i}`, action }));
   try {
     const result = applyUserOps(userId, ops, today, now.getTime());

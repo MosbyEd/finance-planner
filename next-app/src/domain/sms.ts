@@ -1,10 +1,11 @@
+import { MAIN_ACCOUNT_ID, accountsOf, findAccount } from "./accounts";
 import type { Action } from "./actions";
 import { addDays, addMonths, diffDays, monthKeyOf, type IsoDate, type MonthKey } from "./dates";
 import { OTHER_CATEGORY } from "./defaults";
 import { formatMoney, MAX_KOPECKS, type Kopecks } from "./money";
 import { isSkipped, occurrenceDate } from "./recurring";
 import { autoSavingByDefault } from "./savings";
-import { LIMITS, type State, type Transaction } from "./schema";
+import { LIMITS, type Account, type State, type Transaction } from "./schema";
 
 /**
  * Операции из СМС Сбербанка (номер 900). iOS не даёт приложениям читать СМС, поэтому текст присылает
@@ -31,7 +32,9 @@ export type SmsOperation =
   | { kind: "savingsInterest"; amount: Kopecks; time: string | null }
   /** Перевод со счёта на накопительный счёт и обратно. */
   | { kind: "toSavings"; amount: Kopecks; time: string | null }
-  | { kind: "fromSavings"; amount: Kopecks; time: string | null };
+  | { kind: "fromSavings"; amount: Kopecks; time: string | null }
+  /** Перевод на свой счёт («Перевод 1000р на СЧЁТ1234»): не расход, а перевод между счетами. */
+  | { kind: "ownTransfer"; amount: Kopecks; time: string | null };
 
 type IncomeVia = Extract<SmsOperation, { kind: "income" }>["via"];
 type ExpenseVia = Extract<SmsOperation, { kind: "expense" }>["via"];
@@ -162,7 +165,10 @@ export function parseSberSms(raw: string): SmsOperation | null {
   if (m) {
     const to = clean(m[3]).replace(/^(?:для|получателю|на имя)\s+/iu, "");
     // На свой счёт («на СЧЁТ5804») — деньги остаются у вас, это не расход.
-    if (/^на\s+(?:СЧ[ЁЕ]Т|сч[её]т)/iu.test(to)) return null;
+    if (/^на\s+(?:СЧ[ЁЕ]Т|сч[её]т)/iu.test(to)) {
+      const a = amount(m);
+      return a ? { kind: "ownTransfer", amount: a, time } : null;
+    }
     return expense("transfer", m, to);
   }
 
@@ -455,6 +461,77 @@ export interface SmsPlan {
   actions: Action[];
   /** Что добавлено — для уведомления «Команд». */
   summary: string;
+  /** Добавлять нечего: перевод на свой счёт, которого нет в приложении, или операция уже учтена. */
+  skip?: { status: "ignored" | "duplicate"; message: string };
+}
+
+// ---------- счета из СМС ----------
+
+/** Цифры карты или счёта в СМС: «MIR-7759», «СЧЁТ5804», «*3150», «VISA1234». */
+const ACCOUNT_KEY_RE = /(?:MIR|VISA|MC|ECMC|MAESTRO|СЧ[ЁЕ]Т|\*)\s?-?(\d{4})(?!\d)/giu;
+
+/**
+ * Цифры счёта, к которому относится СМС (source), и счёта, куда ушли деньги (target — после «на»):
+ * «Накопительный счет *3150 16:16 Перевод 9501р на СЧЁТ5804» → 3150 и 5804.
+ */
+export function smsAccountKeys(raw: string): { source: string | null; target: string | null } {
+  const text = normalizeSms(raw).replace(/\s*Баланс.*$/iu, "");
+  const on = text.search(/\sна\s/iu);
+  let source: string | null = null;
+  let target: string | null = null;
+  for (const m of text.matchAll(ACCOUNT_KEY_RE)) {
+    if (on >= 0 && (m.index ?? 0) > on) target ??= m[1];
+    else source ??= m[1];
+  }
+  return { source, target };
+}
+
+/** Открытый счёт с этими цифрами (их указывают в настройках счёта). */
+function accountForKey(state: State, key: string | null): Account | undefined {
+  if (!key) return undefined;
+  return accountsOf(state).find((a) => !a.archived && a.smsKeys.includes(key));
+}
+
+/** Поле счёта для операции: основной счёт не пишем (его и так подразумевает операция без счёта). */
+function onAccount(account: Account | undefined): { accountId?: string } {
+  return account && account.id !== MAIN_ACCOUNT_ID ? { accountId: account.id } : {};
+}
+
+function nearDate(a: IsoDate, b: IsoDate): boolean {
+  return Math.abs(diffDays(a, b)) <= 1;
+}
+
+/**
+ * Перевод на свой счёт, который есть в приложении. Если СМС о зачислении на тот счёт пришла раньше и записалась
+ * доходом (ещё не проверенным), она заменяется переводом — деньги не считаются дважды.
+ */
+function planOwnTransfer(
+  state: State,
+  amount: Kopecks,
+  from: Account | undefined,
+  to: Account,
+  ctx: { idBase: string; date: IsoDate; note: string },
+): SmsPlan {
+  const source = from ?? findAccount(state, MAIN_ACCOUNT_ID);
+  if (!source || source.id === to.id) {
+    return { actions: [], summary: "", skip: { status: "ignored", message: "Перевод на тот же счёт — пропущено." } };
+  }
+  const income = state.transactions.find(
+    (t) =>
+      t.type === "income" &&
+      t.review &&
+      (t.accountId ?? MAIN_ACCOUNT_ID) === to.id &&
+      t.amount === amount &&
+      t.note.startsWith(SMS_NOTE_PREFIX) &&
+      nearDate(t.date, ctx.date),
+  );
+  return {
+    actions: [
+      ...(income ? [{ type: "tx.delete" as const, id: income.id }] : []),
+      { type: "transfer.add", id: ctx.idBase, date: ctx.date, from: source.id, to: to.id, amount, note: ctx.note, review: true },
+    ],
+    summary: `Перевод ${formatMoney(amount)}: ${source.name} → ${to.name}`,
+  };
 }
 
 /**
@@ -471,11 +548,37 @@ export function smsNote(sms: string): string {
 export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
   const note = smsNote(ctx.sms);
   const money = formatMoney(op.amount);
+  // Счета по цифрам карты из СМС (их указывают в настройках счёта). Не нашли — основной счёт и «Сбережения».
+  const keys = smsAccountKeys(ctx.sms);
+  const source = accountForKey(state, keys.source);
+  const target = accountForKey(state, keys.target);
+  const savingsAccount = (a: Account | undefined) => (a?.kind === "savings" ? a : undefined);
+
+  if (op.kind === "ownTransfer") {
+    if (!target) {
+      return { actions: [], summary: "", skip: { status: "ignored", message: "Перевод на свой счёт — не расход, пропущено." } };
+    }
+    return planOwnTransfer(state, op.amount, source, target, { idBase: ctx.idBase, date: ctx.date, note });
+  }
 
   if (op.kind === "toSavings" || op.kind === "fromSavings") {
+    // Пополнение: с основного (или счёта из СМС) на накопительный; снятие — с накопительного (он в начале СМС).
+    const savings = op.kind === "toSavings" ? savingsAccount(target) : savingsAccount(source);
+    const spendingSide = op.kind === "toSavings" ? source : target;
     const amount = op.kind === "toSavings" ? op.amount : -op.amount;
     return {
-      actions: [{ type: "savings.move", id: ctx.idBase, date: ctx.date, amount, note, review: true }],
+      actions: [
+        {
+          type: "savings.move",
+          id: ctx.idBase,
+          date: ctx.date,
+          amount,
+          note,
+          review: true,
+          ...(spendingSide && spendingSide.kind !== "savings" ? onAccount(spendingSide) : {}),
+          ...(savings ? { toAccountId: savings.id } : {}),
+        },
+      ],
       summary: op.kind === "toSavings" ? `В сбережения ${money}` : `Из сбережений ${money}`,
     };
   }
@@ -500,10 +603,40 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
             review: true,
           },
         },
-        { type: "savings.move", id: `${ctx.idBase}.m`, date: ctx.date, amount: op.amount, note, review: true },
+        {
+          type: "savings.move",
+          id: `${ctx.idBase}.m`,
+          date: ctx.date,
+          amount: op.amount,
+          note,
+          review: true,
+          ...(savingsAccount(source) ? { toAccountId: source?.id } : {}),
+        },
       ],
       summary: `Проценты ${money} → в сбережения`,
     };
+  }
+
+  // «Перевод 5000р на карту *1234», а *1234 — своя карта (например, кредитка): это погашение, не расход.
+  if (op.kind === "expense" && op.via === "transfer" && target && target.id !== (source?.id ?? MAIN_ACCOUNT_ID)) {
+    return planOwnTransfer(state, op.amount, source, target, { idBase: ctx.idBase, date: ctx.date, note });
+  }
+
+  // Зачисление на счёт, на который уже записан перевод с другого своего счёта (СМС о списании пришла раньше).
+  // Только перевод из СМС и только зачисление-перевод: зарплату с той же суммой не спутать с ручным переводом.
+  if (op.kind === "income" && (op.via === "transfer" || op.via === "deposit")) {
+    const accountId = source?.id ?? MAIN_ACCOUNT_ID;
+    const transfer = state.transactions.find(
+      (t) =>
+        t.type === "transfer" &&
+        t.toAccountId === accountId &&
+        t.amount === op.amount &&
+        t.note.startsWith(SMS_NOTE_PREFIX) &&
+        nearDate(t.date, ctx.date),
+    );
+    if (transfer) {
+      return { actions: [], summary: "", skip: { status: "duplicate", message: "Уже учтено переводом между счетами." } };
+    }
   }
 
   // Название и категория — как пользователь записал такую операцию в прошлый раз, иначе из СМС и подсказок.
@@ -530,6 +663,7 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
           date: ctx.date,
           note,
           review: true,
+          ...(source ? { accountId: source.id } : {}),
         },
       ],
       summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${planned.title} — регулярный${differs}`,
@@ -543,7 +677,19 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
     actions: [
       {
         type: "tx.add",
-        tx: { id: ctx.idBase, type: op.kind, amount: op.amount, date: ctx.date, category, title, note, mandatory, autoSaving, review: true },
+        tx: {
+          id: ctx.idBase,
+          type: op.kind,
+          amount: op.amount,
+          date: ctx.date,
+          category,
+          title,
+          note,
+          mandatory,
+          autoSaving,
+          review: true,
+          ...onAccount(source),
+        },
       },
     ],
     summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${title} → ${category}`,
