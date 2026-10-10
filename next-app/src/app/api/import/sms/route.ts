@@ -94,9 +94,26 @@ function authorize(req: NextRequest): { user: User; via: "key" | "app" } | null 
  * Строка в журнале сервера на каждую СМС — без текста СМС: чтобы понять, какая из автоматизаций на телефоне
  * сработала (ключ или действие приложения) и чем закончилось.
  */
-function logImport(userId: number | null, via: string, status: string, queuedFor: number): void {
+function logImport(userId: number | null, via: string, status: string, queuedFor: number, shape = ""): void {
   const queued = queuedFor > 60_000 ? ` queued=${Math.round(queuedFor / 60_000)}m` : "";
-  console.log(`[sms] user=${userId ?? "-"} via=${via} status=${status}${queued}`);
+  console.log(`[sms] user=${userId ?? "-"} via=${via} status=${status}${queued}${shape ? ` ${shape}` : ""}`);
+}
+
+/**
+ * ВРЕМЕННО, для отладки нераспознанных СМС: какие поля прислала команда и текст с замаскированными цифрами
+ * (суммы, балансы и номера карт не попадают в журнал). Убрать, когда форматы будут разобраны.
+ */
+function debugShape(req: NextRequest, raw: string, text: string): string {
+  const type = (req.headers.get("content-type") ?? "-").split(";")[0];
+  let keys = "-";
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (data && typeof data === "object") keys = Object.keys(data).join(",") || "{}";
+  } catch {
+    // не JSON
+  }
+  const masked = text.replace(/\d/g, "#").replace(/\s+/g, " ").slice(0, 200);
+  return `type=${type} keys=${keys} len=${text.length} text="${masked}"`;
 }
 
 export async function POST(req: NextRequest) {
@@ -124,7 +141,7 @@ export async function POST(req: NextRequest) {
   const body = await smsBody(req, raw.text);
   const text = body.text.slice(0, MAX_SMS_CHARS);
   if (!text.trim()) {
-    logImport(user.id, via, "empty-text", 0);
+    logImport(user.id, via, "empty-text", 0, debugShape(req, raw.text, raw.text));
     return reply(400, {
       status: "failed",
       message: "Пустой текст СМС. Проще всего заменить запрос на действие «Добавить операцию из СМС» приложения «Бюджет».",
@@ -135,7 +152,13 @@ export async function POST(req: NextRequest) {
     const now = new Date();
     const received = receivedTime(body.receivedAt, now);
     const result = importSms(user.id, text, now, received);
-    logImport(user.id, via, result.status, now.getTime() - received.getTime());
+    logImport(
+      user.id,
+      via,
+      result.status,
+      now.getTime() - received.getTime(),
+      result.status === "ignored" ? debugShape(req, raw.text, text) : "",
+    );
     return reply(200, result);
   } catch (error) {
     if (error instanceof StoredStateError) {
