@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { applyActions } from "./actions";
 import { savingsTotal } from "./metrics";
-import { parseSberSms, planSmsImport, smsAccountKeys, smsDate } from "./sms";
+import { parseSberSms, planSmsImport, smsAccountKeys, smsBalances, smsDate } from "./sms";
+import type { Action } from "./actions";
+
+/** Действия операции без сверки остатка (account.bank) — её проверяют отдельно. */
+const ops = (actions: Action[]) => actions.filter((a) => a.type !== "account.bank");
 import { stateWith, template, tx } from "./test-utils";
 
 const NBSP = " ";
@@ -127,7 +131,7 @@ describe("операции из СМС", () => {
   it("покупка: категория по названию магазина, текст СМС — в заметке", () => {
     const sms = "Счёт карты MIR-7759 19:29 Покупка 162.38р Перекрёсток Баланс: 5097.76р";
     const result = plan(stateWith(), sms);
-    expect(result.actions).toEqual([
+    expect(ops(result.actions)).toEqual([
       {
         type: "tx.add",
         tx: expect.objectContaining({
@@ -373,9 +377,9 @@ describe("счета в СМС", () => {
   });
 
   it("перевод на свою карту — перевод между счетами; на незнакомый свой счёт — пропуск", () => {
-    expect(plan(accounts(), "СЧЁТ5804 10:00 Перевод 5000р на карту MIR-1234 Баланс: 100р")).toMatchObject({
-      actions: [{ type: "transfer.add", from: "main", to: "cc", amount: 500_000, review: true }],
-    });
+    expect(ops(plan(accounts(), "СЧЁТ5804 10:00 Перевод 5000р на карту MIR-1234 Баланс: 100р").actions)).toMatchObject([
+      { type: "transfer.add", from: "main", to: "cc", amount: 500_000, review: true },
+    ]);
     expect(plan(accounts(), "СЧЁТ5804 10:00 Перевод 1000р на СЧЁТ8888 Баланс: 100р")).toMatchObject({
       actions: [],
       skip: { status: "ignored" },
@@ -393,7 +397,7 @@ describe("счета в СМС", () => {
     const afterIncome = applyActions(accounts(), plan(accounts(), incomeSms).actions);
     expect(afterIncome.transactions[0]).toMatchObject({ type: "income", accountId: "cc", review: true });
     const replaced = planSmsImport(afterIncome, parseSberSms(transferSms)!, { idBase: "sms-3", date: "2026-10-10", sms: transferSms });
-    expect(replaced.actions.map((a) => a.type)).toEqual(["tx.delete", "transfer.add"]);
+    expect(ops(replaced.actions).map((a) => a.type)).toEqual(["tx.delete", "transfer.add"]);
     const result = applyActions(afterIncome, replaced.actions);
     expect(result.transactions.map((t) => t.type)).toEqual(["transfer"]);
   });
@@ -430,7 +434,7 @@ describe("счета в СМС", () => {
     const s = accounts();
     s.accounts![3] = { ...s.accounts![3], smsKeys: ["3150", "4444"] };
     const result = plan(s, "СЧЁТ4444 10:00 Зачисление 5000р Баланс: 5000р");
-    expect(result.actions).toEqual([expect.objectContaining({ type: "savings.move", amount: 500_000, toAccountId: "dep" })]);
+    expect(ops(result.actions)).toEqual([expect.objectContaining({ type: "savings.move", amount: 500_000, toAccountId: "dep" })]);
   });
 
   it("снятие с накопительного: зачисление на карту — та же операция; пришедшее раньше — заменяется", () => {
@@ -446,7 +450,7 @@ describe("счета в СМС", () => {
 
     const afterIncome = applyActions(funded, plan(funded, income).actions);
     const replaced = planSmsImport(afterIncome, parseSberSms(withdraw)!, { idBase: "sms-e", date: "2026-10-10", sms: withdraw });
-    expect(replaced.actions.map((a) => a.type)).toEqual(["tx.delete", "savings.move"]);
+    expect(ops(replaced.actions).map((a) => a.type)).toEqual(["tx.delete", "savings.move"]);
     const result = applyActions(afterIncome, replaced.actions);
     expect(result.transactions.filter((t) => t.type === "income")).toHaveLength(0);
   });
@@ -456,5 +460,45 @@ describe("счета в СМС", () => {
     expect(withdraw.actions[0]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });
     const deposit = plan(accounts(), "СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150");
     expect(deposit.actions[0]).toMatchObject({ type: "savings.move", amount: 100_000, toAccountId: "dep" });
+  });
+});
+
+describe("сверка остатка по СМС", () => {
+  const sms = (text: string, state: ReturnType<typeof stateWith>) =>
+    planSmsImport(state, parseSberSms(text)!, { idBase: "sms-bal", date: "2026-10-10", sms: text });
+  const funded = () => applyActions(stateWith(), [{ type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 }]);
+
+  it("остатки из СМС: один на счёт СМС или по каждому счёту", () => {
+    expect(smsBalances("Счёт карты MIR-7759 18:42 Покупка 300р IP Баланс: 5260.14р")).toEqual([{ key: null, amount: 526_014 }]);
+    expect(smsBalances("Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р, баланс *5804: 9560.14р")).toEqual([
+      { key: "3150", amount: 0 },
+      { key: "5804", amount: 956_014 },
+    ]);
+  });
+
+  it("совпало — расхождения нет; не совпало — запоминает разницу банк − приложение", () => {
+    const ok = sms("Счёт карты MIR-7759 18:42 Покупка 300р LENTA Баланс: 4700р", funded());
+    expect(ok.actions.at(-1)).toEqual({ type: "account.bank", accountId: "main", amount: 470_000, delta: 0, date: "2026-10-10" });
+    const off = sms("Счёт карты MIR-7759 18:42 Покупка 300р LENTA Баланс: 4600р", funded());
+    expect(off.actions.at(-1)).toMatchObject({ type: "account.bank", accountId: "main", delta: -10_000 });
+    const state = applyActions(funded(), off.actions);
+    expect(state.accounts?.find((a) => a.id === "main")?.bank).toEqual({ amount: 460_000, delta: -10_000, date: "2026-10-10" });
+  });
+
+  it("вторая СМС перевода не добавляет операцию, но сверяет остаток своего счёта; кредитку не сверяет", () => {
+    const s = stateWith({
+      accounts: [
+        { id: "main", name: "Основной счёт", kind: "debit", spending: true, smsKeys: ["5804"] },
+        { id: "savings", name: "Сбережения", kind: "savings", spending: false, smsKeys: [] },
+        { id: "dep", name: "Накопительный", kind: "savings", spending: false, smsKeys: ["3150"] },
+        { id: "cc", name: "Кредитка", kind: "credit", spending: false, smsKeys: ["1234"] },
+      ],
+    });
+    const first = sms("СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150 Баланс: 0р", s);
+    const afterFirst = applyActions(s, first.actions);
+    const second = sms("Накопительный счет *3150 09:00 Зачисление 1000р Баланс: 1000р", afterFirst);
+    expect(second.skip?.status).toBe("duplicate");
+    expect(second.actions).toEqual([{ type: "account.bank", accountId: "dep", amount: 100_000, delta: 0, date: "2026-10-10" }]);
+    expect(sms("Кредитная карта MIR-1234 12:00 Покупка 500р LENTA Баланс: 95000р", s).actions.some((a) => a.type === "account.bank")).toBe(false);
   });
 });

@@ -159,6 +159,14 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("account.add"), account: accountSchema }),
   z.object({ type: z.literal("account.update"), id: idSchema, patch: accountPatchSchema }),
   z.object({ type: z.literal("account.delete"), id: idSchema }),
+  /** Остаток в банке по СМС и расхождение с приложением; delta 0 — расхождение решено (поправили или оставили). */
+  z.object({
+    type: z.literal("account.bank"),
+    accountId: idSchema,
+    amount: kopecksSchema,
+    delta: kopecksSchema,
+    date: isoDateSchema,
+  }),
   z.object({ type: z.literal("template.add"), template: templateSchema }),
   z.object({
     type: z.literal("template.update"),
@@ -721,6 +729,14 @@ export function applyAction(state: State, action: Action): State {
       const next = accounts.map((a) => (a.id === current.id ? updated : a));
       assertUniqueSmsKeys(next);
       return { ...state, accounts: next };
+    }
+
+    case "account.bank": {
+      const accounts = accountsOf(state);
+      const current = accounts.find((a) => a.id === action.accountId);
+      if (!current) throw new DomainError("Счёт не найден.");
+      const updated: Account = { ...current, bank: { amount: action.amount, delta: action.delta, date: action.date } };
+      return { ...state, accounts: accounts.map((a) => (a.id === current.id ? updated : a)) };
     }
 
     case "account.delete": {

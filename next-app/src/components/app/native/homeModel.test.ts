@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { State } from "@/domain/schema";
 import { stateWith, template, tx } from "@/domain/test-utils";
 import type { Snapshot } from "@/client/store";
+import { applyActions } from "@/domain/actions";
+import { accountBalance } from "@/domain/accounts";
+import { bankResolveActions } from "../accounts";
 import { commandSchema } from "./commands";
 import { buildHomeModel, type HomeModel } from "./homeModel";
 
@@ -92,5 +95,23 @@ describe("модель нативной Главной", () => {
     expect(commandSchema.safeParse({ type: "add", draft: { kind: "expense", amount: -5, category: "Кафе", title: "", date: today } }).success).toBe(false);
     expect(commandSchema.safeParse({ type: "open", overlay: { kind: "nope" } }).success).toBe(false);
     expect(commandSchema.safeParse({ type: "eval" }).success).toBe(false);
+  });
+});
+
+describe("расхождение остатка с банком", () => {
+  it("строка в «Требует внимания», «Поправить» — корректировка на разницу и снятие расхождения", () => {
+    let s = applyActions(base(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 },
+      { type: "account.bank", accountId: "main", amount: 490_000, delta: -10_000, date: today },
+    ]);
+    const row = model(s).attention.find((r) => r.id === "bank:main");
+    expect(row).toMatchObject({ title: "«Основной счёт»: в банке 4 900 ₽, в приложении 5 000 ₽", tone: "warning" });
+    expect(row?.actions.map((a) => a.command)).toEqual([
+      { type: "bank", accountId: "main", fix: true },
+      { type: "bank", accountId: "main", fix: false },
+    ]);
+    s = applyActions(s, bankResolveActions(s, "main", true, today, "fix"));
+    expect(accountBalance(s, "main", today)).toBe(490_000);
+    expect(model(s).attention.some((r) => r.id === "bank:main")).toBe(false);
   });
 });

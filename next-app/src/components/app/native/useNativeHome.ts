@@ -11,6 +11,7 @@ import { storage } from "@/client/storage";
 import { runToastAction, setToastSink, useToast } from "../../ui/feedback";
 import { useUi } from "../overlays";
 import { quickPicks } from "../quickPicks";
+import { bankResolveActions } from "../accounts";
 import { BALANCE_CONFIRMED_KEY } from "../sheets/MoneySheets";
 import { commandSchema, type CommandResult, type NativeCommand } from "./commands";
 import { SKIP_MANDATORY_KEY, buildHomeModel, quickKey } from "./homeModel";
@@ -186,6 +187,13 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
         }
         case "refresh":
           return store.resume().then(() => ({ ok: true }) as const);
+        case "bank": {
+          const actions = bankResolveActions(state, command.accountId, command.fix, day, newId());
+          if (!actions.length) return { ok: true };
+          const result = store.dispatch(actions);
+          if (!result.ok) return result;
+          return command.fix ? { ok: true, message: "Остаток поправлен" } : { ok: true };
+        }
         case "toastAction":
           if (!runToastAction(command.id)) show("Уже нельзя отменить", { kind: "info" });
           return { ok: true };

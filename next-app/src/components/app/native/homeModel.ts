@@ -14,7 +14,7 @@ import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import type { Snapshot } from "@/client/store";
 import { quickPicks, type QuickPick } from "../quickPicks";
-import { ACCOUNT_KINDS, accountRows, hasOwnAccounts, lastAccountId, payableAccounts } from "../accounts";
+import { ACCOUNT_KINDS, accountRows, bankMismatches, hasOwnAccounts, lastAccountId, payableAccounts } from "../accounts";
 import type { NativeCommand } from "./commands";
 
 /**
@@ -251,6 +251,20 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       actions: [
         { label: "Отложить", primary: true, command: { type: "rollover", month: rollover.month, amount: rollover.amount, decision: "saved" } },
         { label: "Оставить", primary: false, command: { type: "rollover", month: rollover.month, amount: rollover.amount, decision: "dismissed" } },
+      ],
+    });
+  }
+  for (const m of bankMismatches(state, today)) {
+    rows.push({
+      id: `bank:${m.account.id}`,
+      symbol: "building.columns",
+      tone: "warning",
+      title: m.title,
+      text: m.text,
+      command: null,
+      actions: [
+        { label: "Поправить", primary: true, command: { type: "bank", accountId: m.account.id, fix: true } },
+        { label: "Оставить", primary: false, command: { type: "bank", accountId: m.account.id, fix: false } },
       ],
     });
   }

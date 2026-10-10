@@ -1,5 +1,5 @@
-import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, accountsOf, findAccount } from "./accounts";
-import type { Action } from "./actions";
+import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, accountBalance, accountsOf, findAccount } from "./accounts";
+import { applyActions, type Action } from "./actions";
 import { addDays, addMonths, diffDays, monthKeyOf, type IsoDate, type MonthKey } from "./dates";
 import { OTHER_CATEGORY } from "./defaults";
 import { formatMoney, MAX_KOPECKS, type Kopecks } from "./money";
@@ -590,10 +590,6 @@ function planMove(
   };
 }
 
-/**
- * Действия для операции из СМС. idBase — устойчивый id (по тексту СМС): повторная отправка той же СМС
- * не создаст вторую операцию.
- */
 /** Заметка операции из СМС: сам текст СМС. По ней же узнаём повторно присланную СМС и уже подтверждённые начисления. */
 export const SMS_NOTE_PREFIX = "СМС: ";
 
@@ -601,7 +597,71 @@ export function smsNote(sms: string): string {
   return `${SMS_NOTE_PREFIX}${normalizeSms(sms)}`.slice(0, LIMITS.note).trim();
 }
 
+/**
+ * Остатки из СМС: «Баланс: 5260.14р» — счёт этой СМС (key = null); «Баланс счёта *3150: 0р, баланс *5804: 9560р» —
+ * по каждому счёту.
+ */
+export function smsBalances(raw: string): { key: string | null; amount: Kopecks }[] {
+  const text = normalizeSms(raw);
+  const result: { key: string | null; amount: Kopecks }[] = [];
+  const re = new RegExp(String.raw`Баланс(?:\s+(?:сч[её]та|карты))?\s*(?:\*\s?(\d{4}))?\s*:\s*(-?)${AMOUNT}`, "giu");
+  for (const m of text.matchAll(re)) {
+    // Остаток может быть нулевым (amountOf нули не пропускает — это сумма операции).
+    const amount = Number(m[3].replace(/ /g, "")) * 100 + (m[4] ? Number(m[4].padEnd(2, "0")) : 0);
+    if (Number.isSafeInteger(amount) && amount <= MAX_KOPECKS) result.push({ key: m[1] ?? null, amount: m[2] ? -amount : amount });
+  }
+  return result;
+}
+
+/**
+ * Сверка остатка по СМС: после операции сравниваем «Баланс» из СМС с остатком счёта в приложении и запоминаем
+ * расхождение — приложение предложит поправить. У кредитки в СМС доступный лимит, а не долг — её не сверяем.
+ * Баланс без цифр счёта относится к счёту этой СМС; неизвестные цифры (счёт не заведён) — к основному, пока
+ * у счетов не указаны цифры вовсе.
+ */
+function bankBalanceActions(state: State, actions: Action[], ctx: { date: IsoDate; sms: string }): Action[] {
+  const balances = smsBalances(ctx.sms);
+  if (!balances.length) return [];
+  let after: State;
+  try {
+    after = applyActions(state, actions);
+  } catch {
+    return [];
+  }
+  const keys = smsAccountKeys(ctx.sms);
+  const anyKeys = accountsOf(state).some((a) => a.smsKeys.length > 0);
+  const byKey = (key: string | null) => accountForKey(state, key) ?? (anyKeys ? undefined : findAccount(state, MAIN_ACCOUNT_ID));
+  // Накопительные счета без цифр из СМС (в том числе «Сбережения» по умолчанию с «копилкой») — конверты внутри
+  // основного счёта: в банке эти деньги лежат на нём же.
+  const envelopes = accountsOf(state).filter((a) => a.kind === "savings" && !a.smsKeys.length && !a.spending && !a.archived);
+  const appBalance = (id: string) =>
+    accountBalance(after, id, ctx.date) +
+    (id === MAIN_ACCOUNT_ID ? envelopes.reduce((sum, a) => sum + accountBalance(after, a.id, ctx.date), 0) : 0);
+  const result: Action[] = [];
+  const seen = new Set<string>();
+  for (const balance of balances) {
+    const account = byKey(balance.key ?? keys.source);
+    if (!account || account.kind === "credit" || seen.has(account.id)) continue;
+    seen.add(account.id);
+    const delta = balance.amount - appBalance(account.id);
+    result.push({ type: "account.bank", accountId: account.id, amount: balance.amount, delta, date: ctx.date });
+  }
+  return result;
+}
+
+/**
+ * Действия для операции из СМС. idBase — устойчивый id (по тексту СМС): повторная отправка той же СМС
+ * не создаст вторую операцию. Остаток из СМС сверяется с приложением (account.bank) — даже если сама операция
+ * уже учтена второй СМС того же перевода: в той СМС остаток другого счёта.
+ */
 export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
+  const plan = planOperation(state, op, ctx);
+  if (plan.skip?.status === "ignored") return plan;
+  const bank = bankBalanceActions(state, plan.actions, ctx);
+  return bank.length ? { ...plan, actions: [...plan.actions, ...bank] } : plan;
+}
+
+function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
   const note = smsNote(ctx.sms);
   const money = formatMoney(op.amount);
   // Счета по цифрам карты из СМС (их указывают в настройках счёта). Не нашли — основной счёт и «Сбережения».

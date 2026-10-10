@@ -156,6 +156,11 @@ export const accountSchema = z.object({
   graceDays: z.number().int().min(1).max(365).optional(),
   /** Закрыт: не предлагается для новых операций, но остаётся в истории. */
   archived: z.literal(true).optional(),
+  /**
+   * Остаток в банке по последней СМС («Баланс: 5260.14р») и расхождение с приложением на тот момент
+   * (банк − приложение). delta ≠ 0 — приложение предлагает поправить остаток.
+   */
+  bank: z.object({ amount: kopecksSchema, delta: kopecksSchema, date: isoDateSchema }).optional(),
 });
 export type Account = z.infer<typeof accountSchema>;
 

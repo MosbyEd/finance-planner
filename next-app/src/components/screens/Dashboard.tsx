@@ -22,7 +22,7 @@ import { SKIP_MANDATORY_KEY } from "../app/native/homeModel";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
 import { quickPicks, type QuickPick } from "../app/quickPicks";
-import { ACCOUNT_KINDS, accountRows, hasOwnAccounts } from "../app/accounts";
+import { ACCOUNT_KINDS, accountRows, bankMismatches, bankResolveActions, hasOwnAccounts } from "../app/accounts";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
@@ -162,6 +162,30 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
               Отложить
             </Button>
             <Button size="sm" variant="secondary" onClick={() => resolveRollover(rollover.month, rollover.amount, "dismissed")}>
+              Оставить
+            </Button>
+          </>
+        }
+      />,
+    );
+  }
+  for (const m of bankMismatches(state, today)) {
+    const resolve = (fix: boolean) => {
+      if (dispatch(bankResolveActions(state, m.account.id, fix, today, newId())) && fix) toast("Остаток поправлен");
+    };
+    rows.push(
+      <AttentionRow
+        key={`bank:${m.account.id}`}
+        icon="wallet"
+        tone="warning"
+        title={m.title}
+        text={m.text}
+        actions={
+          <>
+            <Button size="sm" onClick={() => resolve(true)}>
+              Поправить
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => resolve(false)}>
               Оставить
             </Button>
           </>

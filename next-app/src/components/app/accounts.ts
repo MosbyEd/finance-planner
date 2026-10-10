@@ -1,4 +1,5 @@
 import {
+  accountBalance,
   accountBalances,
   activeAccounts,
   creditStatus,
@@ -7,7 +8,8 @@ import {
   MAIN_ACCOUNT_ID,
   sourceAccountId,
 } from "@/domain/accounts";
-import { formatDay, type IsoDate } from "@/domain/dates";
+import type { Action } from "@/domain/actions";
+import { formatDay, formatRelativeDay, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
 import type { IconName } from "../ui/Icon";
@@ -89,4 +91,47 @@ export function transactionAccountLabel(state: State, tx: Transaction): string |
   const name = (id: string) => findAccount(state, id)?.name ?? "счёт";
   if (tx.type === "transfer") return `${name(sourceAccountId(tx))} → ${name(tx.toAccountId ?? "")}`;
   return name(sourceAccountId(tx));
+}
+
+/** Расхождение остатка с банком по последней СМС (≥ 1 ₽): что предложить поправить. */
+export interface BankMismatch {
+  account: Account;
+  /** Остаток в банке по СМС. */
+  bank: Kopecks;
+  /** Остаток в приложении на тот момент. */
+  app: Kopecks;
+  delta: Kopecks;
+  title: string;
+  text: string;
+}
+
+export function bankMismatches(state: State, today: IsoDate): BankMismatch[] {
+  return activeAccounts(state).flatMap((account) => {
+    const bank = account.bank;
+    if (!bank || Math.abs(bank.delta) < 100) return [];
+    const app = bank.amount - bank.delta;
+    return [
+      {
+        account,
+        bank: bank.amount,
+        app,
+        delta: bank.delta,
+        title: `«${account.name}»: в банке ${formatMoney(bank.amount, { whole: true })}, в приложении ${formatMoney(app, { whole: true })}`,
+        text: `По СМС — ${formatRelativeDay(bank.date, today).replace(/, .*/, "").toLowerCase()}. Поправить остаток на ${formatMoney(bank.delta, { sign: true })}?`,
+      },
+    ];
+  });
+}
+
+/** «Поправить»: корректировка счёта на разницу с банком и снятие расхождения. «Оставить» — только снятие. */
+export function bankResolveActions(state: State, accountId: string, fix: boolean, today: IsoDate, id: string): Action[] {
+  const account = activeAccounts(state).find((a) => a.id === accountId);
+  const bank = account?.bank;
+  if (!account || !bank) return [];
+  const resolve: Action = { type: "account.bank", accountId, amount: bank.amount, delta: 0, date: bank.date };
+  if (!fix || bank.delta === 0) return [resolve];
+  return [
+    { type: "balance.set", id, date: today, actual: accountBalance(state, accountId, today) + bank.delta, accountId },
+    resolve,
+  ];
 }

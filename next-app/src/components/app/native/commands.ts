@@ -17,7 +17,9 @@ export type NativeCommand =
   | { type: "add"; draft: AddDraft }
   | { type: "undo"; txId: string }
   | { type: "refresh" }
-  | { type: "toastAction"; id: number };
+  | { type: "toastAction"; id: number }
+  /** Расхождение остатка с банком: fix — поправить корректировкой, иначе — оставить как есть. */
+  | { type: "bank"; accountId: string; fix: boolean };
 
 export interface AddDraft {
   kind: "income" | "expense";
@@ -84,4 +86,5 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("toastAction"), id: z.number().int() }),
+  z.object({ type: z.literal("bank"), accountId: z.string().min(1).max(120), fix: z.boolean() }),
 ]);

@@ -118,10 +118,12 @@ export function importSms(userId: number, text: string, now = new Date(), receiv
   }
 
   const plan = planSmsImport(state, op, { idBase, date, sms });
-  if (plan.skip) return plan.skip;
+  // Операция уже учтена (или это не операция) — но остаток из СМС всё равно сверяем.
+  if (plan.skip && !plan.actions.length) return plan.skip;
   const ops = plan.actions.map((action, i) => ({ opId: `sms-${hash.slice(0, 30)}-${i}`, action }));
   try {
     const result = applyUserOps(userId, ops, today, now.getTime());
+    if (plan.skip) return plan.skip;
     if (!result.changed) return { status: "duplicate", message: "Эта операция уже добавлена." };
     return { status: "added", message: plan.summary };
   } catch (error) {
