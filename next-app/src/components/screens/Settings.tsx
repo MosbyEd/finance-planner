@@ -1,0 +1,21 @@
+"use client";
+
+import { AboutSection } from "./settings/AboutSection";
+import { AccountSection } from "./settings/AccountSection";
+import { CategoriesSection } from "./settings/CategoriesSection";
+import { DataSection } from "./settings/DataSection";
+import { ProfileSection } from "./settings/ProfileSection";
+import { SavingsSection } from "./settings/SavingsSection";
+
+export function Settings() {
+  return (
+    <div className="space-y-4">
+      <AccountSection />
+      <SavingsSection />
+      <CategoriesSection />
+      <ProfileSection />
+      <DataSection />
+      <AboutSection />
+    </div>
+  );
+}

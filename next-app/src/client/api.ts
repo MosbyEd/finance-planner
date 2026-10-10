@@ -1,0 +1,145 @@
+import { z } from "zod";
+import type { Action } from "@/domain/actions";
+import type { AiProposal } from "@/domain/ai";
+import type { IsoDate } from "@/domain/dates";
+import { stateSchema, type State } from "@/domain/schema";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly data: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  /** Нет связи с сервером или сервер недоступен — стоит повторить позже. */
+  get isNetwork(): boolean {
+    return this.status === 0 || this.status >= 500;
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 20_000;
+const UNEXPECTED = "Сервер вернул неожиданный ответ. Попробуем ещё раз позже.";
+
+/**
+ * Запрос к API с таймаутом. Ответ 2xx, который не является ожидаемым JSON (страница прокси,
+ * captive portal), считается сетевой ошибкой — иначе изменение посчиталось бы сохранённым.
+ */
+async function request<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init: { method?: string; body?: unknown; timeoutMs?: number; account?: string } = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(path, {
+      method: init.method ?? "GET",
+      credentials: "same-origin",
+      headers: {
+        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+        // Какой аккаунт ожидает вкладка: если в соседней вошли в другой, сервер ответит 409.
+        ...(init.account ? { "X-Account": encodeURIComponent(init.account) } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    text = await response.text();
+  } catch {
+    throw new ApiError(controller.signal.aborted ? "Сервер не отвечает." : "Нет связи с сервером.", 0);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    if (response.ok) throw new ApiError(UNEXPECTED, 0);
+  }
+  const body = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  if (!response.ok) {
+    const message = typeof body.error === "string" ? body.error : `Ошибка сервера (${response.status}).`;
+    throw new ApiError(message, response.status, body);
+  }
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) throw new ApiError(UNEXPECTED, 0);
+  return parsed.data;
+}
+
+const userSchema = z.object({ login: z.string(), name: z.string().nullable() });
+export type PublicUser = z.infer<typeof userSchema>;
+
+const meSchema = z.object({
+  user: userSchema.nullable(),
+  aiEnabled: z.boolean(),
+  registrationOpen: z.boolean(),
+});
+export type MeResponse = z.infer<typeof meSchema>;
+
+const userResponseSchema = z.object({ user: userSchema });
+const okSchema = z.object({ ok: z.literal(true) });
+const stateResponseSchema = z.object({ version: z.number().int().min(0), state: stateSchema });
+const opsResponseSchema = z.object({ version: z.number().int().min(0), stale: z.boolean() });
+
+export interface Op {
+  /** Уникальный id изменения: сервер не применит его дважды. */
+  opId: string;
+  action: Action;
+}
+
+export interface AiChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const aiChatSchema = z.object({
+  text: z.string(),
+  // Предложение уже проверено сервером; здесь — только форма.
+  proposal: z
+    .object({ operations: z.array(z.any()), templates: z.array(z.any()), limits: z.array(z.any()) })
+    .nullable(),
+  skipped: z.number(),
+  reasoning: z.string().nullable(),
+  model: z.string(),
+});
+export interface AiChatResponse {
+  text: string;
+  proposal: AiProposal | null;
+  skipped: number;
+  reasoning: string | null;
+  model: string;
+}
+
+export const api = {
+  me: () => request("/api/me", meSchema),
+  login: (login: string, password: string) =>
+    request("/api/auth/login", userResponseSchema, { method: "POST", body: { login, password } }),
+  register: (login: string, password: string, name: string) =>
+    request("/api/auth/register", userResponseSchema, { method: "POST", body: { login, password, name } }),
+  logout: () => request("/api/auth/logout", okSchema, { method: "POST" }),
+  getState: (account?: string): Promise<{ version: number; state: State }> =>
+    request("/api/state", stateResponseSchema, { timeoutMs: 30_000, account }),
+  postOps: (baseVersion: number, ops: Op[], account?: string) =>
+    request("/api/state/actions", opsResponseSchema, {
+      method: "POST",
+      body: { baseVersion, ops },
+      timeoutMs: 60_000,
+      account,
+    }),
+  aiChat: async (messages: AiChatMessage[], mode: "fast" | "reasoning", today: IsoDate): Promise<AiChatResponse> =>
+    (await request("/api/ai/chat", aiChatSchema, {
+      method: "POST",
+      body: { messages, mode, today },
+      timeoutMs: 200_000,
+    })) as AiChatResponse,
+  updateName: (name: string) => request("/api/account", userResponseSchema, { method: "PATCH", body: { name } }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request("/api/account/password", okSchema, { method: "POST", body: { currentPassword, newPassword } }),
+  deleteAccount: (password: string) => request("/api/account", okSchema, { method: "DELETE", body: { password } }),
+};

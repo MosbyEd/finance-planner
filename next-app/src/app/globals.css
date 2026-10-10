@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+/* Семантические цвета: светлая тема по умолчанию, тёмная — по настройке системы. */
+:root {
+  --bg: #f4f4f1;
+  --surface: #ffffff;
+  --surface-2: #f0efeb;
+  --surface-3: #e7e5e0;
+  --text: #1c1b19;
+  --muted: #6b6862;
+  --border: #e3e1dc;
+  /* Границы полей ввода и выключенного переключателя: контраст ≥ 3:1 с фоном (WCAG 1.4.11). */
+  --border-strong: #949088;
+  --accent: #3f51d9;
+  --accent-soft: #e9ebfc;
+  --accent-text: #ffffff;
+  --positive: #0b7651;
+  --positive-soft: #e3f4ec;
+  --negative: #c02f43;
+  /* Сплошной красный фон под белым текстом (кнопка удаления, уведомление об ошибке). */
+  --negative-strong: #b8293d;
+  --negative-soft: #fbe7ea;
+  --warning: #965a00;
+  --warning-soft: #fdf1dc;
+  --overlay: rgb(20 19 17 / 0.45);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110;
+    --surface: #1b1b19;
+    --surface-2: #242421;
+    --surface-3: #2f2f2b;
+    --text: #f1f0ec;
+    --muted: #a3a09a;
+    --border: #2f2e2b;
+    --border-strong: #6b6862;
+    --accent: #8796ff;
+    --accent-soft: #262b4d;
+    --accent-text: #0f1120;
+    --positive: #3dc58e;
+    --positive-soft: #163326;
+    --negative: #ff7083;
+    --negative-strong: #c93a4f;
+    --negative-soft: #3a1c22;
+    --warning: #f0a83a;
+    --warning-soft: #3a2a12;
+    --overlay: rgb(0 0 0 / 0.6);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-negative: var(--negative);
+  --color-negative-strong: var(--negative-strong);
+  --color-negative-soft: var(--negative-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-overlay: var(--overlay);
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1;
+  }
+  /* iOS не зумит поле, если шрифт ≥ 16px */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@utility animate-sheet {
+  animation: sheet-in 180ms ease-out;
+}
+
+@utility animate-fade {
+  animation: fade-in 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

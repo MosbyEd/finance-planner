@@ -1,0 +1,382 @@
+"use client";
+
+import { useState } from "react";
+import { formatDay, formatMonthIn, monthKeyOf, type MonthKey } from "@/domain/dates";
+import { balanceAt, goalsReserved, monthMetrics, safeToSpend, savingsTotal } from "@/domain/metrics";
+import { formatMoney, type Kopecks } from "@/domain/money";
+import { occurrenceDate } from "@/domain/recurring";
+import { plural } from "@/domain/text";
+import { newId, useSnapshot, useToday } from "@/client/react";
+import { storage } from "@/client/storage";
+import { AmountInput } from "../../ui/AmountInput";
+import { Button } from "../../ui/Button";
+import { Money, Segmented } from "../../ui/controls";
+import { useToast } from "../../ui/feedback";
+import { TextInput } from "../../ui/Field";
+import { Sheet } from "../../ui/Sheet";
+import { useDispatch } from "../hooks";
+import { useUi } from "../overlays";
+
+/** Человек подтвердил остаток, совпавший с расчётным (корректировка не создаётся). */
+export const BALANCE_CONFIRMED_KEY = "fp:onboarding-balance-confirmed";
+
+/** Сверка остатка: человек вводит, сколько реально на счёте, приложение добавляет корректировку. */
+export function BalanceSheet() {
+  const { state } = useSnapshot();
+  const { close } = useUi();
+  const today = useToday();
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const computed = balanceAt(state, today);
+  // Операций ещё нет — это не сверка, а стартовый остаток.
+  const fresh = state.transactions.length === 0;
+  const [actual, setActual] = useState<Kopecks | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const delta = actual === null ? 0 : actual - computed;
+
+  const save = () => {
+    if (actual === null) {
+      setError("Введите сумму");
+      return;
+    }
+    if (delta === 0) {
+      // Корректировка не нужна, но шаг «укажите остаток» в онбординге считаем выполненным.
+      storage.set(BALANCE_CONFIRMED_KEY, "1");
+      toast("Остаток совпадает");
+      close();
+      return;
+    }
+    if (dispatch({ type: "balance.set", id: newId(), date: today, actual })) {
+      toast(fresh ? `Стартовый остаток: ${formatMoney(actual)}` : `Остаток обновлён: ${formatMoney(actual)}`);
+      close();
+    }
+  };
+
+  return (
+    <Sheet
+      open
+      onClose={close}
+      dirty={actual !== null}
+      title={fresh ? "Сколько сейчас денег?" : "Сколько на счёте?"}
+      footer={
+        <Button className="w-full" onClick={save}>
+          Сохранить
+        </Button>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        {fresh ? (
+          <p className="text-[15px] text-muted">
+            Сколько сейчас денег на картах и наличными? Это будет стартовый остаток.
+          </p>
+        ) : (
+          <p className="text-[15px] text-muted">
+            По операциям в приложении сейчас <Money value={computed} className="font-semibold text-text" />. Если реальный
+            остаток на картах и наличными другой — введите его, и приложение добавит корректировку.
+          </p>
+        )}
+        <AmountInput
+          label={fresh ? "Остаток сейчас" : "Реальный остаток"}
+          value={actual}
+          onChange={(v) => {
+            setActual(v);
+            setError(null);
+          }}
+          allowNegative
+          autoFocus
+          error={error}
+        />
+        {!fresh && actual !== null && delta !== 0 && (
+          <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">
+            Корректировка: <Money value={delta} sign tone="auto" className="font-semibold" />. Она не влияет на бюджет
+            месяца — только на остаток.
+          </p>
+        )}
+        {!fresh && actual !== null && delta === 0 && (
+          <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">Остаток совпадает с расчётным — менять нечего.</p>
+        )}
+        <button type="submit" hidden />
+      </form>
+    </Sheet>
+  );
+}
+
+/** Пополнение или снятие общих сбережений. */
+export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
+  const { state } = useSnapshot();
+  const { close } = useUi();
+  const today = useToday();
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const [dir, setDir] = useState(direction);
+  const [amount, setAmount] = useState<Kopecks | null>(null);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const total = savingsTotal(state, today);
+  const inGoals = goalsReserved(state);
+  // Деньги, отложенные на цели, снимаются на вкладке «Цели» — здесь доступно только свободное.
+  const available = Math.max(0, total - inGoals);
+  // Снять больше, чем свободно, нельзя — подсказываем сразу, а не после нажатия.
+  const overLimit = dir === "out" && amount !== null && amount > available;
+  const touchesGoals = dir === "out" && inGoals > 0;
+  const limitError = overLimit
+    ? available > 0
+      ? `Можно снять не больше ${formatMoney(available)}`
+      : inGoals > 0
+        ? "Свободных сбережений нет — всё отложено на цели"
+        : "В сбережениях пока ничего нет"
+    : null;
+
+  const save = () => {
+    if (!amount) {
+      setError("Введите сумму");
+      return;
+    }
+    if (overLimit) return;
+    const signed = dir === "in" ? amount : -amount;
+    if (dispatch({ type: "savings.move", id: newId(), date: today, amount: signed, note: note.trim() })) {
+      toast(dir === "in" ? `Отложено ${formatMoney(amount)}` : `Снято ${formatMoney(amount)}`);
+      close();
+    }
+  };
+
+  return (
+    <Sheet
+      open
+      onClose={close}
+      dirty={amount !== null || note.trim() !== ""}
+      title="Сбережения"
+      footer={
+        <Button className="w-full" onClick={save} disabled={overLimit}>
+          {dir === "in" ? "Отложить" : "Снять"}
+        </Button>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        <div className="rounded-2xl bg-surface-2 px-4 py-3">
+          <p className="text-sm text-muted">Накоплено</p>
+          <Money value={total} className="text-2xl font-semibold" />
+          {inGoals > 0 && <p className="text-sm text-muted">из них на целях: {formatMoney(inGoals)}</p>}
+        </div>
+        <Segmented
+          label="Направление"
+          value={dir}
+          onChange={(v) => {
+            setDir(v);
+            setError(null);
+          }}
+          options={[
+            { value: "in", label: "Отложить" },
+            { value: "out", label: "Снять" },
+          ]}
+        />
+        <div className="space-y-2">
+          <AmountInput
+            label="Сумма"
+            value={amount}
+            onChange={(v) => {
+              setAmount(v);
+              setError(null);
+            }}
+            autoFocus
+            error={error ?? limitError}
+            hint={dir === "in" ? "Деньги уйдут со счёта в сбережения" : "Деньги вернутся из сбережений на счёт"}
+          />
+          {dir === "out" && available > 0 && amount !== available && (
+            <button
+              type="button"
+              onClick={() => {
+                setAmount(available);
+                setError(null);
+              }}
+              className="h-10 rounded-full bg-surface-2 px-3.5 text-sm font-medium text-text hover:bg-surface-3"
+            >
+              Всё — {formatMoney(available)}
+            </button>
+          )}
+          {touchesGoals && (
+            <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted" role="status">
+              Ещё {formatMoney(inGoals)} отложено на цели — их снимают на вкладке «Цели».
+            </p>
+          )}
+        </div>
+        <TextInput label="Комментарий" placeholder="Необязательно" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+        <button type="submit" hidden />
+      </form>
+    </Sheet>
+  );
+}
+
+/** Объяснение, откуда взялся дневной лимит. */
+export function ExplainSheet() {
+  const { state, aiEnabled } = useSnapshot();
+  const { close, open } = useUi();
+  const today = useToday();
+  const sts = safeToSpend(state, today);
+  const m = monthMetrics(state, monthKeyOf(today), today);
+  // Без доходов в плане этого месяца лимит считается только по деньгам на счёте (как в safeToSpend).
+  const hasIncome = sts.usesBudget;
+  const budgetBinding = hasIncome && sts.budgetPerDay <= sts.cashPerDay;
+  const raw = hasIncome ? Math.min(sts.budgetPerDay, sts.cashPerDay) : sts.cashPerDay;
+  const days = (n: number) => `${n} ${plural(n, ["день", "дня", "дней"])}`;
+
+  return (
+    <Sheet
+      open
+      onClose={close}
+      title="Как считается лимит на день"
+      footer={
+        aiEnabled ? (
+          <Button
+            variant="soft"
+            icon="sparkles"
+            className="w-full"
+            onClick={() =>
+              open({
+                kind: "ai",
+                prompt: "Объясни мой лимит на сегодня и подскажи, как не выйти за бюджет до конца месяца.",
+              })
+            }
+          >
+            Спросить AI-помощника
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="space-y-4 text-[15px]">
+        <p>
+          {hasIncome
+            ? "Берём меньшее из двух чисел — так денег хватит и на план месяца, и на платежи до следующего дохода."
+            : "В этом месяце доходов в плане нет — считаем только по деньгам на счёте."}
+        </p>
+        <p className="rounded-2xl bg-surface-2 px-4 py-3">
+          Лимит на сегодня: <span className="font-semibold tabular-nums">{formatMoney(sts.recommended)}</span>
+          <span className="mt-1 block text-sm text-muted">
+            Потрачено сегодня {formatMoney(sts.spentToday)} —{" "}
+            {sts.leftToday < 0 ? (
+              <span className="font-medium text-negative">сверх лимита {formatMoney(-sts.leftToday)}</span>
+            ) : (
+              <>осталось {formatMoney(sts.leftToday)}</>
+            )}
+          </span>
+          {raw < 0 && <span className="mt-1 block text-sm text-muted">Если получилось меньше нуля, лимит — 0 ₽.</span>}
+        </p>
+
+        <section className={`rounded-2xl p-4 ${budgetBinding ? "bg-accent-soft" : "bg-surface-2"}`}>
+          <h3 className="font-semibold">По бюджету месяца: {formatMoney(sts.budgetPerDay)} в день</h3>
+          <dl className="mt-2 space-y-1 text-sm">
+            <Row label="Доходы за месяц (с плановыми)" value={m.income.plan} />
+            <Row label="− Обязательные расходы" value={m.mandatory.plan} />
+            <Row label={`− Норма сбережений (${state.settings.savingsRatePercent}%)`} value={m.savings.target} />
+            <Row label="= Гибкий бюджет" value={m.flexible.budget} strong />
+            <Row label="− Уже потрачено до сегодня" value={m.flexible.spent - m.flexible.spentToday} />
+            {m.flexible.reserved > 0 && <Row label="− Запланированные траты" value={m.flexible.reserved} />}
+            {m.flexible.extraSavings > 0 && <Row label="− Отложено сверх нормы" value={m.flexible.extraSavings} />}
+          </dl>
+          <p className="pt-1 text-sm text-muted">
+            Делим на {days(m.daysLeft)} до конца месяца, включая сегодня.
+            {!hasIncome && " Без доходов в плане этот расчёт не учитывается."}
+          </p>
+        </section>
+
+        <section className={`rounded-2xl p-4 ${!budgetBinding ? "bg-accent-soft" : "bg-surface-2"}`}>
+          <h3 className="font-semibold">По деньгам на счёте: {formatMoney(sts.cashPerDay)} в день</h3>
+          <dl className="mt-2 space-y-1 text-sm">
+            <Row label="Сейчас на счёте (до сегодняшних трат)" value={sts.cashNow} />
+            <Row
+              label={
+                sts.horizon.reason === "income"
+                  ? `− Платежи до «${sts.horizon.title}» ${formatDay(sts.horizon.date)}`
+                  : "− Платежи до конца месяца"
+              }
+              value={sts.plannedOut}
+            />
+          </dl>
+          <p className="pt-1 text-sm text-muted">
+            Делим на {days(sts.daysUntil)} {sts.horizon.reason === "income" ? "до ближайшего дохода" : "до конца месяца"}.
+          </p>
+        </section>
+
+        <p className="text-sm text-muted">
+          Обязательные платежи и доходы берутся из регулярных доходов и платежей и запланированных операций. Если остаток в
+          приложении отличается от реального — сверьте его на главном экране.
+        </p>
+      </div>
+    </Sheet>
+  );
+}
+
+function Row({ label, value, strong }: { label: string; value: Kopecks; strong?: boolean }) {
+  return (
+    <div className={`flex justify-between gap-3 ${strong ? "font-semibold" : ""}`}>
+      <dt className={strong ? "" : "text-muted"}>{label}</dt>
+      <dd className="tabular-nums">{formatMoney(value)}</dd>
+    </div>
+  );
+}
+
+/** Запланированное начисление регулярного платежа или дохода: пропустить один раз или изменить сам регулярный платёж. */
+export function PlannedSheet({ templateId, month }: { templateId: string; month: MonthKey }) {
+  const { state } = useSnapshot();
+  const { close, open } = useUi();
+  const today = useToday();
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const template = state.templates.find((t) => t.id === templateId);
+  if (!template) return null;
+  const date = occurrenceDate(template, month);
+  const income = template.kind === "income";
+  // «в октябре» (с годом, если не текущий) — начисление может быть и в следующем месяце.
+  const inMonth = formatMonthIn(month, today);
+  const skip = () => {
+    if (dispatch({ type: "occurrence.skip", templateId, month })) {
+      close();
+      toast(income ? "Доход пропущен" : "Платёж пропущен", {
+        action: { label: "Отменить", onClick: () => dispatch({ type: "occurrence.unskip", templateId, month }) },
+      });
+    }
+  };
+
+  return (
+    <Sheet
+      open
+      onClose={close}
+      title={template.title}
+      footer={
+        <div className="grid gap-2">
+          <Button onClick={skip}>Пропустить {inMonth}</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "template", templateId })}>
+            {income ? "Изменить регулярный доход" : "Изменить регулярный платёж"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-2xl bg-surface-2 px-4 py-3">
+          <p className="text-sm text-muted">
+            {income ? "Ожидаемый доход" : "Предстоящий платёж"} · {formatDay(date, today)}
+          </p>
+          <Money value={template.amount} className="text-2xl font-semibold" />
+          <p className="text-sm text-muted">{template.category}</p>
+        </div>
+        <p className="text-sm text-muted">
+          {income
+            ? `В день поступления операция появится в истории автоматически. Если ${inMonth} дохода не будет — пропустите его.`
+            : `В день платежа операция появится в истории автоматически. Если ${inMonth} платежа не будет — пропустите его.`}
+        </p>
+      </div>
+    </Sheet>
+  );
+}

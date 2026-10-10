@@ -1,0 +1,106 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { IsoDate, MonthKey } from "@/domain/dates";
+import { useConfirm } from "../ui/feedback";
+
+/** Какое окно сейчас открыто поверх экрана. Одновременно открыто не больше одного. */
+export type Overlay =
+  | { kind: "tx"; txId?: string; preset?: { type?: "income" | "expense"; mandatory?: boolean; date?: IsoDate } }
+  | { kind: "template"; templateId?: string; preset?: { kind?: "income" | "expense" } }
+  | { kind: "goal"; goalId?: string }
+  | { kind: "goalMoney"; goalId: string; direction: "in" | "out" }
+  | { kind: "loan"; loanId?: string }
+  | { kind: "loanPayment"; loanId: string }
+  | { kind: "savings"; direction: "in" | "out" }
+  | { kind: "balance" }
+  | { kind: "explain" }
+  | { kind: "planned"; templateId: string; month: MonthKey }
+  | { kind: "ai"; prompt?: string }
+  | { kind: "auth"; mode?: "login" | "register" }
+  | { kind: "limit"; category?: string };
+
+export type Tab = "home" | "history" | "plans" | "goals" | "analytics" | "settings";
+
+interface UiContextValue {
+  overlay: Overlay | null;
+  open: (overlay: Overlay) => void;
+  close: () => void;
+  tab: Tab;
+  /** Переключает вкладку. Если на текущей есть несохранённый черновик, сначала спросит подтверждение. */
+  setTab: (tab: Tab) => void;
+  /** Проверка «есть несохранённые изменения» перед уходом с вкладки. Возвращает функцию, снимающую проверку. */
+  registerLeaveGuard: (key: string, isDirty: () => boolean) => () => void;
+  unregisterLeaveGuard: (key: string) => void;
+}
+
+const UiContext = createContext<UiContextValue | null>(null);
+
+export function UiProvider({ children, initialTab = "home" }: { children: ReactNode; initialTab?: Tab }) {
+  const confirm = useConfirm();
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const guards = useRef(new Map<string, () => boolean>());
+
+  const unregisterLeaveGuard = useCallback((key: string) => {
+    guards.current.delete(key);
+  }, []);
+  const registerLeaveGuard = useCallback((key: string, isDirty: () => boolean) => {
+    guards.current.set(key, isDirty);
+    return () => {
+      // Снимаем, только если под ключом всё ещё наша проверка.
+      if (guards.current.get(key) === isDirty) guards.current.delete(key);
+    };
+  }, []);
+
+  const setTab = useCallback(
+    (next: Tab) => {
+      const go = () => {
+        setTabState(next);
+        window.scrollTo({ top: 0 });
+      };
+      const dirty = next !== tab && [...guards.current.values()].some((isDirty) => isDirty());
+      if (!dirty) {
+        go();
+        return;
+      }
+      void confirm({
+        title: "Уйти без сохранения?",
+        message: "Изменения в настройках пропадут.",
+        confirmLabel: "Не сохранять",
+        danger: true,
+      }).then((ok) => {
+        if (ok) go();
+      });
+    },
+    [confirm, tab],
+  );
+
+  const value: UiContextValue = {
+    overlay,
+    open: setOverlay,
+    close: () => setOverlay(null),
+    tab,
+    setTab,
+    registerLeaveGuard,
+    unregisterLeaveGuard,
+  };
+  return <UiContext.Provider value={value}>{children}</UiContext.Provider>;
+}
+
+export function useUi(): UiContextValue {
+  const ctx = useContext(UiContext);
+  if (!ctx) throw new Error("useUi вне UiProvider");
+  return ctx;
+}
+
+/** Пока dirty, переход на другую вкладку сначала спросит, можно ли бросить черновик. */
+export function useLeaveGuard(dirty: boolean): void {
+  const { registerLeaveGuard } = useUi();
+  const key = useId();
+  const dirtyRef = useRef(dirty);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  useEffect(() => registerLeaveGuard(key, () => dirtyRef.current), [key, registerLeaveGuard]);
+}
