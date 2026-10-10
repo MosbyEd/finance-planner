@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		021051AC686C37550E6565AB /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */; };
+		0DE8777B1FBE0867E8518646 /* BudgetWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4799331368D164CAE12ED554 /* BudgetWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		3DCA238646210F616325015F /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */; };
 		48C3271800E63486EFDAF540 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F51C0C8567B79CB7B06B26C /* HomeView.swift */; };
@@ -34,6 +35,30 @@
 		E6443106F3F4F2E4F3507FEF /* HomeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56599AF6B58426CDDCBDCB90 /* HomeModel.swift */; };
 		EB8EE50E6952DBF240187936 /* AddTransactionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4BE7AF48666D4A86271365EB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E31A4135F8BF5162CBF783C8;
+			remoteInfo = BudgetWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		22F03FF4ECF4194AFCBF02B0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0DE8777B1FBE0867E8518646 /* BudgetWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
@@ -177,10 +202,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				22F03FF4ECF4194AFCBF02B0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				32835B928A75601793C3B25D /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -303,6 +330,15 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		32835B928A75601793C3B25D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = BudgetWidget;
+			target = E31A4135F8BF5162CBF783C8 /* BudgetWidget */;
+			targetProxy = 4BE7AF48666D4A86271365EB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -476,6 +512,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = A3AQ5X62W5;
@@ -499,6 +536,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = A3AQ5X62W5;

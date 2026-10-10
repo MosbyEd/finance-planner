@@ -257,8 +257,11 @@ final class HomeStore {
     }
 
     func update(_ next: HomeModel) {
+        // Первая модель в запуске уходит в виджет, даже если совпала с сохранённой: виджет мог
+        // остаться без данных (переустановка, первый запуск с виджетом).
+        let first = !live
         live = true
-        guard next != model else { return }
+        guard first || next != model else { return }
         model = next
         if let data = try? JSONEncoder().encode(next) {
             UserDefaults.standard.set(data, forKey: cacheKey)
