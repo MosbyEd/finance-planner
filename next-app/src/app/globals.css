@@ -207,6 +207,8 @@
     color: var(--text);
     font-family: var(--font-sans);
     font-feature-settings: "tnum" 1;
+    /* Что-то шире экрана обрезается, а не сдвигает страницу вбок (clip, а не hidden: sticky-шапки работают). */
+    overflow-x: clip;
   }
   /* Неподвижная подложка с мягкими пятнами цвета. Отдельный слой, а не background-attachment: fixed —
      в iOS Safari фиксированный фон не работает. */

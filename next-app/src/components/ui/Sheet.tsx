@@ -126,7 +126,8 @@ export function Sheet({
           </h2>
           <IconButton icon="close" label="Закрыть" variant="secondary" onClick={() => void requestClose()} size={40} />
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        {/* Поперёк окно не прокручивается: если что-то шире окна, оно обрезается, а не сдвигает всю страницу вбок. */}
+        <div className="flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-4">
           {description && (
             <div id={descriptionId} className="mb-4 text-[15px] text-muted last:mb-0">
               {description}

@@ -1,7 +1,9 @@
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
-const CONTROL =
-  "w-full rounded-2xl border border-border-strong bg-surface px-3.5 text-text placeholder:text-muted/70 outline-none transition focus:border-accent aria-[invalid=true]:border-negative disabled:opacity-60";
+/** Вид поля без ширины — для полей своей ширины (w-24 рядом с w-full не сработает: побеждает w-full). */
+const CONTROL_LOOK =
+  "rounded-2xl border border-border-strong bg-surface px-3.5 text-text placeholder:text-muted/70 outline-none transition focus:border-accent aria-[invalid=true]:border-negative disabled:opacity-60";
+const CONTROL = `w-full ${CONTROL_LOOK}`;
 
 /** id подсказки или ошибки под полем — для aria-describedby у самого поля. */
 export function fieldMessageId(controlId: string): string {
@@ -162,3 +164,4 @@ export function TimeInput({
 }
 
 export const controlClass = CONTROL;
+export const controlLookClass = CONTROL_LOOK;

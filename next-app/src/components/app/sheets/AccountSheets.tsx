@@ -19,7 +19,7 @@ import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { Segmented, Switch } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
-import { DateInput, TextInput, controlClass } from "../../ui/Field";
+import { DateInput, TextInput, controlClass, controlLookClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { ACCOUNT_KINDS, bankResolveActions } from "../accounts";
@@ -301,11 +301,11 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
                 placeholder="7759"
                 value={card.digits}
                 onChange={(e) => updateCard(card.key, { digits: fourDigits(e.target.value) })}
-                className={`${controlClass} h-12 w-24 shrink-0 tabular-nums`}
+                className={`${controlLookClass} h-12 w-24 shrink-0 tabular-nums`}
               />
               <input
                 aria-label="Название карты"
-                placeholder="Название — например, Мир"
+                placeholder="Например, Мир"
                 maxLength={40}
                 value={card.name}
                 onChange={(e) => updateCard(card.key, { name: e.target.value })}
