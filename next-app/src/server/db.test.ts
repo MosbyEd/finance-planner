@@ -22,7 +22,7 @@ describe("миграция login_key (L3)", () => {
     expect(() =>
       db.prepare("INSERT INTO users (login, login_key, password_hash, created_at) VALUES ('аНя', ?, 'x', 0)").run(loginKey("аНя")),
     ).toThrow(/UNIQUE/);
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(4);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
     db.close();
   });
 

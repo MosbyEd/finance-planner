@@ -59,6 +59,15 @@ const MIGRATIONS: Migration[] = [
     UPDATE states SET rev = random() % 9007199254740992 WHERE user_id = NEW.user_id;
   END;
   `,
+  // Ключ для автоматизации «Команд», которая присылает СМС банка (по одному на пользователя, хранится SHA-256).
+  `
+  CREATE TABLE sms_keys (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  `,
 ];
 
 function addLoginKey(db: DatabaseSync): void {

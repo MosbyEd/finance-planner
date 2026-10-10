@@ -1,0 +1,384 @@
+import type { Action } from "./actions";
+import { addDays, type IsoDate } from "./dates";
+import { OTHER_CATEGORY } from "./defaults";
+import { formatMoney, MAX_KOPECKS, type Kopecks } from "./money";
+import { autoSavingByDefault } from "./savings";
+import { LIMITS, type State, type Transaction } from "./schema";
+
+/**
+ * Операции из СМС Сбербанка (номер 900). iOS не даёт приложениям читать СМС, поэтому текст присылает
+ * автоматизация «Команд» на сервер; здесь — только разбор текста и выбор категории, без сети и базы.
+ */
+
+export type SmsOperation =
+  | {
+      kind: "expense";
+      via: "purchase" | "payment" | "transfer" | "cash" | "writeoff";
+      amount: Kopecks;
+      time: string | null;
+      /** Магазин или получатель; пусто, если в СМС его нет. */
+      counterparty: string;
+    }
+  | {
+      kind: "income";
+      via: "salary" | "advance" | "bonus" | "transfer" | "deposit" | "refund" | "interest";
+      amount: Kopecks;
+      time: string | null;
+      counterparty: string;
+    }
+  /** Проценты, выплаченные на накопительный счёт: доход, который сразу лежит в сбережениях. */
+  | { kind: "savingsInterest"; amount: Kopecks; time: string | null }
+  /** Перевод со счёта на накопительный счёт и обратно. */
+  | { kind: "toSavings"; amount: Kopecks; time: string | null }
+  | { kind: "fromSavings"; amount: Kopecks; time: string | null };
+
+type IncomeVia = Extract<SmsOperation, { kind: "income" }>["via"];
+type ExpenseVia = Extract<SmsOperation, { kind: "expense" }>["via"];
+
+/** Пробелы СМС (неразрывные, узкие) — обычные, по одному. */
+export function normalizeSms(text: string): string {
+  return text
+    .replace(/[    ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Сумма в рублях: «1440р», «162.38р», «61 848.91р», «358,90р.», «500 руб.», «500 ₽».
+const AMOUNT = String.raw`(\d{1,3}(?: \d{3})+|\d+)(?:[.,](\d{1,2}))?\s?(?:руб\.?|р\.?|₽|RUB)(?![а-яё])`;
+/** Остаток строки — магазин или получатель (текст уже без «Баланс…»). */
+const TAIL = String.raw`(?:\s+(.+))?$`;
+
+function amountOf(rubles: string, fraction: string | undefined): Kopecks | null {
+  const whole = Number(rubles.replace(/ /g, ""));
+  const kopecks = fraction ? Number(fraction.padEnd(2, "0")) : 0;
+  const total = whole * 100 + kopecks;
+  return Number.isSafeInteger(total) && total > 0 && total <= MAX_KOPECKS ? total : null;
+}
+
+/** Магазин или получатель без хвостовой пунктуации; точку инициала («Валерия В.») оставляем. */
+function clean(text: string | undefined): string {
+  const trimmed = (text ?? "").replace(/[\s,;:]+$/, "");
+  const withoutDot = / [A-ZА-ЯЁ]\.$/u.test(trimmed) ? trimmed : trimmed.replace(/\.+$/, "");
+  return withoutDot.trim().slice(0, 60);
+}
+
+/** Время операции «ЧЧ:ММ» из СМС, если есть. */
+function timeOf(text: string): string | null {
+  const m = /(?:^|\s)([01]?\d|2[0-3]):([0-5]\d)(?=\s)/.exec(text);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : null;
+}
+
+/** Не операции: отказы, коды, пароли, реклама с суммами. */
+const NOT_OPERATION = /отказ|отклон|недостаточно|не выполн|не прош|код[\s:]|парол|одобрен|предлага|акци[яи]|https?:\/\/|\.ru\//iu;
+const SAVINGS_ACCOUNT = /^(?:Накопительный|Сберегательный) сч[её]т|^Вклад/iu;
+
+/** Разбирает СМС от 900. Не операция или незнакомый формат — null. */
+export function parseSberSms(raw: string): SmsOperation | null {
+  const text = normalizeSms(raw);
+  if (!text || NOT_OPERATION.test(text)) return null;
+  const time = timeOf(text);
+  const match = (re: string) => new RegExp(re, "iu").exec(text);
+  const amount = (m: RegExpExecArray) => amountOf(m[1], m[2]);
+
+  // Со счёта на накопительный: «Зачисление средств 45 045р на счёт Накопительный счет *7272».
+  let m = match(String.raw`(?:Зачисление средств|Перевод)\s+${AMOUNT}\s+на (?:сч[её]т\s+)?(?:Накопительный|Сберегательный|вклад)`);
+  if (m) {
+    const a = amount(m);
+    return a ? { kind: "toSavings", amount: a, time } : null;
+  }
+
+  if (SAVINGS_ACCOUNT.test(text)) {
+    // С накопительного на основной счёт: «Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804».
+    m = match(String.raw`Перевод\s+${AMOUNT}\s+на\s+(?:СЧ[ЁЕ]Т|карту|сч[её]т)`);
+    if (m) {
+      const a = amount(m);
+      return a ? { kind: "fromSavings", amount: a, time } : null;
+    }
+    m = match(String.raw`(?:Выплатили проценты|Зачисление процентов|Капитализация|Проценты)\s+${AMOUNT}`);
+    if (m) {
+      const a = amount(m);
+      return a ? { kind: "savingsInterest", amount: a, time } : null;
+    }
+    // Остальное по накопительному (пополнение с него же, закрытие) — без изменений на счёте в приложении.
+    return null;
+  }
+
+  // Дальше нужна только сама операция: «Баланс…» и всё после него отрезаем, чтобы он не попал в получателя.
+  const head = text.replace(/\s*Баланс.*$/iu, "");
+  const on = (re: string) => new RegExp(re, "iu").exec(head);
+  const income = (via: IncomeVia, m: RegExpExecArray, counterparty = ""): SmsOperation | null => {
+    const a = amount(m);
+    return a ? { kind: "income", via, amount: a, time, counterparty: clean(counterparty) } : null;
+  };
+  const expense = (via: ExpenseVia, m: RegExpExecArray, counterparty = ""): SmsOperation | null => {
+    const a = amount(m);
+    return a ? { kind: "expense", via, amount: a, time, counterparty: clean(counterparty) } : null;
+  };
+
+  // «Зачисление зарплаты 61 848.91р», «Зачисление аванса …».
+  m = on(String.raw`Зачисление\s+(зарплаты|заработной платы|аванса|премии|пенсии|стипендии|отпускных)\s+${AMOUNT}`);
+  if (m) {
+    const word = m[1].toLowerCase();
+    const a = amountOf(m[2], m[3]);
+    const via: IncomeVia = word.startsWith("аванс") ? "advance" : word.startsWith("прем") ? "bonus" : "salary";
+    return a ? { kind: "income", via, amount: a, time, counterparty: "" } : null;
+  }
+
+  // Входящий перевод: «Перевод 800р от Валерия В.», «Перевод из Т-Банк +5000р от ИВАН И.».
+  m = on(String.raw`Перевод(?:\s+из\s+.+?)?\s+\+?${AMOUNT}\s+от\s+(.+)$`);
+  if (m) return income("transfer", m, m[3]);
+
+  // Возврат и отмена покупки.
+  m = on(String.raw`(?:Возврат покупки|Отмена покупки|Возврат)\s+${AMOUNT}${TAIL}`);
+  if (m) return income("refund", m, m[3]);
+
+  // Прочие зачисления: «Зачисление 1500р …».
+  m = on(String.raw`Зачисление\s+\+?${AMOUNT}${TAIL}`);
+  if (m) return income("deposit", m, m[3]);
+
+  m = on(String.raw`Покупка\s+${AMOUNT}${TAIL}`);
+  if (m) return expense("purchase", m, m[3]);
+
+  m = on(String.raw`Оплата(?:\s+услуг)?\s+${AMOUNT}${TAIL}`);
+  if (m) return expense("payment", m, m[3]);
+
+  m = on(String.raw`Выдача(?:\s+наличных)?\s+${AMOUNT}${TAIL}`);
+  if (m) return expense("cash", m);
+
+  // Исходящий перевод: «перевод 3000р OZON», «перевод 8000р», «Перевод по СБП 500р для ИВАН И.».
+  m = on(String.raw`Перевод(?:\s+по СБП)?\s+${AMOUNT}${TAIL}`);
+  if (m) {
+    const to = clean(m[3]).replace(/^(?:для|получателю|на имя)\s+/iu, "");
+    // На свой счёт («на СЧЁТ5804») — деньги остаются у вас, это не расход.
+    if (/^на\s+(?:СЧ[ЁЕ]Т|сч[её]т)/iu.test(to)) return null;
+    return expense("transfer", m, to);
+  }
+
+  m = on(String.raw`Списание\s+${AMOUNT}${TAIL}`);
+  if (m) return expense("writeoff", m, m[3]);
+
+  return null;
+}
+
+/**
+ * Дата операции. В СМС есть только время; если оно заметно позже текущего — СМС пришла после полуночи
+ * за вчерашнюю операцию (час запаса — на расхождение часов).
+ */
+export function smsDate(today: IsoDate, nowTime: string, smsTime: string | null): IsoDate {
+  if (!smsTime) return today;
+  const minutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  return minutes(smsTime) - minutes(nowTime) > 60 ? addDays(today, -1) : today;
+}
+
+// ---------- категории ----------
+
+/** Для сравнения названий: регистр, «ё», пунктуация и лишние пробелы не важны. */
+function normalizeName(text: string): string {
+  return text
+    .toLocaleLowerCase("ru")
+    .replace(/ё/g, "е")
+    .replace(/[^a-zа-я0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Подсказки по названию магазина: первая категория из списка, которая есть у пользователя.
+ * Важнее любой подсказки — категория прошлой операции с тем же названием (см. learnedCategory).
+ */
+const CATEGORY_HINTS: { re: RegExp; categories: string[] }[] = [
+  {
+    re: /perekrest|перекрест|pyater|пятероч|magnit|магнит|vkusvill|вкусвилл|lenta|лента|auchan|ашан|dixy|дикси|spar\b|azbuka|азбука вкуса|samokat|самокат|globus|глобус|okey|окей|verny|верный|chestnyj losos|losos|myaso|мясо|ovoshch|овощ|produkt|продукт/,
+    categories: ["Продукты"],
+  },
+  {
+    re: /yandex ?go|yandex ?taxi|яндекс ?такси|яндекс ?go|uber|citymobil|ситимобил|taxi|такси/,
+    categories: ["Такси", "Транспорт"],
+  },
+  {
+    re: /metropoliten|метрополитен|mosmetro|metro (?!c ?c)|мцд|mcd|troika|тройка|mosgortrans|transport|транспорт|aeroexpress|аэроэкспресс|rzd|ржд|whoosh|urent|самокат шеринг/,
+    categories: ["Транспорт"],
+  },
+  {
+    re: /yandex ?eda|яндекс ?еда|delivery|деливери|kuper|купер/,
+    categories: ["Доставка", "Кафе/рестораны", "Кафе и рестораны"],
+  },
+  {
+    re: /kafe|cafe|кафе|restoran|ресторан|coffee|кофе|kofe|burger|бургер|vkusno|вкусно|kfc|rostics|ростикс|teremok|теремок|shokoladnica|шоколадница|starbucks|cofix|pizza|пицц|sushi|суши|stolovaya|столовая|dodo|додо|bar\b|бар\b|grill|гриль|pekarn|пекарн|bakery/,
+    categories: ["Кафе/рестораны", "Кафе и рестораны", "Кафе", "Кофе"],
+  },
+  {
+    re: /podpisk|подписк|yandex ?plus|яндекс ?плюс|kinopoisk|кинопоиск|ivi\b|okko|spotify|apple ?com|itunes|google|youtube|telegram|телеграм|sberprime|сберпрайм|prime/,
+    categories: ["Подписки"],
+  },
+  {
+    re: /apteka|аптек|pharm|фарм|zdorov|здоров|clinic|клиник|medsi|медси|invitro|инвитро|gemotest|гемотест|stomat|стомат|doctor|доктор/,
+    categories: ["Здоровье"],
+  },
+  {
+    re: /\bmts\b|\bмтс\b|beeline|билайн|megafon|мегафон|tele2|\bt2\b|yota|йота|rostelecom|ростелеком/,
+    categories: ["Связь и интернет", "Связь", "Мобильная связь"],
+  },
+  {
+    re: /\bazs\b|\bазс\b|lukoil|лукойл|gazpromneft|газпромнефть|rosneft|роснефть|tatneft|татнефть|shell|neste|parking|парковк|avtomoyka|автомойк/,
+    categories: ["Автомобиль", "Транспорт"],
+  },
+  { re: /kino|кино|cinema|синема|karo|каро|formula kino/, categories: ["Кино", "Развлечения"] },
+  { re: /cvety|цветы|flowers|flowwow/, categories: ["Цветы", "Подарки"] },
+  { re: /\bzoo|зоо|chetyre lapy|четыре лапы|beethoven|бетховен|petshop/, categories: ["Коты", "Животные", "Питомцы"] },
+  { re: /fitness|фитнес|sport|спорт|world ?class|ddx|x ?fit|бассейн/, categories: ["Спорт"] },
+  { re: /zara|uniqlo|lamoda|ламода|gloria|befree|ostin|остин|h ?m\b|zolla|золла|love republic|sela/, categories: ["Одежда"] },
+];
+
+const INCOME_CATEGORY: Record<IncomeVia, string> = {
+  salary: "Зарплата",
+  advance: "Аванс",
+  bonus: "Премия",
+  transfer: "Переводы",
+  deposit: "Переводы",
+  refund: "Возвраты",
+  interest: "Проценты",
+};
+const EXPENSE_FALLBACK: Record<ExpenseVia, string> = {
+  purchase: OTHER_CATEGORY,
+  payment: OTHER_CATEGORY,
+  writeoff: OTHER_CATEGORY,
+  transfer: "Переводы",
+  cash: "Наличные",
+};
+
+function findCategory(state: State, name: string): string | null {
+  const wanted = normalizeName(name);
+  const all = [...state.categories.flexible, ...state.categories.mandatory, ...state.categories.income];
+  return all.find((c) => normalizeName(c) === wanted) ?? null;
+}
+
+/** Категория и «обязательность» последней операции того же типа с тем же названием — пользователь мог её поправить. */
+function learnedCategory(state: State, type: "income" | "expense", title: string): Transaction | null {
+  const key = normalizeName(title);
+  if (!key) return null;
+  for (let i = state.transactions.length - 1; i >= 0; i--) {
+    const t = state.transactions[i];
+    if (t.type === type && t.category && normalizeName(t.title) === key) return t;
+  }
+  return null;
+}
+
+function hintedCategory(state: State, counterparty: string): string | null {
+  const name = normalizeName(counterparty);
+  if (!name) return null;
+  for (const hint of CATEGORY_HINTS) {
+    if (!hint.re.test(name)) continue;
+    for (const candidate of hint.categories) {
+      const found = findCategory(state, candidate);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function isMandatoryCategory(state: State, category: string): boolean {
+  const key = normalizeName(category);
+  const inGroup = (list: string[]) => list.some((c) => normalizeName(c) === key);
+  return inGroup(state.categories.mandatory) && !inGroup(state.categories.flexible);
+}
+
+function titleOf(op: Extract<SmsOperation, { kind: "income" | "expense" }>): string {
+  const who = op.counterparty;
+  switch (op.via) {
+    case "salary":
+      return "Зарплата";
+    case "advance":
+      return "Аванс";
+    case "bonus":
+      return "Премия";
+    case "interest":
+      return "Проценты";
+    case "refund":
+      return who ? `Возврат: ${who}` : "Возврат покупки";
+    case "deposit":
+      return who ? `Зачисление: ${who}` : "Зачисление";
+    case "cash":
+      return "Снятие наличных";
+    case "transfer":
+      if (op.kind === "income") return who ? `Перевод от ${who}` : "Входящий перевод";
+      return who ? `Перевод ${who}` : "Перевод";
+    default:
+      return who || (op.via === "payment" ? "Оплата" : op.via === "writeoff" ? "Списание" : "Покупка");
+  }
+}
+
+export interface SmsPlan {
+  actions: Action[];
+  /** Что добавлено — для уведомления «Команд». */
+  summary: string;
+}
+
+/**
+ * Действия для операции из СМС. idBase — устойчивый id (по тексту СМС): повторная отправка той же СМС
+ * не создаст вторую операцию.
+ */
+export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
+  const note = `СМС: ${normalizeSms(ctx.sms)}`.slice(0, LIMITS.note).trim();
+  const money = formatMoney(op.amount);
+
+  if (op.kind === "toSavings" || op.kind === "fromSavings") {
+    const amount = op.kind === "toSavings" ? op.amount : -op.amount;
+    return {
+      actions: [{ type: "savings.move", id: ctx.idBase, date: ctx.date, amount, note }],
+      summary: op.kind === "toSavings" ? `В сбережения ${money}` : `Из сбережений ${money}`,
+    };
+  }
+
+  if (op.kind === "savingsInterest") {
+    // Доход месяца, который сразу лежит в сбережениях: на остаток счёта не влияет.
+    const category = findCategory(state, INCOME_CATEGORY.interest) ?? INCOME_CATEGORY.interest;
+    return {
+      actions: [
+        {
+          type: "tx.add",
+          tx: {
+            id: ctx.idBase,
+            type: "income",
+            amount: op.amount,
+            date: ctx.date,
+            category,
+            title: "Проценты по накопительному счёту",
+            note,
+            mandatory: false,
+            autoSaving: false,
+          },
+        },
+        { type: "savings.move", id: `${ctx.idBase}.m`, date: ctx.date, amount: op.amount, note },
+      ],
+      summary: `Проценты ${money} → в сбережения`,
+    };
+  }
+
+  const title = titleOf(op).slice(0, LIMITS.title).trim();
+  const learned = op.counterparty || op.via === "transfer" ? learnedCategory(state, op.kind, title) : null;
+  let category: string;
+  let mandatory = false;
+  if (learned) {
+    category = learned.category;
+    mandatory = op.kind === "expense" && Boolean(learned.mandatory);
+  } else if (op.kind === "income") {
+    category = findCategory(state, INCOME_CATEGORY[op.via]) ?? INCOME_CATEGORY[op.via];
+  } else {
+    const fallback = EXPENSE_FALLBACK[op.via];
+    category = hintedCategory(state, op.counterparty) ?? findCategory(state, fallback) ?? fallback;
+    mandatory = isMandatoryCategory(state, category);
+  }
+
+  // «Копилка с покупок» — только с покупок картой: переводы, платежи (банку, за услуги) и снятие наличных не покупки.
+  const notPurchase = op.kind === "expense" && op.via !== "purchase";
+  const autoSaving = !notPurchase && autoSavingByDefault({ type: op.kind, amount: op.amount, category }, state.settings);
+  return {
+    actions: [
+      {
+        type: "tx.add",
+        tx: { id: ctx.idBase, type: op.kind, amount: op.amount, date: ctx.date, category, title, note, mandatory, autoSaving },
+      },
+    ],
+    summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${title} → ${category}`,
+  };
+}

@@ -97,6 +97,12 @@ const signInResponseSchema = z.object({ user: userSchema, token: z.string().min(
 const okSchema = z.object({ ok: z.literal(true) });
 const stateResponseSchema = z.object({ version: z.number().int().min(0), state: stateSchema });
 const opsResponseSchema = z.object({ version: z.number().int().min(0), stale: z.boolean() });
+/** Ключ для автоматизации «Команд», присылающей СМС банка: есть ли он и когда им пользовались. */
+const smsKeyStatusSchema = z.object({
+  key: z.object({ createdAt: z.number(), lastUsedAt: z.number().nullable() }).nullable(),
+});
+export type SmsKeyStatus = NonNullable<z.infer<typeof smsKeyStatusSchema>["key"]>;
+const smsKeyCreatedSchema = z.object({ key: z.string(), createdAt: z.number() });
 
 export interface Op {
   /** Уникальный id изменения: сервер не применит его дважды. */
@@ -153,4 +159,7 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) =>
     request("/api/account/password", okSchema, { method: "POST", body: { currentPassword, newPassword } }),
   deleteAccount: (password: string) => request("/api/account", okSchema, { method: "DELETE", body: { password } }),
+  smsKeyStatus: () => request("/api/account/sms-key", smsKeyStatusSchema),
+  createSmsKey: () => request("/api/account/sms-key", smsKeyCreatedSchema, { method: "POST" }),
+  deleteSmsKey: () => request("/api/account/sms-key", okSchema, { method: "DELETE" }),
 };

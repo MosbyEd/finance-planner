@@ -93,7 +93,7 @@ const tooLarge = () => jsonError(413, "Слишком большой запро�
  * отменяется) и возвращается 413. Content-Length может отсутствовать (chunked) или врать,
  * поэтому req.text() — который сначала буферизует всё тело — здесь не годится.
  */
-async function readText(req: NextRequest, maxBytes: number): Promise<BodyText> {
+export async function readText(req: NextRequest, maxBytes: number): Promise<BodyText> {
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > maxBytes) return { ok: false, response: tooLarge() };
   if (!req.body) return { ok: true, text: "" };
