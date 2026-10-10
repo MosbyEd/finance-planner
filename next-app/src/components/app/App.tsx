@@ -5,6 +5,8 @@ import { dueOccurrences } from "@/domain/recurring";
 import { FinanceStore } from "@/client/store";
 import { StoreProvider, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
+import { syncNotifications } from "@/client/notifications";
+import { isNativeApp } from "@/client/runtime";
 import { registerServiceWorker } from "@/client/sw";
 import { IconButton } from "../ui/Button";
 import { ConfirmProvider, ToastProvider, useToast } from "../ui/feedback";
@@ -89,6 +91,7 @@ function Shell() {
   }, [tab]);
 
   useRecurringSync();
+  useNotificationSync();
 
   // Офлайн-оболочка (только в production: в разработке кэш мешал бы горячей перезагрузке).
   useEffect(() => registerServiceWorker(), []);
@@ -217,6 +220,16 @@ function SyncStatus() {
 }
 
 /** Создаёт операции по регулярным платежам, когда наступает их день. */
+/** В iOS-приложении перепланирует локальные уведомления, когда меняются данные (с задержкой — не на каждый ввод). */
+function useNotificationSync() {
+  const { state, phase } = useSnapshot();
+  useEffect(() => {
+    if (phase !== "ready" || !isNativeApp()) return;
+    const timer = setTimeout(() => void syncNotifications(state), 2000);
+    return () => clearTimeout(timer);
+  }, [state, phase]);
+}
+
 function useRecurringSync() {
   const { state, phase, version, sessionExpired } = useSnapshot();
   const today = useToday();
