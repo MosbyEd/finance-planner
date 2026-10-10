@@ -237,11 +237,11 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
         )}
 
         <TextInput
-          label="Цифры карты или счёта из СМС"
+          label="Цифры карт и счёта из СМС"
           inputMode="numeric"
           value={keys}
           placeholder={kind === "savings" ? "3150" : "7759, 5804"}
-          hint="Последние четыре цифры, как в СМС банка: карта «MIR-7759», счёт «СЧЁТ5804», накопительный «*3150» — операции и переводы из СМС попадут на этот счёт"
+          hint="Последние четыре цифры, как в СМС банка: карта «MIR-7759», счёт «СЧЁТ5804», накопительный «*3150». Несколько карт одного счёта — через запятую. Операции и переводы из СМС по ним попадут на этот счёт"
           onChange={(e) => {
             setKeys(e.target.value);
             setErrors((v) => ({ ...v, keys: undefined }));
