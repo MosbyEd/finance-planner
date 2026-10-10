@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { appleAiRespond, appleAiStatus, type AppleAiStatus } from "@/client/native";
 import { isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
-import { Card, Notice } from "../../ui/controls";
+import { Notice } from "../../ui/controls";
+import { SectionCard, useRowSummary } from "./SettingsList";
 
 const REASONS: Record<string, string> = {
   deviceNotEligible: "Этот iPhone не поддерживает Apple Intelligence.",
@@ -30,6 +31,8 @@ export function AppleAiSection() {
     };
   }, []);
 
+  useRowSummary(status ? { text: status.device?.available ? "Доступна" : "Недоступна" } : null);
+
   if (!isNativeApp()) return null;
 
   const run = async () => {
@@ -47,7 +50,7 @@ export function AppleAiSection() {
 
   const device = status?.device;
   return (
-    <Card title="Apple Intelligence">
+    <SectionCard title="Apple Intelligence">
       <div className="space-y-3">
         {!status ? (
           <p className="text-sm text-muted">Проверяем…</p>
@@ -81,6 +84,6 @@ export function AppleAiSection() {
           </p>
         )}
       </div>
-    </Card>
+    </SectionCard>
   );
 }

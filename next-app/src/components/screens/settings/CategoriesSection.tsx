@@ -5,10 +5,10 @@ import { LIMITS, type CategoryGroup } from "@/domain/schema";
 import { useSnapshot } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
 import { Button } from "../../ui/Button";
-import { Card } from "../../ui/controls";
 import { useToast } from "../../ui/feedback";
 import { controlClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
+import { SectionCard } from "./SettingsList";
 
 const GROUPS: { group: CategoryGroup; title: string; hint: string }[] = [
   { group: "income", title: "Доходы", hint: "зарплата, аванс, подработка" },
@@ -18,7 +18,7 @@ const GROUPS: { group: CategoryGroup; title: string; hint: string }[] = [
 
 export function CategoriesSection() {
   return (
-    <Card title="Категории">
+    <SectionCard title="Категории">
       <p className="text-sm text-muted">
         Удаление категории не меняет прошлые операции — они сохранят свою категорию. Новую категорию можно добавить и
         прямо при вводе операции.
@@ -28,7 +28,7 @@ export function CategoriesSection() {
           <CategoryGroupEditor key={g.group} group={g.group} title={g.title} hint={g.hint} />
         ))}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 

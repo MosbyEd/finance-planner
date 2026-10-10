@@ -16,38 +16,19 @@ import { useToast } from "../ui/feedback";
 import { DateInput, TextInput } from "../ui/Field";
 import { Sheet } from "../ui/Sheet";
 import { useDeleteTransaction, useDispatch } from "./hooks";
+import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
 
 type Kind = "income" | "expense";
 
-interface QuickPick {
-  category: string;
-  title: string;
-  amount: Kopecks;
-  mandatory: boolean;
+/** Категории расходов одним списком: сначала повседневные, затем обязательные (без повторов). */
+function expenseCategories(state: State): string[] {
+  return [...new Set([...state.categories.flexible, ...state.categories.mandatory])];
 }
 
-/** Частые недавние траты — одним нажатием заполняют форму. */
-function quickPicks(state: State, today: IsoDate): QuickPick[] {
-  const from = addDays(today, -60);
-  const counts = new Map<string, { pick: QuickPick; count: number; last: string }>();
-  for (const tx of state.transactions) {
-    if (tx.type !== "expense" || tx.templateId || tx.loanId || tx.date < from || tx.date > today) continue;
-    const key = `${tx.category}|${tx.title}|${tx.amount}`;
-    const entry = counts.get(key) ?? {
-      pick: { category: tx.category, title: tx.title, amount: tx.amount, mandatory: Boolean(tx.mandatory) },
-      count: 0,
-      last: tx.date,
-    };
-    entry.count += 1;
-    if (tx.date > entry.last) entry.last = tx.date;
-    counts.set(key, entry);
-  }
-  return [...counts.values()]
-    .filter((e) => e.count >= 2)
-    .sort((a, b) => b.count - a.count || b.last.localeCompare(a.last))
-    .slice(0, 6)
-    .map((e) => e.pick);
+/** Обязательная ли категория: из группы «Обязательные» и не повторяется в повседневных. */
+function isMandatoryCategory(state: State, category: string): boolean {
+  return state.categories.mandatory.includes(category) && !state.categories.flexible.includes(category);
 }
 
 function lastCategory(state: State, kind: Kind, mandatory: boolean): string | null {
@@ -80,11 +61,16 @@ export function TransactionSheet({
   const [kind, setKind] = useState<Kind>(
     existing?.type === "income" || existing?.type === "expense" ? existing.type : (preset?.type ?? "expense"),
   );
-  const [mandatory, setMandatory] = useState(existing ? Boolean(existing.mandatory) : (preset?.mandatory ?? false));
-  const initialGroup = kind === "income" ? "income" : mandatory ? "mandatory" : "flexible";
+  const presetMandatory = preset?.mandatory ?? false;
+  const initialGroup = kind === "income" ? "income" : presetMandatory ? "mandatory" : "flexible";
   const [category, setCategory] = useState(
-    () => existing?.category ?? lastCategory(state, kind, mandatory) ?? state.categories[initialGroup][0] ?? "",
+    () => existing?.category ?? lastCategory(state, kind, presetMandatory) ?? state.categories[initialGroup][0] ?? "",
   );
+  // Обязательность следует из категории (аренда, связь — обязательные), пока человек не переключил её сам.
+  const [mandatory, setMandatory] = useState(() =>
+    existing ? Boolean(existing.mandatory) : presetMandatory || isMandatoryCategory(state, category),
+  );
+  const [mandatoryTouched, setMandatoryTouched] = useState(false);
   const [amount, setAmount] = useState<Kopecks | null>(existing?.amount ?? null);
   const [title, setTitle] = useState(existing?.title ?? "");
   const [date, setDate] = useState<IsoDate>(existing?.date ?? preset?.date ?? today);
@@ -107,7 +93,12 @@ export function TransactionSheet({
     repeat;
   // Регулярный расход всегда обязательный (так он попадает в план месяца) — показываем это в форме сразу.
   const mandatoryLocked = repeat && kind === "expense";
-  const group = kind === "income" ? "income" : mandatory ? "mandatory" : "flexible";
+  const categories = kind === "income" ? state.categories.income : expenseCategories(state);
+
+  const pickCategory = (next: string) => {
+    setCategory(next);
+    if (kind === "expense" && !mandatoryTouched && !mandatoryLocked) setMandatory(isMandatoryCategory(state, next));
+  };
 
   const picks = useMemo(() => (editing || kind !== "expense" ? [] : quickPicks(state, today)), [editing, kind, state, today]);
 
@@ -123,29 +114,26 @@ export function TransactionSheet({
 
   const switchKind = (next: Kind) => {
     setKind(next);
-    // Расход с повтором — сразу обязательный.
-    const nextMandatory = next === "expense" && repeat ? true : mandatory;
-    if (nextMandatory !== mandatory) setMandatory(nextMandatory);
-    const nextGroup = next === "income" ? "income" : nextMandatory ? "mandatory" : "flexible";
-    if (!state.categories[nextGroup].includes(category)) {
-      setCategory(lastCategory(state, next, nextMandatory) ?? state.categories[nextGroup][0] ?? "");
-    }
+    const list = next === "income" ? state.categories.income : expenseCategories(state);
+    const nextCategory = list.includes(category)
+      ? category
+      : (lastCategory(state, next, false) ?? list[0] ?? "");
+    setCategory(nextCategory);
+    // Расход с повтором — сразу обязательный; иначе — по категории.
+    if (next === "expense") setMandatory(repeat || (mandatoryTouched ? mandatory : isMandatoryCategory(state, nextCategory)));
   };
   const switchMandatory = (next: boolean) => {
+    setMandatoryTouched(true);
     setMandatory(next);
-    const nextGroup = next ? "mandatory" : "flexible";
-    if (!state.categories[nextGroup].includes(category)) {
-      setCategory(lastCategory(state, "expense", next) ?? state.categories[nextGroup][0] ?? "");
-    }
   };
   const switchRepeat = (next: boolean) => {
     setRepeat(next);
     if (kind !== "expense") return;
     if (next) {
       setMandatoryBeforeRepeat(mandatory);
-      if (!mandatory) switchMandatory(true);
-    } else if (mandatoryBeforeRepeat !== mandatory) {
-      switchMandatory(mandatoryBeforeRepeat);
+      setMandatory(true);
+    } else {
+      setMandatory(mandatoryBeforeRepeat);
     }
   };
   const repeatDay = isValidIsoDate(date) ? Number(date.slice(8)) : null;
@@ -248,7 +236,7 @@ export function TransactionSheet({
         {picks.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-sm font-medium text-muted">Часто</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {picks.map((p) => (
                 <button
                   key={`${p.category}|${p.title}|${p.amount}`}
@@ -258,6 +246,7 @@ export function TransactionSheet({
                     setCategory(p.category);
                     setTitle(p.title);
                     setMandatory(p.mandatory || mandatoryLocked);
+                    setMandatoryTouched(true);
                   }}
                   className="shrink-0 rounded-2xl border border-border bg-surface-2 px-3 py-1.5 text-left text-sm hover:border-accent"
                 >
@@ -269,35 +258,12 @@ export function TransactionSheet({
           </div>
         )}
 
-        {kind === "expense" && (
-          <div className="space-y-1.5">
-            <Segmented
-              label="Вид расхода"
-              size="sm"
-              value={mandatory ? "mandatory" : "flexible"}
-              onChange={(v) => switchMandatory(v === "mandatory")}
-              disabled={mandatoryLocked}
-              options={[
-                { value: "flexible", label: "Повседневный" },
-                { value: "mandatory", label: "Обязательный" },
-              ]}
-            />
-            <p className="text-xs text-muted">
-              {mandatoryLocked
-                ? "Регулярные расходы считаются обязательными"
-                : mandatory
-                  ? "Аренда, кредиты, связь, крупные покупки — заранее вычитаются из бюджета месяца"
-                  : "Еда, транспорт, кафе — тратится из гибкого бюджета"}
-            </p>
-          </div>
-        )}
-
         <CategoryPicker
           label="Категория"
           showValue
-          categories={state.categories[group]}
+          categories={categories}
           value={category}
-          onChange={setCategory}
+          onChange={pickCategory}
           error={errors.category}
         />
 
@@ -329,6 +295,22 @@ export function TransactionSheet({
             {date > today && <span className="self-center text-sm text-muted">Запланировано на {formatDay(date)}</span>}
           </div>
         </div>
+
+        {kind === "expense" && (
+          <Switch
+            checked={mandatory}
+            onChange={switchMandatory}
+            disabled={mandatoryLocked}
+            label="Обязательный расход"
+            description={
+              mandatoryLocked
+                ? "Регулярные расходы считаются обязательными"
+                : mandatory
+                  ? "Как аренда и кредиты: заранее вычитается из бюджета месяца"
+                  : "Повседневная трата — из гибкого бюджета. Обязательность подставляется по категории"
+            }
+          />
+        )}
 
         {autoSavingAvailable && (
           <Switch

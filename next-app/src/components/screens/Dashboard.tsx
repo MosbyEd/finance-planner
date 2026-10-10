@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { autoSavingByDefault } from "@/domain/savings";
 import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf } from "@/domain/dates";
 import {
   balanceAt,
@@ -19,11 +20,12 @@ import { storage } from "@/client/storage";
 import { useDispatch } from "../app/hooks";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
+import { quickPicks, type QuickPick } from "../app/quickPicks";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
-import { Card, Money, Notice, Progress } from "../ui/controls";
+import { Card, Money, Progress } from "../ui/controls";
 import { useToast } from "../ui/feedback";
-import { Icon } from "../ui/Icon";
+import { Icon, type IconName } from "../ui/Icon";
 
 const STATUS_TEXT: Record<SafeToSpend["status"], { text: string; tone: string }> = {
   ok: { text: "Всё по плану", tone: "bg-positive-soft text-positive" },
@@ -43,23 +45,246 @@ function statusBadge(sts: SafeToSpend): { text: string; tone: string } {
 
 const SKIP_MANDATORY_KEY = "fp:onboarding-skip-mandatory";
 
-/** Операции из СМС и Siri, которые ещё не проверены: вернуться к списку после «Позже». */
-function ReviewNotice() {
-  const { state } = useSnapshot();
-  const { open } = useUi();
-  const count = useMemo(() => state.transactions.filter((t) => t.review).length, [state]);
-  if (!count) return null;
+/** Строка «Требует внимания»: значок в цветном круге, короткий текст и одно-два действия. */
+function AttentionRow({
+  icon,
+  tone,
+  title,
+  text,
+  onClick,
+  actions,
+}: {
+  icon: IconName;
+  tone: "accent" | "positive" | "warning" | "negative";
+  title: string;
+  text?: ReactNode;
+  /** Вся строка — кнопка (тогда справа шеврон). */
+  onClick?: () => void;
+  actions?: ReactNode;
+}) {
+  const circle = {
+    accent: "bg-accent-soft text-accent",
+    positive: "bg-positive-soft text-positive",
+    warning: "bg-warning-soft text-warning",
+    negative: "bg-negative-soft text-negative",
+  }[tone];
+  const body = (
+    <>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${circle}`} aria-hidden>
+        <Icon name={icon} size={18} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-medium">{title}</span>
+        {text && <span className="block text-sm text-muted">{text}</span>}
+      </span>
+      {onClick && <Icon name="chevronRight" size={18} className="shrink-0 text-muted" aria-hidden />}
+    </>
+  );
   return (
-    <Notice
-      action={
-        <Button size="sm" onClick={() => open({ kind: "review" })}>
-          Проверить
-        </Button>
-      }
-    >
-      {count} {plural(count, ["новая операция", "новые операции", "новых операций"])} из СМС и Siri{" "}
-      {plural(count, ["ждёт", "ждут", "ждут"])} проверки.
-    </Notice>
+    <li className="py-1">
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className="-mx-2 flex min-h-12 w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-1.5 text-left hover:bg-fill"
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex min-h-12 items-center gap-3 py-1.5">{body}</div>
+      )}
+      {actions && <div className="mt-1 flex flex-wrap gap-2 pl-12">{actions}</div>}
+    </li>
+  );
+}
+
+/**
+ * Всё, что ждёт действия, — в одной карточке под лимитом: новые операции из СМС, остаток прошлого месяца,
+ * предупреждения месяца, вход и перенос данных. Нет дел — карточки нет.
+ */
+function AttentionCard({ warnings }: { warnings: string[] }) {
+  const snapshot = useSnapshot();
+  const store = useStore();
+  const toast = useToast();
+  const dispatch = useDispatch();
+  const today = useToday();
+  const { open } = useUi();
+  const { state } = snapshot;
+  const reviewCount = useMemo(() => state.transactions.filter((t) => t.review).length, [state]);
+  const rollover = useMemo(() => pendingRollover(state, today), [state, today]);
+
+  const resolveRollover = (month: string, amount: number, decision: "saved" | "dismissed") => {
+    if (dispatch({ type: "rollover.resolve", month, decision, id: newId(), date: today }) && decision === "saved") {
+      toast(`${formatMoney(amount, { whole: true })} отложено в сбережения`);
+    }
+  };
+
+  const rows: ReactNode[] = [];
+  if (snapshot.sessionExpired) {
+    rows.push(
+      <AttentionRow
+        key="session"
+        icon="user"
+        tone="negative"
+        title="Войдите снова"
+        text="Сессия истекла. Изменения сохранены на телефоне и отправятся после входа."
+        onClick={() => open({ kind: "auth", mode: "login" })}
+      />,
+    );
+  }
+  if (reviewCount > 0) {
+    rows.push(
+      <AttentionRow
+        key="review"
+        icon="check"
+        tone="accent"
+        title={`${reviewCount} ${plural(reviewCount, ["новая операция", "новые операции", "новых операций"])}`}
+        text="Из СМС и Siri — проверьте категории"
+        onClick={() => open({ kind: "review" })}
+      />,
+    );
+  }
+  if (rollover) {
+    rows.push(
+      <AttentionRow
+        key="rollover"
+        icon="piggy"
+        tone="positive"
+        title={`${formatMonthIn(rollover.month, today).replace(/^в/, "В")} осталось ${formatMoney(rollover.amount, { whole: true })}`}
+        text="Отложить остаток гибкого бюджета в сбережения?"
+        actions={
+          <>
+            <Button size="sm" onClick={() => resolveRollover(rollover.month, rollover.amount, "saved")}>
+              Отложить
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => resolveRollover(rollover.month, rollover.amount, "dismissed")}>
+              Оставить
+            </Button>
+          </>
+        }
+      />,
+    );
+  }
+  for (const w of warnings) {
+    rows.push(<AttentionRow key={`w:${w}`} icon="alert" tone="warning" title={w} />);
+  }
+  if (snapshot.guestImportOffer) {
+    rows.push(
+      <AttentionRow
+        key="guest"
+        icon="upload"
+        tone="accent"
+        title="Перенести данные без входа?"
+        text="В этом браузере есть операции, которые вы вели без аккаунта."
+        actions={
+          <>
+            <Button
+              size="sm"
+              onClick={() => {
+                const r = store.acceptGuestImport();
+                toast(r.ok ? "Данные перенесены в аккаунт" : r.error, { kind: r.ok ? "info" : "error" });
+              }}
+            >
+              Перенести
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => store.dismissGuestImport()}>
+              Не нужно
+            </Button>
+          </>
+        }
+      />,
+    );
+  }
+  if (snapshot.legacyImportOffer) {
+    rows.push(
+      <AttentionRow
+        key="legacy"
+        icon="upload"
+        tone="accent"
+        title="Найдены данные старой версии"
+        text="Перенести их? Текущие данные будут заменены."
+        actions={
+          <>
+            <Button
+              size="sm"
+              onClick={() => {
+                const r = store.acceptLegacyImport();
+                toast(r.ok ? "Данные старой версии перенесены" : r.error, { kind: r.ok ? "info" : "error" });
+              }}
+            >
+              Перенести
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => store.dismissLegacyImport()}>
+              Не нужно
+            </Button>
+          </>
+        }
+      />,
+    );
+  }
+  if (!rows.length) return null;
+  return (
+    <Card title="Требует внимания">
+      <ul className="divide-y divide-separator">{rows}</ul>
+    </Card>
+  );
+}
+
+/**
+ * Быстрые траты: частые покупки добавляются одним касанием — с возможностью отменить.
+ * Показываются, только когда есть что предложить (трата повторялась хотя бы дважды за 60 дней).
+ */
+function QuickSpend() {
+  const { state } = useSnapshot();
+  const today = useToday();
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const picks = useMemo(() => quickPicks(state, today, 6), [state, today]);
+  if (!picks.length) return null;
+
+  const add = (p: QuickPick) => {
+    const id = newId();
+    const ok = dispatch({
+      type: "tx.add",
+      tx: {
+        id,
+        type: "expense",
+        amount: p.amount,
+        date: today,
+        category: p.category,
+        title: p.title,
+        note: "",
+        mandatory: p.mandatory,
+        autoSaving: autoSavingByDefault({ type: "expense", amount: p.amount, category: p.category }, state.settings),
+      },
+    });
+    if (ok) {
+      toast(`${p.title || p.category} · ${formatMoney(p.amount)} — добавлено`, {
+        action: { label: "Отменить", onClick: () => dispatch({ type: "tx.delete", id }) },
+      });
+    }
+  };
+
+  return (
+    <section aria-labelledby="quick-spend-title" className="space-y-2">
+      <h2 id="quick-spend-title" className="px-1 text-sm font-medium text-muted">
+        Быстрые траты — одним касанием
+      </h2>
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {picks.map((p) => (
+          <button
+            key={`${p.category}|${p.title}|${p.amount}`}
+            type="button"
+            onClick={() => add(p)}
+            aria-label={`Добавить расход: ${p.title || p.category}, ${formatMoney(p.amount)}`}
+            className="glass-control flex min-h-12 shrink-0 flex-col items-start justify-center rounded-2xl px-3.5 py-2 text-left transition active:scale-95"
+          >
+            <span className="text-sm font-medium">{p.title || p.category}</span>
+            <span className="text-xs text-muted tabular-nums">{formatMoney(p.amount)}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -78,7 +303,6 @@ export function Dashboard() {
       balance: balanceAt(state, today),
       savings: savingsTotal(state, today),
       upcoming: upcomingEvents(state, today, addDays(today, 30)),
-      rollover: pendingRollover(state, today),
       // Сначала разворачиваем: при стабильной сортировке по дате внутри дня сверху окажутся добавленные позже (как в истории).
       recent: [...state.transactions]
         .reverse()
@@ -116,18 +340,21 @@ export function Dashboard() {
     <Onboarding progress={progress} mandatorySkipped={mandatorySkipped} onSkipMandatory={skipMandatory} showImport={!hasData} />
   );
 
+  // Порядок — по дизайн-коду: сначала ответ «сколько можно сегодня», затем то, что ждёт действия,
+  // быстрые траты, счёт и сбережения, месяц, ближайшие платежи и последние операции.
   return (
     <div className="space-y-4">
-      <Banners />
-      <ReviewNotice />
-      {data.rollover && <RolloverNotice month={data.rollover.month} amount={data.rollover.amount} />}
-
       {!hasData ? (
-        onboarding
+        <>
+          <AttentionCard warnings={[]} />
+          {onboarding}
+        </>
       ) : (
         <>
           {progress.balance ? <TodayCard sts={data.sts} /> : <BalancePrompt />}
+          <AttentionCard warnings={data.metrics.warnings} />
           {onboarding}
+          <QuickSpend />
 
           <div className="grid grid-cols-2 gap-3">
             <button
@@ -139,7 +366,7 @@ export function Dashboard() {
                 <Icon name="wallet" size={16} /> На счёте
               </span>
               <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={formatMoney(data.balance)}>
-                <Money value={data.balance} tone={data.balance < 0 ? "negative" : "default"} />
+                <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />
               </span>
               <span className="mt-1 block text-xs text-muted">
                 {progress.balance ? "Сверить остаток" : "Указать остаток"}
@@ -154,7 +381,7 @@ export function Dashboard() {
                 <Icon name="piggy" size={16} /> Сбережения
               </span>
               <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={formatMoney(data.savings)}>
-                <Money value={data.savings} />
+                <Money value={data.savings} whole />
               </span>
               <span className="mt-1 block text-xs text-muted">Пополнить или снять</span>
             </button>
@@ -222,10 +449,10 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
         </span>
       </div>
       <p className="mt-1 text-4xl font-bold tracking-tight tabular-nums">
-        {formatMoney(Math.abs(sts.leftToday))}
+        {formatMoney(Math.abs(sts.leftToday), { whole: true })}
       </p>
       <p className="mt-1 text-sm opacity-90">
-        Лимит на день {formatMoney(sts.recommended)} · потрачено {formatMoney(sts.spentToday)}
+        Лимит на день {formatMoney(sts.recommended, { whole: true })} · потрачено {formatMoney(sts.spentToday, { whole: true })}
       </p>
       {sts.status === "gap" && (
         <p className="mt-3 rounded-2xl bg-black/15 px-3 py-2 text-sm">
@@ -275,10 +502,10 @@ function MonthCard({ metrics }: { metrics: ReturnType<typeof monthMetrics> }) {
     >
       <div className="flex items-end justify-between gap-3">
         <div>
-          <p className="text-sm text-muted">Осталось в гибком бюджете</p>
-          <Money value={f.left} tone={f.left < 0 ? "negative" : "default"} className="text-2xl font-semibold" />
+          <p className="text-sm text-muted">{f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете"}</p>
+          <Money value={Math.abs(f.left)} whole tone={f.left < 0 ? "negative" : "default"} className="text-2xl font-semibold" />
         </div>
-        <p className="text-right text-sm text-muted">из {formatMoney(Math.max(0, f.budget))}</p>
+        <p className="text-right text-sm text-muted">из {formatMoney(Math.max(0, f.budget), { whole: true })}</p>
       </div>
       <div className="mt-3">
         <Progress
@@ -294,44 +521,31 @@ function MonthCard({ metrics }: { metrics: ReturnType<typeof monthMetrics> }) {
         )}
       </div>
 
-      <dl className="mt-4 grid grid-cols-1 gap-2 text-[15px] sm:grid-cols-3">
-        <Stat label="Доходы" fact={metrics.income.fact} plan={metrics.income.plan} />
-        <Stat label="Обязательные" fact={metrics.mandatory.fact} plan={metrics.mandatory.plan} />
-        <Stat label="Отложено" fact={metrics.savings.fact} plan={metrics.savings.target} />
-      </dl>
-
-      {metrics.warnings.length > 0 && (
-        <ul className="mt-4 space-y-2">
-          {metrics.warnings.map((w) => (
-            <li key={w} className="flex gap-2 rounded-2xl bg-warning-soft px-3 py-2 text-sm">
-              <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-warning" />
-              <span>{w}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* Доходы, обязательные и отложенное с планом — в «Аналитике» («Подробнее»), предупреждения — в «Требует внимания». */}
     </Card>
   );
 }
 
-function Stat({ label, fact, plan }: { label: string; fact: number; plan: number }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2 rounded-2xl bg-surface-2 px-3 py-2 sm:block">
-      <dt className="text-sm text-muted">{label}</dt>
-      <dd className="text-right sm:text-left">
-        <span className="block font-semibold tabular-nums">{formatMoney(fact)}</span>
-        <span className="block text-xs text-muted tabular-nums">план {formatMoney(plan)}</span>
-      </dd>
-    </div>
-  );
-}
+/** Сколько ближайших событий видно сразу; остальные — по «Все». */
+const UPCOMING_PREVIEW = 3;
 
 function UpcomingCard({ events }: { events: UpcomingEvent[] }) {
   const { open } = useUi();
   const today = useToday();
-  const visible = events.slice(0, 12);
+  const [expanded, setExpanded] = useState(false);
+  const all = events.slice(0, 30);
+  const visible = expanded ? all : all.slice(0, UPCOMING_PREVIEW);
   return (
-    <Card title="Ближайшие 30 дней">
+    <Card
+      title="Скоро"
+      action={
+        all.length > UPCOMING_PREVIEW ? (
+          <Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+            {expanded ? "Свернуть" : `Все ${all.length}`}
+          </Button>
+        ) : undefined
+      }
+    >
       {visible.length === 0 ? (
         <p className="text-sm text-muted">
           Запланированных платежей нет. Добавьте регулярные доходы и расходы на вкладке «Регулярные» — и здесь появится
@@ -347,11 +561,11 @@ function UpcomingCard({ events }: { events: UpcomingEvent[] }) {
                   <span className="block truncate whitespace-nowrap text-xs text-muted">
                     {formatRelativeDay(e.date, today).replace(/, .*/, "")} ·{" "}
                     <span className={e.balanceAfter < 0 ? "font-medium text-negative" : ""}>
-                      останется {formatMoney(e.balanceAfter)}
+                      останется {formatMoney(e.balanceAfter, { whole: true })}
                     </span>
                   </span>
                 </span>
-                <Money value={e.effect} sign tone={e.effect > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
+                <Money value={e.effect} sign whole tone={e.effect > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
               </>
             );
             // Будущая операция открывается на редактирование, начисление регулярного платежа — в окне «пропустить/изменить».
@@ -495,96 +709,5 @@ function OnboardingStep({
         )}
       </div>
     </li>
-  );
-}
-
-function RolloverNotice({ month, amount }: { month: string; amount: number }) {
-  const dispatch = useDispatch();
-  const toast = useToast();
-  const today = useToday();
-  const resolve = (decision: "saved" | "dismissed") => {
-    if (dispatch({ type: "rollover.resolve", month, decision, id: newId(), date: today }) && decision === "saved") {
-      toast(`${formatMoney(amount)} отложено в сбережения`);
-    }
-  };
-  return (
-    <Notice
-      tone="positive"
-      action={
-        <>
-          <Button size="sm" variant="secondary" onClick={() => resolve("dismissed")}>
-            Оставить на счёте
-          </Button>
-          <Button size="sm" onClick={() => resolve("saved")}>
-            Отложить
-          </Button>
-        </>
-      }
-    >
-      {formatMonthIn(month, today).replace(/^в/, "В")} не потрачено {formatMoney(amount)} гибкого бюджета. Отложить эту
-      сумму в сбережения?
-    </Notice>
-  );
-}
-
-/** Предложения перенести данные и предупреждения о синхронизации. */
-function Banners() {
-  const snapshot = useSnapshot();
-  const store = useStore();
-  const toast = useToast();
-  const { open } = useUi();
-
-  return (
-    <>
-      {snapshot.sessionExpired && (
-        <Notice tone="negative" action={<Button size="sm" onClick={() => open({ kind: "auth", mode: "login" })}>Войти</Button>}>
-          Сессия истекла. Изменения сохранены на устройстве — войдите, чтобы отправить их.
-        </Notice>
-      )}
-      {snapshot.guestImportOffer && (
-        <Notice
-          action={
-            <>
-              <Button size="sm" variant="secondary" onClick={() => store.dismissGuestImport()}>
-                Не нужно
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  const r = store.acceptGuestImport();
-                  toast(r.ok ? "Данные перенесены в аккаунт" : r.error, { kind: r.ok ? "info" : "error" });
-                }}
-              >
-                Перенести
-              </Button>
-            </>
-          }
-        >
-          В этом браузере есть данные, которые вы вели без входа. Перенести их в аккаунт?
-        </Notice>
-      )}
-      {snapshot.legacyImportOffer && (
-        <Notice
-          action={
-            <>
-              <Button size="sm" variant="secondary" onClick={() => store.dismissLegacyImport()}>
-                Не нужно
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  const r = store.acceptLegacyImport();
-                  toast(r.ok ? "Данные старой версии перенесены" : r.error, { kind: r.ok ? "info" : "error" });
-                }}
-              >
-                Перенести
-              </Button>
-            </>
-          }
-        >
-          Найдены данные старой версии планировщика. Перенести их? Текущие данные будут заменены.
-        </Notice>
-      )}
-    </>
   );
 }

@@ -11,10 +11,11 @@ import { useDispatch } from "../../app/hooks";
 import { useLeaveGuard } from "../../app/overlays";
 import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
-import { Card, Switch } from "../../ui/controls";
+import { Switch } from "../../ui/controls";
 import { useToast } from "../../ui/feedback";
 import { TextInput } from "../../ui/Field";
 import { ChipGroup, ChoiceChips, ToggleChip, UnsavedHint, parseIntInRange } from "./common";
+import { SectionCard, UNSAVED_SUMMARY, useRowSummary } from "./SettingsList";
 
 const ROUNDING = [
   { value: 0, label: "Без округления" },
@@ -141,6 +142,7 @@ export function SavingsSection() {
 
   const dirty = !sameForm(form, toForm(saved));
   useLeaveGuard(dirty);
+  useRowSummary(dirty ? UNSAVED_SUMMARY : null);
   const preview = previewSettings(form, saved);
 
   const monthIncome = useMemo(() => monthMetrics(state, monthKeyOf(today), today).income.plan, [state, today]);
@@ -189,7 +191,7 @@ export function SavingsSection() {
     : [...ROUNDING, { value: form.roundTo, label: formatMoney(form.roundTo) }];
 
   return (
-    <Card title="Сбережения">
+    <SectionCard title="Сбережения">
       <form
         className="space-y-6"
         noValidate
@@ -213,8 +215,8 @@ export function SavingsSection() {
             Эта доля доходов месяца сразу откладывается в плане. Из остального вычитаются обязательные расходы, а что
             останется — гибкий бюджет на повседневные траты. Отчисления с доходов и покупок (ниже) засчитываются в эту
             норму, а не добавляются к ней.{" "}
-            {monthIncome > 0 ? "Доходы этого месяца по плану" : "Например, при доходах"} {formatMoney(incomeExample)} →
-            отложить {formatMoney(percentOf(incomeExample, preview.savingsRatePercent))}.
+            {monthIncome > 0 ? "Доходы этого месяца по плану" : "Например, при доходах"} {formatMoney(incomeExample, { whole: true })} →
+            отложить {formatMoney(percentOf(incomeExample, preview.savingsRatePercent), { whole: true })}.
           </p>
         </div>
 
@@ -330,6 +332,6 @@ export function SavingsSection() {
           <UnsavedHint dirty={dirty} />
         </div>
       </form>
-    </Card>
+    </SectionCard>
   );
 }

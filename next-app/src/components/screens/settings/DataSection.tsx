@@ -11,9 +11,10 @@ import { saveTextFile } from "@/client/files";
 import { useSnapshot, useStore, useToday } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
 import { Button, IconButton } from "../../ui/Button";
-import { Card, Notice } from "../../ui/controls";
+import { Notice } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
 import { Disclosure } from "./common";
+import { SectionCard } from "./SettingsList";
 
 const MAX_IMPORT_BYTES = 30 * 1024 * 1024;
 const DROPPED_PREVIEW = 5;
@@ -182,7 +183,7 @@ export function DataSection() {
   };
 
   return (
-    <Card title="Данные">
+    <SectionCard title="Данные">
       <div className="space-y-4">
         <p className="text-sm text-muted">
           {mode === "account"
@@ -278,6 +279,6 @@ export function DataSection() {
           </div>
         )}
       </div>
-    </Card>
+    </SectionCard>
   );
 }

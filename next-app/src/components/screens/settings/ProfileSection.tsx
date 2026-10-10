@@ -6,10 +6,10 @@ import { useSnapshot } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
 import { useLeaveGuard } from "../../app/overlays";
 import { Button } from "../../ui/Button";
-import { Card } from "../../ui/controls";
 import { useToast } from "../../ui/feedback";
 import { TextArea, TextInput } from "../../ui/Field";
 import { ChoiceChips, UnsavedHint } from "./common";
+import { SectionCard, UNSAVED_SUMMARY, useRowSummary } from "./SettingsList";
 
 const MAX_OCCUPATION = 100;
 
@@ -71,6 +71,7 @@ export function ProfileSection() {
 
   const dirty = !sameProfile(toProfile(form), saved);
   useLeaveGuard(dirty);
+  useRowSummary(dirty ? UNSAVED_SUMMARY : null);
   const patch = (next: Partial<Form>) => setForm((f) => ({ ...f, ...next }));
 
   const save = () => {
@@ -82,7 +83,7 @@ export function ProfileSection() {
   };
 
   return (
-    <Card title="Профиль для AI-помощника">
+    <SectionCard title="Профиль для AI-помощника">
       <form
         className="space-y-5"
         onSubmit={(e) => {
@@ -129,6 +130,6 @@ export function ProfileSection() {
           <UnsavedHint dirty={dirty} />
         </div>
       </form>
-    </Card>
+    </SectionCard>
   );
 }

@@ -13,8 +13,9 @@ import {
 } from "@/client/notifications";
 import { isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
-import { Card, Notice, Switch } from "../../ui/controls";
+import { Notice, Switch } from "../../ui/controls";
 import { controlClass } from "../../ui/Field";
+import { SectionCard, useRowSummary, type RowSummary } from "./SettingsList";
 
 const KINDS: { key: keyof NotificationPrefs; label: string; description: string }[] = [
   { key: "payments", label: "Обязательные платежи", description: "Накануне: что и сколько нужно заплатить завтра." },
@@ -22,6 +23,15 @@ const KINDS: { key: keyof NotificationPrefs; label: string; description: string 
   { key: "cashGap", label: "Кассовый разрыв", description: "Если в ближайшую неделю денег на счёте не хватит на платежи." },
   { key: "debts", label: "Сроки долгов", description: "Накануне срока возврата вашего долга и в день, когда должны вам." },
 ];
+
+/** Состояние для строки в списке настроек. */
+function accessSummary(access: NotificationAccess, prefs: NotificationPrefs): RowSummary | null {
+  if (access === "denied") return { text: "Запрещены в iOS", tone: "warning" };
+  if (access === "prompt") return { text: "Не включены" };
+  if (access !== "granted") return null;
+  const any = KINDS.some((k) => Boolean(prefs[k.key])) || prefs.dailyReminder;
+  return { text: any ? "Включены" : "Выключены" };
+}
 
 /** Уведомления — только в iOS-приложении: их планирует сам телефон по данным бюджета. */
 export function NotificationsSection() {
@@ -42,6 +52,8 @@ export function NotificationsSection() {
     };
   }, []);
 
+  useRowSummary(accessSummary(access, prefs));
+
   if (!native) return null;
 
   const update = (patch: Partial<NotificationPrefs>) => {
@@ -58,7 +70,7 @@ export function NotificationsSection() {
   };
 
   return (
-    <Card title="Уведомления">
+    <SectionCard title="Уведомления">
       <div className="space-y-4">
         {access === "prompt" && (
           <Notice action={<Button size="sm" onClick={() => void enable()}>Включить</Button>}>
@@ -117,6 +129,6 @@ export function NotificationsSection() {
           </>
         )}
       </div>
-    </Card>
+    </SectionCard>
   );
 }

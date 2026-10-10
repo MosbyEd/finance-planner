@@ -102,8 +102,13 @@ function getFormatter(fractionDigits: number): Intl.NumberFormat {
   return f;
 }
 
-/** «12 500 ₽», «12 500,50 ₽». Копейки показываем только если они есть. */
-export function formatMoney(kopecks: Kopecks, options: { sign?: boolean } = {}): string {
+/**
+ * «12 500 ₽», «12 500,50 ₽». Копейки показываем только если они есть.
+ * whole — для итогов и сводок (дизайн-код: «деньги в итогах — без копеек»): округление до рубля.
+ */
+export function formatMoney(kopecks: Kopecks, options: { sign?: boolean; whole?: boolean } = {}): string {
+  // Половину рубля округляем от нуля и у списаний: −150,50 → −151, как +150,50 → +151.
+  if (options.whole) kopecks = Math.sign(kopecks) * Math.round(Math.abs(kopecks) / 100) * 100;
   const fraction = kopecks % 100 === 0 ? 0 : 2;
   const text = getFormatter(fraction).format(Math.abs(kopecks) / 100);
   if (kopecks < 0) return `−${text}`;

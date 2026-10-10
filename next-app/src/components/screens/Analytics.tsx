@@ -34,6 +34,10 @@ type ExpenseKind = Exclude<BreakdownKind, "income">;
 
 const SHORT_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
+/** На этом экране все суммы — итоги и сводки, поэтому без копеек (дизайн-код: «деньги в итогах — без копеек»). */
+function rubles(kopecks: Kopecks): string {
+  return formatMoney(kopecks, { whole: true });
+}
 
 function percent(share: number): string {
   if (share > 0 && share < 0.01) return "<1%";
@@ -167,14 +171,14 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
           <p className={`text-sm ${over ? "font-medium text-negative" : "text-muted"}`}>
             {over ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете"}
           </p>
-          <Money value={Math.abs(f.left)} tone={over ? "negative" : "default"} className="text-2xl font-semibold" />
+          <Money whole value={Math.abs(f.left)} tone={over ? "negative" : "default"} className="text-2xl font-semibold" />
         </div>
         <p className="ml-auto text-right text-sm text-muted">
-          из {formatMoney(Math.max(0, f.budget))}
+          из {rubles(Math.max(0, f.budget))}
           {f.extraSavings > 0 && (
             <>
               <br />
-              отложено сверх нормы {formatMoney(f.extraSavings)}
+              отложено сверх нормы {rubles(f.extraSavings)}
             </>
           )}
         </p>
@@ -192,7 +196,7 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
         <Stat
           label="Доходы"
           value={future ? metrics.income.plan : metrics.income.fact}
-          sub={future ? "по плану" : metrics.income.plan !== metrics.income.fact ? `план ${formatMoney(metrics.income.plan)}` : "факт"}
+          sub={future ? "по плану" : metrics.income.plan !== metrics.income.fact ? `план ${rubles(metrics.income.plan)}` : "факт"}
         />
         <Stat
           label="Обязательные"
@@ -201,7 +205,7 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
             future
               ? "по плану"
               : metrics.mandatory.plan !== metrics.mandatory.fact
-                ? `план ${formatMoney(metrics.mandatory.plan)}`
+                ? `план ${rubles(metrics.mandatory.plan)}`
                 : "факт"
           }
         />
@@ -214,12 +218,12 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
         <Stat
           label="Потрачено"
           value={f.spent}
-          sub={f.reserved > 0 ? `ещё запланировано ${formatMoney(f.reserved)}` : "повседневные траты"}
+          sub={f.reserved > 0 ? `ещё запланировано ${rubles(f.reserved)}` : "повседневные траты"}
         />
         <Stat
           label="Отложено"
           value={metrics.savings.fact}
-          sub={`план ${formatMoney(metrics.savings.target)}`}
+          sub={`план ${rubles(metrics.savings.target)}`}
           wide
         />
       </dl>
@@ -255,7 +259,7 @@ function Stat({
     <div className={`flex items-start justify-between gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 ${wide ? "sm:col-span-2" : ""}`}>
       <dt className="text-sm text-muted">{label}</dt>
       <dd className="min-w-0 text-right">
-        <Money value={value} tone={tone} className="font-semibold" />
+        <Money whole value={value} tone={tone} className="font-semibold" />
         {sub && <span className="block text-xs text-muted">{sub}</span>}
       </dd>
     </div>
@@ -339,7 +343,7 @@ function ExpensesCard({
           <p className="mt-3 flex justify-between gap-3 text-sm text-muted">
             <span>{rangeText(range, today)}</span>
             <span>
-              всего <Money value={total} className="font-semibold text-text" />
+              всего <Money whole value={total} className="font-semibold text-text" />
             </span>
           </p>
           <ul className="mt-2 space-y-0.5">
@@ -365,8 +369,8 @@ function ExpenseRow({ row, onClick }: { row: CategoryRow; onClick: () => void })
   if (row.limit) {
     details.push(
       row.amount > row.limit
-        ? `сверх лимита ${formatMoney(row.amount - row.limit)}`
-        : `осталось ${formatMoney(row.limit - row.amount)}`,
+        ? `сверх лимита ${rubles(row.amount - row.limit)}`
+        : `осталось ${rubles(row.limit - row.amount)}`,
     );
   }
   // Кнопка растянута на всю строку через ::after — так внутри можно держать прогресс-бар (div нельзя класть в button).
@@ -382,8 +386,13 @@ function ExpenseRow({ row, onClick }: { row: CategoryRow; onClick: () => void })
           <span className="sr-only">{row.limit !== null ? " — изменить лимит" : " — задать лимит"}</span>
         </button>
         <span className="shrink-0 text-[15px]">
-          <Money value={row.amount} className="font-semibold" tone={row.limit !== null && ratio > 1 ? "negative" : "default"} />
-          {row.limit !== null && <span className="text-sm text-muted"> из {formatMoney(row.limit)}</span>}
+          <Money
+            whole
+            value={row.amount}
+            className="font-semibold"
+            tone={row.limit !== null && ratio > 1 ? "negative" : "default"}
+          />
+          {row.limit !== null && <span className="text-sm text-muted"> из {rubles(row.limit)}</span>}
         </span>
       </div>
       {details.length > 0 && <p className="mt-0.5 text-sm text-muted">{details.join(" · ")}</p>}
@@ -425,7 +434,7 @@ function IncomeCard({ range, today }: { range: { from: IsoDate; to: IsoDate } | 
           <p className="flex justify-between gap-3 text-sm text-muted">
             <span>{rangeText(range, today)}</span>
             <span>
-              всего <Money value={total} className="font-semibold text-text" />
+              всего <Money whole value={total} className="font-semibold text-text" />
             </span>
           </p>
           <ul className="mt-2 space-y-3">
@@ -434,7 +443,7 @@ function IncomeCard({ range, today }: { range: { from: IsoDate; to: IsoDate } | 
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="min-w-0 truncate text-[15px] font-medium">{row.category}</span>
                   <span className="shrink-0 text-[15px]">
-                    <Money value={row.amount} tone="positive" className="font-semibold" />
+                    <Money whole value={row.amount} tone="positive" className="font-semibold" />
                     <span className="text-sm text-muted"> · {percent(row.share)}</span>
                   </span>
                 </div>
@@ -531,7 +540,7 @@ function TrendCard({ month, today, hideWhenEmpty }: { month: MonthKey; today: Is
                   className={`flex min-w-0 flex-1 flex-col items-center rounded-xl pt-2 ${selected ? "bg-surface-2" : ""}`}
                   title={
                     p.totals
-                      ? `${formatMonth(p.month)}: доходы ${formatMoney(p.totals.income)}, расходы ${formatMoney(p.totals.expense)}, отложено ${formatMoney(p.totals.savings)}`
+                      ? `${formatMonth(p.month)}: доходы ${rubles(p.totals.income)}, расходы ${rubles(p.totals.expense)}, отложено ${rubles(p.totals.savings)}`
                       : `${formatMonth(p.month)}: ещё не наступил`
                   }
                 >
@@ -586,7 +595,7 @@ function TrendCard({ month, today, hideWhenEmpty }: { month: MonthKey; today: Is
 
 function TrendTable({ points }: { points: TrendPoint[] }) {
   const cell = (value: Kopecks | undefined): ReactNode =>
-    value === undefined ? <span className="text-muted">—</span> : formatMoney(value);
+    value === undefined ? <span className="text-muted">—</span> : rubles(value);
   return (
     <table className="w-full text-sm tabular-nums">
       <caption className="sr-only">Доходы, расходы и отложенное по месяцам</caption>

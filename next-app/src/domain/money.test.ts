@@ -59,3 +59,11 @@ describe("percentOf / kopecksToInput", () => {
     expect(parseAmount(kopecksToInput(123_456))).toBe(123_456);
   });
 });
+
+describe("суммы без копеек для итогов", () => {
+  it("округляет до рубля и не показывает копейки", () => {
+    expect(formatMoney(7_561_023, { whole: true }).replace(/\s/g, " ")).toBe("75 610 ₽");
+    expect(formatMoney(7_561_060, { whole: true }).replace(/\s/g, " ")).toBe("75 611 ₽");
+    expect(formatMoney(-15_050, { whole: true, sign: true }).replace(/\s/g, " ")).toBe("−151 ₽");
+  });
+});

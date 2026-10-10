@@ -139,11 +139,14 @@ type Tone = "default" | "positive" | "negative" | "muted" | "auto";
 export function Money({
   value,
   sign,
+  whole,
   tone = "default",
   className = "",
 }: {
   value: Kopecks;
   sign?: boolean;
+  /** Без копеек — для итогов и сводок. */
+  whole?: boolean;
   tone?: Tone;
   className?: string;
 }) {
@@ -161,7 +164,7 @@ export function Money({
                 ? "text-negative"
                 : ""
             : "";
-  return <span className={`whitespace-nowrap tabular-nums ${color} ${className}`}>{formatMoney(value, { sign })}</span>;
+  return <span className={`whitespace-nowrap tabular-nums ${color} ${className}`}>{formatMoney(value, { sign, whole })}</span>;
 }
 
 export function Progress({

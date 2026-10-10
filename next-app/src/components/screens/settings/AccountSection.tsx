@@ -6,11 +6,12 @@ import { useSnapshot, useStore } from "@/client/react";
 import { PasswordInput } from "../../app/sheets/AuthSheet";
 import { useUi } from "../../app/overlays";
 import { Button } from "../../ui/Button";
-import { Card, Notice } from "../../ui/controls";
+import { Notice } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
 import { TextInput } from "../../ui/Field";
 import { Icon, type IconName } from "../../ui/Icon";
 import { Disclosure } from "./common";
+import { SectionCard } from "./SettingsList";
 
 const MAX_NAME = 60;
 const MIN_PASSWORD = 8;
@@ -25,7 +26,7 @@ function GuestAccount() {
   const { open } = useUi();
   const { registrationOpen } = useSnapshot();
   return (
-    <Card title="Аккаунт">
+    <SectionCard title="Аккаунт">
       <p className="text-[15px] text-muted">
         Вы ведёте бюджет без входа: данные хранятся только на этом устройстве. Если удалить приложение, очистить данные
         браузера или открыть приложение на другом устройстве, их там не будет. С аккаунтом данные сохраняются на сервере, доступны со всех
@@ -41,13 +42,13 @@ function GuestAccount() {
           </Button>
         )}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
 function SignedInAccount({ login, name }: { login: string; name: string | null }) {
   return (
-    <Card title="Аккаунт">
+    <SectionCard title="Аккаунт">
       <div className="space-y-5">
         <div className="flex items-center gap-3">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
@@ -66,7 +67,7 @@ function SignedInAccount({ login, name }: { login: string; name: string | null }
         </div>
         <LogoutButton />
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -342,7 +343,7 @@ function DeleteAccount({ login }: { login: string }) {
       >
         <Notice tone="negative">
           Аккаунт и все данные на сервере будут удалены без возможности восстановления. Сначала можно скачать
-          резервную копию в разделе «Данные» ниже.
+          резервную копию в разделе «Данные».
         </Notice>
         <input type="text" name="username" autoComplete="username" value={login} readOnly hidden />
         <PasswordInput

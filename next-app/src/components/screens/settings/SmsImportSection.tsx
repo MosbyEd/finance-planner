@@ -7,10 +7,11 @@ import { useSnapshot } from "@/client/react";
 import { nativeOpenShortcuts } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
-import { Card, Notice } from "../../ui/controls";
+import { Notice } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
 import { controlClass } from "../../ui/Field";
 import { Disclosure } from "./common";
+import { SectionCard, useRowSummary } from "./SettingsList";
 
 /** Адрес, куда автоматизация «Команд» отправляет СМС. */
 function importUrl(): string {
@@ -73,7 +74,7 @@ function AppActionSetup() {
     else toast("Не удалось скопировать — выделите текст вручную.", { kind: "error" });
   };
   return (
-    <Card title="Операции из СМС">
+    <SectionCard title="Операции из СМС">
       <div className="space-y-4">
         <p className="text-[15px] text-muted">
           Покупки, переводы и зарплата из СМС Сбербанка (номер 900) добавляются сами, а запланированные платежи
@@ -126,7 +127,7 @@ function AppActionSetup() {
           <SmsImport embedded />
         </Disclosure>
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -155,6 +156,8 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
   }, [attempt]);
 
   const hasKey = status.kind === "ready" && status.key !== null;
+  // Внутри раздела приложения ключ — запасной способ, его состояние строке не показываем.
+  useRowSummary(embedded || status.kind !== "ready" ? null : { text: hasKey ? "Подключено" : "Не подключено" });
 
   const create = async () => {
     if (busy) return;
@@ -296,5 +299,5 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
       )}
     </div>
   );
-  return embedded ? body : <Card title="Операции из СМС">{body}</Card>;
+  return embedded ? body : <SectionCard title="Операции из СМС">{body}</SectionCard>;
 }

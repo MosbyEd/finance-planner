@@ -2,14 +2,14 @@
 
 import { useUi } from "../../app/overlays";
 import { Button } from "../../ui/Button";
-import { Card } from "../../ui/controls";
+import { SectionCard } from "./SettingsList";
 
-const APP_VERSION = "3.0";
+export const APP_VERSION = "3.0";
 
 export function AboutSection() {
   const { open } = useUi();
   return (
-    <Card title="О приложении">
+    <SectionCard title="О приложении">
       <div className="space-y-3 text-[15px]">
         <p>
           Лимит на день — меньшее из двух чисел. Первое — остаток гибкого бюджета месяца (доходы минус обязательные
@@ -24,6 +24,6 @@ export function AboutSection() {
         </Button>
         <p className="text-sm text-muted">Версия {APP_VERSION}</p>
       </div>
-    </Card>
+    </SectionCard>
   );
 }

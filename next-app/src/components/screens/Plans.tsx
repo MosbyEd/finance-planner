@@ -8,7 +8,7 @@ import type { Template } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { useDispatch } from "../app/hooks";
 import { useUi } from "../app/overlays";
-import { Button, IconButton } from "../ui/Button";
+import { Button } from "../ui/Button";
 import { Card, EmptyState, Money } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 
@@ -199,39 +199,51 @@ function TemplateRow({ row }: { row: Row }) {
     }
   };
 
+  const amount = t.kind === "income" ? t.amount : -t.amount;
+
+  // Строка открывает шаблон: кнопка растянута на всю строку через ::after. Справа — сумма и под ней
+  // подписанная кнопка паузы, так на узком экране тексту слева остаётся вся ширина.
   return (
-    <li className="flex items-center gap-1">
+    <li className="relative -mx-2 flex min-h-14 items-center gap-3 rounded-2xl px-2 py-2 transition hover:bg-surface-2">
       <button
         type="button"
         onClick={() => open({ kind: "template", templateId: t.id })}
-        className="-ml-2 flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left hover:bg-surface-2"
+        className="min-w-0 flex-1 text-left after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-accent"
       >
-        <span className="min-w-0 flex-1">
-          <span className={`block truncate text-[15px] font-medium ${t.active ? "" : "text-muted"}`}>{t.title}</span>
-          {/* День платежа важнее категории: на узком экране сокращается категория, а не число. */}
-          <span className="flex min-w-0 text-sm text-muted">
-            {t.category !== t.title && <span className="min-w-0 truncate">{t.category}</span>}
-            <span className="shrink-0 whitespace-nowrap">
-              {t.category !== t.title && "\u00a0·\u00a0"}
-              {t.dayOfMonth}-го числа
-            </span>
-          </span>
-          <span className={`block text-xs ${t.active ? "text-muted" : "font-medium text-warning"}`}>
-            {!t.active ? "На паузе" : next ? `Следующий — ${formatDay(next, today)}` : "Начнётся позже"}
+        <span className={`block truncate text-[15px] font-medium ${t.active ? "" : "text-muted"}`}>{t.title}</span>
+        {/* День платежа важнее категории: на узком экране сокращается категория, а не число. */}
+        <span className="flex min-w-0 text-sm text-muted">
+          {t.category !== t.title && <span className="min-w-0 truncate">{t.category}</span>}
+          <span className="shrink-0 whitespace-nowrap">
+            {t.category !== t.title && "\u00a0·\u00a0"}
+            {t.dayOfMonth}-го числа
           </span>
         </span>
-        <Money
-          value={t.kind === "income" ? t.amount : -t.amount}
-          sign
-          tone={!t.active ? "muted" : t.kind === "income" ? "positive" : "default"}
-          className="font-semibold"
-        />
+        <span className={`block text-xs ${t.active ? "text-muted" : "font-medium text-warning"}`}>
+          {!t.active ? "На паузе" : next ? `Следующий — ${formatDay(next, today)}` : "Начнётся позже"}
+        </span>
+        <span className="sr-only">, {formatMoney(amount, { sign: true })}</span>
       </button>
-      <IconButton
-        icon={t.active ? "pause" : "play"}
-        label={t.active ? `Поставить «${t.title}» на паузу` : `Возобновить «${t.title}»`}
-        onClick={toggle}
-      />
+      <span className="flex shrink-0 flex-col items-end gap-1.5">
+        <span aria-hidden="true">
+          <Money
+            value={amount}
+            sign
+            tone={!t.active ? "muted" : t.kind === "income" ? "positive" : "default"}
+            className="font-semibold"
+          />
+        </span>
+        {/* Подписанная кнопка, а не значок «II». Капсула 32 pt, область нажатия — 44 pt (::before).
+            Название операции — для диктора. */}
+        <button
+          type="button"
+          onClick={toggle}
+          className="glass-control relative inline-flex h-8 items-center rounded-full px-3 text-[13px] font-medium transition before:absolute before:-inset-x-1 before:-inset-y-1.5 before:content-[''] active:scale-[0.97]"
+        >
+          {t.active ? "Пауза" : "Включить"}
+          <span className="sr-only"> «{t.title}»</span>
+        </button>
+      </span>
     </li>
   );
 }

@@ -1,5 +1,9 @@
+"use client";
+
 import type { Transaction } from "@/domain/schema";
 import { balanceEffect } from "@/domain/metrics";
+import { formatMoney, type Kopecks } from "@/domain/money";
+import { useSnapshot } from "@/client/react";
 import { Money } from "../ui/controls";
 import { Icon, type IconName } from "../ui/Icon";
 
@@ -26,10 +30,29 @@ export function transactionCategoryLabel(tx: Transaction): string {
   return isLoanAdjustment(tx) ? "Долг · через счёт" : tx.category;
 }
 
+// Индекс строится один раз на каждый новый список операций (после правки store отдаёт новый массив).
+const autoSavingsCache = new WeakMap<readonly Transaction[], ReadonlyMap<string, Kopecks>>();
+
+/** Суммы автоотчислений в сбережения по id исходной операции (покупки или дохода). */
+export function autoSavingsBySource(transactions: readonly Transaction[]): ReadonlyMap<string, Kopecks> {
+  let index = autoSavingsCache.get(transactions);
+  if (!index) {
+    const sums = new Map<string, Kopecks>();
+    for (const t of transactions) {
+      if (t.linkedTo) sums.set(t.linkedTo, (sums.get(t.linkedTo) ?? 0) + t.amount);
+    }
+    index = sums;
+    autoSavingsCache.set(transactions, index);
+  }
+  return index;
+}
+
 /**
  * Строка операции: иконка типа, название, категория/пометки и сумма со знаком.
  * Сумма — всегда влияние на деньги на счёте: пополнение сбережений показывается как минус («−5 000 ₽ · в сбережения»),
  * снятие — как плюс. Так строки сходятся с остатком на счёте и итогами.
+ * Автоотчисление с операции — не отдельной строкой, а подписью у неё (дизайн-код, §7): под суммой значок копилки
+ * и «+51 ₽»; слова «в копилку» видны на широком экране, на телефоне — только экранному диктору.
  */
 export function TransactionRow({
   tx,
@@ -40,6 +63,8 @@ export function TransactionRow({
   onClick?: () => void;
   subtitle?: string;
 }) {
+  const { state } = useSnapshot();
+  const autoSaving = tx.linkedTo ? 0 : (autoSavingsBySource(state.transactions).get(tx.id) ?? 0);
   const loanAdjustment = isLoanAdjustment(tx);
   const meta: { icon: IconName; tint: string } = loanAdjustment ? LOAN_ADJUSTMENT_META : TYPE_META[tx.type];
   const effect = balanceEffect(tx);
@@ -62,12 +87,22 @@ export function TransactionRow({
         <span className="block truncate text-[15px] font-medium">{transactionLabel(tx)}</span>
         {secondary && <span className="block truncate text-sm text-muted">{secondary}</span>}
       </span>
-      <Money
-        value={effect}
-        sign
-        tone={tx.type === "income" ? "positive" : tx.type === "adjustment" ? "auto" : "default"}
-        className="text-[15px] font-semibold"
-      />
+      <span className="flex shrink-0 flex-col items-end">
+        <Money
+          value={effect}
+          sign
+          tone={tx.type === "income" ? "positive" : tx.type === "adjustment" ? "auto" : "default"}
+          className="text-[15px] font-semibold"
+        />
+        {autoSaving !== 0 && (
+          // Как кешбэк в банковских приложениях: под суммой, чтобы не отнимать место у названия и категории.
+          <span className="inline-flex items-center gap-1 whitespace-nowrap text-[13px] text-muted">
+            <Icon name="piggy" size={14} className="shrink-0" />
+            <span className="tabular-nums">{formatMoney(autoSaving, { sign: true })}</span>
+            <span className="sr-only sm:not-sr-only">{autoSaving > 0 ? "в копилку" : "из копилки"}</span>
+          </span>
+        )}
+      </span>
     </>
   );
 
