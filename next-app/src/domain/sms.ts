@@ -125,8 +125,9 @@ export function parseSberSms(raw: string): SmsOperation | null {
     return a ? { kind: "income", via, amount: a, time, counterparty: "" } : null;
   }
 
-  // Входящий перевод: «Перевод 800р от Валерия В.», «Перевод из Т-Банк +5000р от ИВАН И.».
-  m = on(String.raw`Перевод(?:\s+из\s+.+?)?\s+\+?${AMOUNT}\s+от\s+(.+)$`);
+  // Входящий перевод: «Перевод 800р от Валерия В.», «Перевод из Т-Банк +5000р от ИВАН И.»,
+  // «Перевод по СБП из Альфа-Банк +10р от ЭДУАРД К.».
+  m = on(String.raw`Перевод(?:\s+по\s+СБП)?(?:\s+(?:из|с)\s+.+?)?\s+\+?${AMOUNT}\s+от\s+(.+)$`);
   if (m) return income("transfer", m, m[3]);
 
   // Возврат и отмена покупки.
@@ -142,7 +143,7 @@ export function parseSberSms(raw: string): SmsOperation | null {
   if (m) return income("transfer", m, m[3]);
 
   // Перевод с «+» перед суммой — входящий: «Перевод с карты *1234 +1000р», «Перевод +1000р».
-  m = on(String.raw`Перевод(?:\s+(?:с|из)\s+.+?)?\s+\+${AMOUNT}(?:\s+от)?${TAIL}`);
+  m = on(String.raw`Перевод(?:\s+по\s+СБП)?(?:\s+(?:с|из)\s+.+?)?\s+\+${AMOUNT}(?:\s+от)?${TAIL}`);
   if (m) return income("transfer", m, m[3]);
 
   m = on(String.raw`Покупка\s+${AMOUNT}${TAIL}`);
