@@ -1,7 +1,9 @@
 import {
   accountBalance,
   accountBalances,
+  accountCards,
   activeAccounts,
+  cardLabel,
   creditStatus,
   findAccount,
   isSpendingAccount,
@@ -85,12 +87,28 @@ export function accountRows(state: State, today: IsoDate): AccountRow[] {
   });
 }
 
-/** Подпись счёта у операции, когда счетов несколько: «Кредитка», у перевода — «Основной → Кредитка». */
+/**
+ * Подпись счёта у операции: «Кредитка», с картой — «Кредитка · Мир •7759» (карта видна и при одном счёте),
+ * у перевода — «Основной → Кредитка».
+ */
 export function transactionAccountLabel(state: State, tx: Transaction): string | null {
-  if (!hasOwnAccounts(state)) return null;
   const name = (id: string) => findAccount(state, id)?.name ?? "счёт";
-  if (tx.type === "transfer") return `${name(sourceAccountId(tx))} → ${name(tx.toAccountId ?? "")}`;
-  return name(sourceAccountId(tx));
+  if (tx.type === "transfer") return hasOwnAccounts(state) ? `${name(sourceAccountId(tx))} → ${name(tx.toAccountId ?? "")}` : null;
+  const account = findAccount(state, sourceAccountId(tx));
+  const card = tx.card ? cardLabel(account, tx.card) : null;
+  const parts = [hasOwnAccounts(state) ? name(sourceAccountId(tx)) : null, card].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** Карта последней операции по этому счёту — её предлагаем по умолчанию. */
+export function lastCardOf(state: State, accountId: string): string | null {
+  const account = findAccount(state, accountId);
+  const known = new Set(account ? accountCards(account).map((c) => c.digits) : []);
+  for (let i = state.transactions.length - 1; i >= 0; i--) {
+    const tx = state.transactions[i];
+    if (sourceAccountId(tx) === accountId && tx.card && known.has(tx.card)) return tx.card;
+  }
+  return null;
 }
 
 /** Расхождение остатка с банком по последней СМС (≥ 1 ₽): что предложить поправить. */
@@ -121,6 +139,22 @@ export function bankMismatches(state: State, today: IsoDate): BankMismatch[] {
       },
     ];
   });
+}
+
+/**
+ * «Перевод» для расхождения: в банке меньше — деньги ушли с этого счёта (выбрать, куда), больше — пришли
+ * (выбрать, откуда). После перевода расхождение снимается.
+ */
+export function bankTransferOverlay(m: Pick<BankMismatch, "account" | "delta">): {
+  kind: "transfer";
+  from?: string;
+  to?: string;
+  amount: number;
+  resolveBank: string;
+} {
+  return m.delta < 0
+    ? { kind: "transfer", from: m.account.id, amount: -m.delta, resolveBank: m.account.id }
+    : { kind: "transfer", to: m.account.id, amount: m.delta, resolveBank: m.account.id };
 }
 
 /** «Поправить»: корректировка счёта на разницу с банком и снятие расхождения. «Оставить» — только снятие. */

@@ -502,3 +502,38 @@ describe("сверка остатка по СМС", () => {
     expect(sms("Кредитная карта MIR-1234 12:00 Покупка 500р LENTA Баланс: 95000р", s).actions.some((a) => a.type === "account.bank")).toBe(false);
   });
 });
+
+describe("свой счёт по названию в СМС", () => {
+  const withAlfa = (kind: "debit" | "credit") =>
+    stateWith({
+      accounts: [
+        { id: "main", name: "Основной счёт", kind: "debit", spending: true, number: "5804", cards: [{ digits: "7759", name: "Мир" }] },
+        { id: "savings", name: "Сбережения", kind: "savings", spending: false },
+        { id: "alfa", name: kind === "credit" ? "Альфа кредитка" : "Альфа", kind, spending: kind !== "credit" },
+      ],
+    });
+  const plan = (state: ReturnType<typeof stateWith>, text: string) =>
+    planSmsImport(state, parseSberSms(text)!, { idBase: "sms-name", date: "2026-10-10", sms: text });
+
+  it("перевод из Альфа-Банка на карту — перевод со счёта «Альфа», а не доход; карта — у операции", () => {
+    const result = plan(withAlfa("debit"), "Счёт карты MIR-7759 15:27 Перевод по СБП из Альфа-Банк +57р от ЭДУАРД К. Баланс: 4045.04р");
+    expect(ops(result.actions)).toEqual([expect.objectContaining({ type: "transfer.add", from: "alfa", to: "main", amount: 5_700 })]);
+  });
+
+  it("оплата «Альфа-банк» при кредитке «Альфа» — погашение; без такого счёта — обычный расход с картой", () => {
+    const repay = plan(withAlfa("credit"), "СЧЁТ5804 16:16 Оплата 4000р Альфа-банк Баланс: 5560.14р");
+    expect(ops(repay.actions)).toEqual([expect.objectContaining({ type: "transfer.add", from: "main", to: "alfa", amount: 400_000 })]);
+    const s = withAlfa("debit");
+    s.accounts = s.accounts!.filter((a) => a.id !== "alfa");
+    const purchase = plan(s, "Счёт карты MIR-7759 18:42 Покупка 300р LENTA Баланс: 5260.14р");
+    expect(ops(purchase.actions)[0]).toMatchObject({ type: "tx.add", tx: { card: "7759" } });
+    // Номер счёта — не карта: у операции по «СЧЁТ5804» карты нет.
+    const byNumber = plan(s, "СЧЁТ5804 16:23 перевод 3000р OZON Баланс: 5560.14р");
+    expect((ops(byNumber.actions)[0] as { tx: { card?: string } }).tx.card).toBeUndefined();
+  });
+
+  it("общие слова названия не считаются: «Основной счёт» не узнаётся в «Оплата … Основной»", () => {
+    const result = plan(withAlfa("debit"), "СЧЁТ5804 16:16 Оплата 400р КАРТА ОСНОВНОЙ Баланс: 5560.14р");
+    expect(ops(result.actions)[0]).toMatchObject({ type: "tx.add" });
+  });
+});

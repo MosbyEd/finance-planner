@@ -22,7 +22,7 @@ import { SKIP_MANDATORY_KEY } from "../app/native/homeModel";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
 import { quickPicks, type QuickPick } from "../app/quickPicks";
-import { ACCOUNT_KINDS, accountRows, bankMismatches, bankResolveActions, hasOwnAccounts } from "../app/accounts";
+import { ACCOUNT_KINDS, accountRows, bankMismatches, bankResolveActions, bankTransferOverlay, hasOwnAccounts } from "../app/accounts";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
@@ -184,6 +184,9 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
           <>
             <Button size="sm" onClick={() => resolve(true)}>
               Поправить
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(m))}>
+              Перевод
             </Button>
             <Button size="sm" variant="secondary" onClick={() => resolve(false)}>
               Оставить

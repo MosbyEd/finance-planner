@@ -14,6 +14,7 @@ struct AddTransactionView: View {
     @State private var title = ""
     @State private var date = Date()
     @State private var accountId: String
+    @State private var card: String?
     @State private var busy = false
     @State private var error: String?
     @FocusState private var amountFocused: Bool
@@ -22,7 +23,13 @@ struct AddTransactionView: View {
         self.add = add
         _kind = State(initialValue: initialKind)
         _category = State(initialValue: Self.defaultCategory(add, initialKind))
-        _accountId = State(initialValue: Self.defaultAccount(add, initialKind))
+        let account = Self.defaultAccount(add, initialKind)
+        _accountId = State(initialValue: account)
+        _card = State(initialValue: add.accounts?.first { $0.id == account }?.lastCard)
+    }
+
+    private var accountCards: [HomeModel.CardChoice] {
+        add.accounts?.first { $0.id == accountId }?.cards ?? []
     }
 
     private static func defaultAccount(_ add: HomeModel.Add, _ kind: Kind) -> String {
@@ -75,9 +82,33 @@ struct AddTransactionView: View {
                                     let selected = account.id == accountId
                                     Button {
                                         accountId = account.id
+                                        card = account.lastCard
                                         UISelectionFeedbackGenerator().selectionChanged()
                                     } label: {
                                         Label(account.name, systemImage: account.symbol)
+                                            .font(.subheadline.weight(selected ? .semibold : .regular))
+                                            .padding(.horizontal, 14)
+                                            .frame(minHeight: 40)
+                                            .foregroundStyle(selected ? .white : Theme.text)
+                                            .background(selected ? Theme.action : Theme.fill, in: .capsule)
+                                    }
+                                    .buttonStyle(PressableStyle())
+                                    .accessibilityAddTraits(selected ? .isSelected : [])
+                                }
+                            }
+                        }
+                    }
+
+                    if !accountCards.isEmpty {
+                        section("Карта") {
+                            FlowLayout(spacing: 8) {
+                                ForEach([nil] + accountCards.map { Optional($0) }, id: \.?.digits) { choice in
+                                    let selected = card == choice?.digits
+                                    Button {
+                                        card = choice?.digits
+                                        UISelectionFeedbackGenerator().selectionChanged()
+                                    } label: {
+                                        Text(choice?.label ?? "Без карты")
                                             .font(.subheadline.weight(selected ? .semibold : .regular))
                                             .padding(.horizontal, 14)
                                             .frame(minHeight: 40)
@@ -247,7 +278,9 @@ struct AddTransactionView: View {
             "category": .string(category),
             "title": .string(title.trimmingCharacters(in: .whitespacesAndNewlines)),
             "date": .string(WidgetSnapshot.today(date)),
-        ].merging((add.accounts?.count ?? 0) > 1 ? ["accountId": .string(accountId)] : [:]) { current, _ in current }
+        ]
+        .merging((add.accounts?.count ?? 0) > 1 ? ["accountId": .string(accountId)] : [:]) { current, _ in current }
+        .merging(card.map { ["card": .string($0)] } ?? [:]) { current, _ in current }
         Task {
             let result = await AppShell.shared.send(.command("add", ["draft": .object(draft)]))
             busy = false

@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { accountBalance, activeAccounts, creditStatus, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "@/domain/accounts";
+import {
+  accountBalance,
+  accountCards,
+  activeAccounts,
+  creditStatus,
+  findAccount,
+  MAIN_ACCOUNT_ID,
+  SAVINGS_ACCOUNT_ID,
+} from "@/domain/accounts";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { AccountKind } from "@/domain/schema";
@@ -11,9 +19,10 @@ import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { Segmented, Switch } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
-import { DateInput, TextInput } from "../../ui/Field";
+import { DateInput, TextInput, controlClass } from "../../ui/Field";
+import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
-import { ACCOUNT_KINDS } from "../accounts";
+import { ACCOUNT_KINDS, bankResolveActions } from "../accounts";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 
@@ -24,11 +33,15 @@ const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
   { value: "credit", label: "Кредитка" },
 ];
 
-/** «7759, 5804» → ["7759", "5804"]; ошибка — если что-то не похоже на четыре цифры. */
-function parseSmsKeys(text: string): { keys: string[]; error: string | null } {
-  const parts = text.split(/[\s,;]+/).filter(Boolean);
-  const bad = parts.find((p) => !/^\d{4}$/.test(p));
-  return { keys: [...new Set(parts)], error: bad ? `«${bad}» — нужны последние четыре цифры` : null };
+/** Только цифры, не больше четырёх (поле — с цифровой клавиатурой). */
+function fourDigits(text: string): string {
+  return text.replace(/\D/g, "").slice(0, 4);
+}
+
+interface CardDraft {
+  key: number;
+  digits: string;
+  name: string;
 }
 
 /** Новый счёт или правка: название, вид, учитывать ли в лимите, цифры карты из СМС, лимит и льготный срок кредитки. */
@@ -46,10 +59,24 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   const [kind, setKind] = useState<AccountKind>(existing?.kind ?? preset?.kind ?? "debit");
   const [spending, setSpending] = useState(existing?.spending ?? (preset?.kind !== "savings" && preset?.kind !== "credit"));
   const [spendingTouched, setSpendingTouched] = useState(Boolean(existing));
-  const [keys, setKeys] = useState(existing?.smsKeys.join(", ") ?? "");
+  const [number, setNumber] = useState(existing?.number ?? "");
+  // Карты прежнего формата (цифры одним списком) показываются как карты без названия.
+  const [cards, setCards] = useState<CardDraft[]>(() =>
+    (existing ? accountCards(existing) : []).map((c, i) => ({ key: i, digits: c.digits, name: c.name })),
+  );
+  const [nextCardKey, setNextCardKey] = useState(cards.length);
   const [limit, setLimit] = useState<Kopecks | null>(existing?.creditLimit ?? null);
   const [grace, setGrace] = useState(existing?.graceDays ? String(existing.graceDays) : "");
-  const [errors, setErrors] = useState<{ name?: string; keys?: string; grace?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; number?: string; cards?: string; grace?: string }>({});
+
+  const updateCard = (key: number, patch: Partial<CardDraft>) => {
+    setCards((list) => list.map((c) => (c.key === key ? { ...c, ...patch } : c)));
+    setErrors((v) => ({ ...v, cards: undefined }));
+  };
+  const addCard = () => {
+    setCards((list) => [...list, { key: nextCardKey, digits: "", name: "" }]);
+    setNextCardKey((k) => k + 1);
+  };
 
   const balance = existing ? accountBalance(state, existing.id, today) : 0;
   const credit = existing?.kind === "credit" ? creditStatus(state, existing, today) : null;
@@ -61,11 +88,13 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   };
 
   const save = () => {
-    const parsed = parseSmsKeys(keys);
     const graceDays = grace.trim() ? Number(grace) : null;
+    const filled = cards.filter((c) => c.digits || c.name.trim());
     const next: typeof errors = {};
     if (!name.trim()) next.name = "Введите название";
-    if (parsed.error) next.keys = parsed.error;
+    if (number && !/^\d{4}$/.test(number)) next.number = "Нужны последние четыре цифры";
+    if (filled.some((c) => !/^\d{4}$/.test(c.digits))) next.cards = "У каждой карты — последние четыре цифры";
+    else if (new Set(filled.map((c) => c.digits)).size !== filled.length) next.cards = "Одна и та же карта указана дважды";
     if (kind === "credit" && graceDays !== null && (!Number.isInteger(graceDays) || graceDays < 1 || graceDays > 365)) {
       next.grace = "От 1 до 365 дней";
     }
@@ -76,7 +105,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
       name: name.trim(),
       kind,
       spending: kind === "credit" ? false : spending,
-      smsKeys: parsed.keys,
+      cards: filled.map((c) => ({ digits: c.digits, name: c.name.trim() })),
     };
     const ok = existing
       ? dispatch({
@@ -84,6 +113,9 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
           id: existing.id,
           patch: {
             ...fields,
+            number: number || null,
+            // Прежний список цифр перенесён в карты.
+            smsKeys: [],
             creditLimit: kind === "credit" ? limit : null,
             graceDays: kind === "credit" ? graceDays : null,
           },
@@ -93,6 +125,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
           account: {
             id: newId(),
             ...fields,
+            ...(number ? { number } : {}),
             ...(kind === "credit" && limit ? { creditLimit: limit } : {}),
             ...(kind === "credit" && graceDays ? { graceDays } : {}),
           },
@@ -237,17 +270,57 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
         )}
 
         <TextInput
-          label="Цифры карт и счёта из СМС"
+          label="Номер счёта — последние 4 цифры"
           inputMode="numeric"
-          value={keys}
-          placeholder={kind === "savings" ? "3150" : "7759, 5804"}
-          hint="Последние четыре цифры, как в СМС банка: карта «MIR-7759», счёт «СЧЁТ5804», накопительный «*3150». Несколько карт одного счёта — через запятую. Операции и переводы из СМС по ним попадут на этот счёт"
+          value={number}
+          placeholder={kind === "savings" ? "3150" : "5804"}
+          hint="Как в СМС банка: «СЧЁТ5804», «Накопительный счет *3150». Есть у любого счёта — с картой или без"
           onChange={(e) => {
-            setKeys(e.target.value);
-            setErrors((v) => ({ ...v, keys: undefined }));
+            setNumber(fourDigits(e.target.value));
+            setErrors((v) => ({ ...v, number: undefined }));
           }}
-          error={errors.keys}
+          error={errors.number}
         />
+
+        <fieldset className="space-y-2">
+          <legend className="mb-1.5 text-sm font-medium text-muted">Карты счёта</legend>
+          {cards.map((card) => (
+            <div key={card.key} className="flex items-start gap-2">
+              <input
+                inputMode="numeric"
+                aria-label="Последние 4 цифры карты"
+                placeholder="7759"
+                value={card.digits}
+                onChange={(e) => updateCard(card.key, { digits: fourDigits(e.target.value) })}
+                className={`${controlClass} h-12 w-24 shrink-0 tabular-nums`}
+              />
+              <input
+                aria-label="Название карты"
+                placeholder="Название — например, Мир"
+                maxLength={40}
+                value={card.name}
+                onChange={(e) => updateCard(card.key, { name: e.target.value })}
+                className={`${controlClass} h-12 min-w-0 flex-1`}
+              />
+              <button
+                type="button"
+                aria-label={`Убрать карту ${card.digits || ""}`.trim()}
+                onClick={() => setCards((list) => list.filter((c) => c.key !== card.key))}
+                className="flex h-12 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-fill hover:text-text"
+              >
+                <Icon name="close" size={18} />
+              </button>
+            </div>
+          ))}
+          {errors.cards && <p className="text-sm text-negative">{errors.cards}</p>}
+          <Button size="sm" variant="secondary" icon="plus" onClick={addCard}>
+            Добавить карту
+          </Button>
+          <p className="text-sm text-muted">
+            Последние четыре цифры, как в СМС («MIR-7759»). Операции из СМС по картам и номеру счёта попадут на этот счёт, а у
+            операции будет видно, какой картой платили.
+          </p>
+        </fieldset>
         <button type="submit" hidden />
       </form>
     </Sheet>
@@ -258,7 +331,18 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
  * Перевод между своими счетами. На накопительный — пополнение сбережений (считается отложенным за месяц),
  * с накопительного — снятие; между остальными (погашение кредитки, снятие наличных) — перевод.
  */
-export function TransferSheet({ from: presetFrom, to: presetTo, amount: presetAmount }: { from?: string; to?: string; amount?: number }) {
+export function TransferSheet({
+  from: presetFrom,
+  to: presetTo,
+  amount: presetAmount,
+  resolveBank,
+}: {
+  from?: string;
+  to?: string;
+  amount?: number;
+  /** Перевод объясняет расхождение остатка с банком на этом счёте — после него расхождение снимается. */
+  resolveBank?: string;
+}) {
   const { state } = useSnapshot();
   const { close } = useUi();
   const today = useToday();
@@ -299,6 +383,7 @@ export function TransferSheet({ from: presetFrom, to: presetTo, amount: presetAm
       ok = dispatch({ type: "transfer.add", id: newId(), date, from, to, amount, note });
     }
     if (!ok) return;
+    if (resolveBank) dispatch(bankResolveActions(state, resolveBank, false, today, newId()));
     toast(`${toAccount.kind === "credit" ? "Погашено" : "Переведено"} ${formatMoney(amount)}: ${fromAccount.name} → ${toAccount.name}`);
     close();
   };

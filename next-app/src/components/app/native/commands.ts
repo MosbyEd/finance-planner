@@ -30,6 +30,8 @@ export interface AddDraft {
   date: IsoDate;
   /** Счёт (нет — основной). */
   accountId?: string;
+  /** Карта, которой платили. */
+  card?: string;
 }
 
 /** Ответ на команду: для добавления — id операции (для «Отменить») и текст уведомления. */
@@ -81,6 +83,7 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
       title: z.string().max(200),
       date: isoDate,
       accountId: z.string().min(1).max(120).optional(),
+      card: z.string().regex(/^\d{4}$/).optional(),
     }),
   }),
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),

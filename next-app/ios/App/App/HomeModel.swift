@@ -197,10 +197,18 @@ struct HomeModel: Codable, Equatable, Sendable {
         var command: JSONValue
     }
 
+    struct CardChoice: Codable, Equatable, Sendable, Hashable, Identifiable {
+        var digits: String
+        var label: String
+        var id: String { digits }
+    }
+
     struct AccountChoice: Codable, Equatable, Sendable, Hashable, Identifiable {
         var id: String
         var name: String
         var symbol: String
+        var cards: [CardChoice]?
+        var lastCard: String?
     }
 
     struct Pick: Codable, Equatable, Sendable, Hashable {

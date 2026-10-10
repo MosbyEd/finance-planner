@@ -12,9 +12,20 @@ import {
 import { formatMoney } from "@/domain/money";
 import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
+import { accountCards, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
 import { quickPicks, type QuickPick } from "../quickPicks";
-import { ACCOUNT_KINDS, accountRows, bankMismatches, hasOwnAccounts, lastAccountId, payableAccounts } from "../accounts";
+import {
+  ACCOUNT_KINDS,
+  accountRows,
+  bankMismatches,
+  bankTransferOverlay,
+  hasOwnAccounts,
+  lastAccountId,
+  lastCardOf,
+  payableAccounts,
+  transactionAccountLabel,
+} from "../accounts";
 import type { NativeCommand } from "./commands";
 
 /**
@@ -124,7 +135,7 @@ export interface AddModel {
   lastExpense: string | null;
   lastIncome: string | null;
   /** Счета для выбора (пусто — выбор не показывается, всё на основном). */
-  accounts: { id: string; name: string; symbol: string }[];
+  accounts: { id: string; name: string; symbol: string; cards: { digits: string; label: string }[]; lastCard: string | null }[];
   lastExpenseAccount: string;
   lastIncomeAccount: string;
   /** Частые траты: заполняют форму одним касанием (сумма в копейках). */
@@ -264,6 +275,7 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       command: null,
       actions: [
         { label: "Поправить", primary: true, command: { type: "bank", accountId: m.account.id, fix: true } },
+        { label: "Перевод", primary: false, command: { type: "open", overlay: bankTransferOverlay(m) } },
         { label: "Оставить", primary: false, command: { type: "bank", accountId: m.account.id, fix: false } },
       ],
     });
@@ -348,13 +360,17 @@ const TX_META: Record<Transaction["type"], { symbol: string; tint: Tone }> = {
   transfer: { symbol: "arrow.left.arrow.right", tint: "accent" },
 };
 
-function recentRow(tx: Transaction, today: IsoDate, autoSaving: number): RecentModel {
+function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: number): RecentModel {
   const loanAdjustment = tx.type === "adjustment" && tx.loanId !== undefined;
   const meta = loanAdjustment ? { symbol: "person.2", tint: "muted" as Tone } : TX_META[tx.type];
   const effect = balanceEffect(tx);
   const categoryLabel = loanAdjustment ? "Долг · через счёт" : tx.category;
   const savingNote = tx.type === "saving" ? (tx.amount > 0 ? "в сбережения" : "из сбережений") : null;
-  const subtitle = [`${formatRelativeDay(tx.date, today)}${tx.title && tx.category ? ` · ${categoryLabel}` : ""}`, savingNote]
+  const subtitle = [
+    `${formatRelativeDay(tx.date, today)}${tx.title && tx.category ? ` · ${categoryLabel}` : ""}`,
+    transactionAccountLabel(state, tx),
+    savingNote,
+  ]
     .filter(Boolean)
     .join(" · ");
   const amountTone =
@@ -399,8 +415,15 @@ export function buildHomeModel(input: HomeInput): HomeModel {
     income: state.categories.income,
     lastExpense: lastCategory(state, "expense"),
     lastIncome: lastCategory(state, "income"),
-    accounts: ownAccounts
-      ? payableAccounts(state).map((a) => ({ id: a.id, name: a.name, symbol: ACCOUNT_KINDS[a.kind].symbol }))
+    // Счета с картами — даже при одном счёте: чтобы выбрать карту.
+    accounts: ownAccounts || payableAccounts(state).some((a) => accountCards(a).length > 0)
+      ? payableAccounts(state).map((a) => ({
+          id: a.id,
+          name: a.name,
+          symbol: ACCOUNT_KINDS[a.kind].symbol,
+          cards: accountCards(a).map((c) => ({ digits: c.digits, label: cardLabel(a, c.digits) })),
+          lastCard: lastCardOf(state, a.id),
+        }))
       : [],
     lastExpenseAccount: lastAccountId(state, "expense"),
     lastIncomeAccount: lastAccountId(state, "income"),
@@ -521,6 +544,6 @@ export function buildHomeModel(input: HomeInput): HomeModel {
               ? { type: "open", overlay: { kind: "transfer", to: e.accountId, amount: -e.amount } }
               : null,
       })),
-    recent: recent.map((tx) => recentRow(tx, today, autoSavings.get(tx.id) ?? 0)),
+    recent: recent.map((tx) => recentRow(state, tx, today, autoSavings.get(tx.id) ?? 0)),
   };
 }

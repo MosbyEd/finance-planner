@@ -12,6 +12,7 @@ import {
   MAIN_ACCOUNT_ID,
   SAVINGS_ACCOUNT_ID,
   accountBalance,
+  accountKeys,
   accountsOf,
   findAccount,
   sourceAccountId,
@@ -85,6 +86,8 @@ const txInputSchema = z.object({
   review: z.boolean().optional(),
   /** Счёт: откуда списано или куда пришло. Нет — основной. */
   accountId: idSchema.optional(),
+  /** Карта, которой платили (четыре цифры). */
+  card: z.string().regex(/^\d{4}$/).optional(),
 });
 export type TxInput = z.infer<typeof txInputSchema>;
 
@@ -99,6 +102,8 @@ const txPatchSchema = z
     mandatory: z.boolean(),
     autoSaving: z.boolean(),
     accountId: idSchema,
+    /** null — без карты. */
+    card: z.string().regex(/^\d{4}$/).nullable(),
   })
   .partial()
   .strict();
@@ -109,6 +114,7 @@ const accountPatchSchema = accountSchema
     // null — убрать лимит или срок (стал не кредиткой, данных больше нет).
     creditLimit: accountSchema.shape.creditLimit.unwrap().nullable(),
     graceDays: accountSchema.shape.graceDays.unwrap().nullable(),
+    number: accountSchema.shape.number.unwrap().nullable(),
     archived: z.boolean(),
   })
   .partial()
@@ -353,7 +359,7 @@ function isBuiltinAccount(id: string): boolean {
 function assertUniqueSmsKeys(accounts: Account[]): void {
   const seen = new Map<string, string>();
   for (const account of accounts) {
-    for (const key of account.smsKeys) {
+    for (const key of new Set(accountKeys(account))) {
       const other = seen.get(key);
       if (other) throw new DomainError(`Цифры ${key} уже указаны у счёта «${other}».`);
       seen.set(key, account.name);
@@ -501,6 +507,7 @@ export function applyAction(state: State, action: Action): State {
         ...(input.type === "expense" ? { mandatory: input.mandatory } : {}),
         ...(input.review ? { review: true as const } : {}),
         ...(input.accountId ? { accountId: input.accountId } : {}),
+        ...(input.card ? { card: input.card } : {}),
       };
       let next = ensureCategory(state, groupFor(input.type, input.mandatory), input.category);
       if (input.repeat) {
@@ -546,7 +553,12 @@ export function applyAction(state: State, action: Action): State {
         action.patch.category === undefined
           ? action.patch
           : { ...action.patch, category: canonicalCategory(state, action.patch.category) };
-      const updated: Transaction = { ...current, ...patch, type };
+      const { card, ...rest } = patch;
+      const updated: Transaction = { ...current, ...rest, type };
+      if (card !== undefined) {
+        if (card === null) delete updated.card;
+        else updated.card = card;
+      }
       // Пользователь поправил операцию — значит, проверил её.
       delete updated.review;
       if (type === "income") delete updated.mandatory;
@@ -707,8 +719,13 @@ export function applyAction(state: State, action: Action): State {
       const accounts = accountsOf(state);
       const current = accounts.find((a) => a.id === action.id);
       if (!current) throw new DomainError("Счёт не найден.");
-      const { creditLimit, graceDays, archived, ...rest } = action.patch;
+      const { creditLimit, graceDays, archived, number, ...rest } = action.patch;
       const updated: Account = { ...current, ...rest };
+      if (number !== undefined) {
+        if (number === null) delete updated.number;
+        else updated.number = number;
+      }
+      if (updated.smsKeys && !updated.smsKeys.length) delete updated.smsKeys;
       if (creditLimit !== undefined) {
         if (creditLimit === null) delete updated.creditLimit;
         else updated.creditLimit = creditLimit;

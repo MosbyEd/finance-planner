@@ -71,6 +71,8 @@ export const transactionSchema = z
     accountId: idSchema.optional(),
     /** Куда: у перевода — обязательно, у сбережений — накопительный счёт (нет — «Сбережения»). */
     toAccountId: idSchema.optional(),
+    /** Последние четыре цифры карты, которой платили (из СМС или выбрана вручную). */
+    card: z.string().regex(/^\d{4}$/).optional(),
     /**
      * Перенос остатка гибкого бюджета за этот месяц (rollover.resolve «saved»). Такое отчисление уменьшает
      * деньги на счёте и пополняет сбережения, но не считается сбережениями месяца, в котором создано.
@@ -143,14 +145,25 @@ export type Goal = z.infer<typeof goalSchema>;
 export const accountKindSchema = z.enum(["debit", "cash", "savings", "credit"]);
 export type AccountKind = z.infer<typeof accountKindSchema>;
 
+/** Карта счёта: последние четыре цифры, как в СМС («MIR-7759»), и название («Мир», «Виртуальная»). */
+export const cardSchema = z.object({
+  digits: z.string().regex(/^\d{4}$/, "Последние четыре цифры карты"),
+  name: z.string().trim().max(40),
+});
+export type Card = z.infer<typeof cardSchema>;
+
 export const accountSchema = z.object({
   id: idSchema,
   name: titleSchema.min(1, "Укажите название"),
   kind: accountKindSchema,
   /** Учитывать деньги счёта в «Сколько можно потратить» (у кредитной карты не учитываются никогда). */
   spending: z.boolean(),
-  /** Последние четыре цифры карты или счёта, как в СМС банка («MIR-7759», «СЧЁТ5804»): по ним СМС узнаёт счёт. */
-  smsKeys: z.array(z.string().regex(/^\d{4}$/, "Четыре цифры карты или счёта")).max(10),
+  /** Последние четыре цифры номера счёта, как в СМС банка («СЧЁТ5804», «*3150») — у любого счёта, с картой или без. */
+  number: z.string().regex(/^\d{4}$/, "Последние четыре цифры счёта").optional(),
+  /** Карты счёта: по их цифрам СМС узнаёт счёт, а у операции видно, какой картой платили. */
+  cards: z.array(cardSchema).max(10).optional(),
+  /** Прежний формат: цифры карт и счёта одним списком. Читается как карты; при сохранении счёта переносится в cards. */
+  smsKeys: z.array(z.string().regex(/^\d{4}$/)).max(10).optional(),
   /** Кредитная карта: кредитный лимит и беспроцентный период — дней с первой покупки, когда долга не было. */
   creditLimit: positiveKopecksSchema.optional(),
   graceDays: z.number().int().min(1).max(365).optional(),

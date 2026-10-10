@@ -36,7 +36,7 @@ export function OverlayHost() {
     case "account":
       return <AccountSheet key={overlay.accountId ?? "new"} accountId={overlay.accountId} preset={overlay.preset} />;
     case "transfer":
-      return <TransferSheet from={overlay.from} to={overlay.to} amount={overlay.amount} />;
+      return <TransferSheet from={overlay.from} to={overlay.to} amount={overlay.amount} resolveBank={overlay.resolveBank} />;
     case "explain":
       return <ExplainSheet />;
     case "planned":

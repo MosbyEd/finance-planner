@@ -108,6 +108,8 @@ describe("расхождение остатка с банком", () => {
     expect(row).toMatchObject({ title: "«Основной счёт»: в банке 4 900 ₽, в приложении 5 000 ₽", tone: "warning" });
     expect(row?.actions.map((a) => a.command)).toEqual([
       { type: "bank", accountId: "main", fix: true },
+      // В банке меньше на 100 ₽ — деньги ушли с основного: перевод с него, сумма подставлена.
+      { type: "open", overlay: { kind: "transfer", from: "main", amount: 10_000, resolveBank: "main" } },
       { type: "bank", accountId: "main", fix: false },
     ]);
     s = applyActions(s, bankResolveActions(s, "main", true, today, "fix"));

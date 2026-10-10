@@ -8,7 +8,7 @@ import { occurrenceDate } from "@/domain/recurring";
 import { autoSavingAmount, autoSavingByDefault } from "@/domain/savings";
 import type { State, Transaction } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
-import { sourceAccountId } from "@/domain/accounts";
+import { accountCards, cardLabel, findAccount, sourceAccountId } from "@/domain/accounts";
 import { AccountPicker } from "../ui/AccountPicker";
 import { AmountInput } from "../ui/AmountInput";
 import { Button } from "../ui/Button";
@@ -17,7 +17,7 @@ import { Segmented, Switch } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { DateInput, TextInput } from "../ui/Field";
 import { Sheet } from "../ui/Sheet";
-import { hasOwnAccounts, lastAccountId, payableAccounts } from "./accounts";
+import { hasOwnAccounts, lastAccountId, lastCardOf, payableAccounts } from "./accounts";
 import { useDeleteTransaction, useDispatch } from "./hooks";
 import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
@@ -79,6 +79,15 @@ export function TransactionSheet({
   // Счёт: показываем выбор, только когда счетов несколько (у всех остальных — основной).
   const showAccounts = hasOwnAccounts(state);
   const [accountId, setAccountId] = useState(() => (existing ? sourceAccountId(existing) : lastAccountId(state, kind)));
+  // Карта счёта, которой платили: у счёта с картами — выбор чипами (по умолчанию — карта последней операции).
+  const selectedAccount = findAccount(state, accountId);
+  const cards = selectedAccount ? accountCards(selectedAccount) : [];
+  const [card, setCard] = useState<string | null>(() => (existing ? (existing.card ?? null) : lastCardOf(state, accountId)));
+  const chooseAccount = (id: string) => {
+    setAccountId(id);
+    setCard(lastCardOf(state, id));
+  };
+  const cardValue = card && cards.some((c) => c.digits === card) ? card : null;
   const [date, setDate] = useState<IsoDate>(existing?.date ?? preset?.date ?? today);
   const [autoSavingTouched, setAutoSavingTouched] = useState(false);
   const [autoSavingChoice, setAutoSavingChoice] = useState(existing?.autoSaving ?? false);
@@ -87,9 +96,10 @@ export function TransactionSheet({
   const [mandatoryBeforeRepeat, setMandatoryBeforeRepeat] = useState(mandatory);
   const [errors, setErrors] = useState<{ amount?: string; category?: string; date?: string }>({});
   // Исходные значения формы — чтобы понять, есть ли несохранённые изменения.
-  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date, accountId }));
+  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date, accountId, card }));
   const dirty =
     accountId !== initial.accountId ||
+    card !== initial.card ||
     kind !== initial.kind ||
     mandatory !== initial.mandatory ||
     category !== initial.category ||
@@ -170,6 +180,7 @@ export function TransactionSheet({
             mandatory: kind === "expense" ? mandatory : false,
             autoSaving: autoSavingAvailable && autoSaving,
             ...(showAccounts && accountId !== sourceAccountId(existing) ? { accountId } : {}),
+            ...(cardValue !== (existing.card ?? null) ? { card: cardValue } : {}),
           },
         })
       : dispatch({
@@ -185,6 +196,7 @@ export function TransactionSheet({
             mandatory: kind === "expense" ? mandatory || repeat : false,
             autoSaving: autoSavingAvailable && autoSaving,
             ...(showAccounts ? { accountId } : {}),
+            ...(cardValue ? { card: cardValue } : {}),
             ...(repeat ? { repeat: { templateId: newId(), startDate: date > today ? date : today } } : {}),
           },
         });
@@ -249,8 +261,29 @@ export function TransactionSheet({
             label={kind === "income" ? "На какой счёт" : "С какого счёта"}
             accounts={payableAccounts(state)}
             value={accountId}
-            onChange={setAccountId}
+            onChange={chooseAccount}
           />
+        )}
+
+        {cards.length > 0 && (
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-sm font-medium text-muted">Карта</legend>
+            <div className="flex flex-wrap gap-2">
+              {[null, ...cards.map((c) => c.digits)].map((digits) => (
+                <button
+                  key={digits ?? "none"}
+                  type="button"
+                  aria-pressed={cardValue === digits}
+                  onClick={() => setCard(digits)}
+                  className={`h-10 rounded-full border px-3.5 text-sm transition ${
+                    cardValue === digits ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
+                  }`}
+                >
+                  {digits ? cardLabel(selectedAccount, digits) : "Без карты"}
+                </button>
+              ))}
+            </div>
+          </fieldset>
         )}
 
         {picks.length > 0 && (

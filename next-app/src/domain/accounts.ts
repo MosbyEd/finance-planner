@@ -1,6 +1,6 @@
 import { addDays, type IsoDate } from "./dates";
 import type { Kopecks } from "./money";
-import type { Account, State, Transaction } from "./schema";
+import type { Account, Card, State, Transaction } from "./schema";
 
 /**
  * Счета. Пока пользователь не завёл свои, у него два счёта по умолчанию: «Основной счёт» (все операции,
@@ -13,8 +13,8 @@ export const SAVINGS_ACCOUNT_ID = "savings";
 
 export function defaultAccounts(): Account[] {
   return [
-    { id: MAIN_ACCOUNT_ID, name: "Основной счёт", kind: "debit", spending: true, smsKeys: [] },
-    { id: SAVINGS_ACCOUNT_ID, name: "Сбережения", kind: "savings", spending: false, smsKeys: [] },
+    { id: MAIN_ACCOUNT_ID, name: "Основной счёт", kind: "debit", spending: true },
+    { id: SAVINGS_ACCOUNT_ID, name: "Сбережения", kind: "savings", spending: false },
   ];
 }
 
@@ -29,6 +29,23 @@ export function activeAccounts(state: Pick<State, "accounts">): Account[] {
 
 export function findAccount(state: Pick<State, "accounts">, id: string): Account | undefined {
   return accountsOf(state).find((a) => a.id === id);
+}
+
+/** Карты счёта (с картами прежнего формата — цифрами из smsKeys без названия). */
+export function accountCards(account: Account): Card[] {
+  if (account.cards) return account.cards;
+  return (account.smsKeys ?? []).map((digits) => ({ digits, name: "" }));
+}
+
+/** Цифры, по которым СМС узнаёт счёт: номер счёта и цифры его карт. */
+export function accountKeys(account: Account): string[] {
+  return [...(account.number ? [account.number] : []), ...accountCards(account).map((c) => c.digits)];
+}
+
+/** «Мир •7759» или «•7759». */
+export function cardLabel(account: Account | undefined, digits: string): string {
+  const name = account ? accountCards(account).find((c) => c.digits === digits)?.name : undefined;
+  return name ? `${name} •${digits}` : `•${digits}`;
 }
 
 /** Счёт операции; у сбережений и переводов — откуда. */

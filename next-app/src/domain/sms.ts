@@ -1,4 +1,4 @@
-import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, accountBalance, accountsOf, findAccount } from "./accounts";
+import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, accountBalance, accountCards, accountKeys, accountsOf, findAccount } from "./accounts";
 import { applyActions, type Action } from "./actions";
 import { addDays, addMonths, diffDays, monthKeyOf, type IsoDate, type MonthKey } from "./dates";
 import { OTHER_CATEGORY } from "./defaults";
@@ -495,7 +495,45 @@ export function smsAccountKeys(raw: string): { source: string | null; target: st
 /** Открытый счёт с этими цифрами (их указывают в настройках счёта). */
 function accountForKey(state: State, key: string | null): Account | undefined {
   if (!key) return undefined;
-  return accountsOf(state).find((a) => !a.archived && a.smsKeys.includes(key));
+  return accountsOf(state).find((a) => !a.archived && accountKeys(a).includes(key));
+}
+
+/** Общие слова в названиях счетов — по ним свой счёт в СМС не узнать. */
+const GENERIC_NAME_WORDS = new Set([
+  "банк", "bank", "карта", "карты", "карточка", "счет", "счета", "кредитка", "кредитная", "кредитный", "кредит",
+  "дебетовая", "дебетовый", "основной", "основная", "накопительный", "накопительная", "сбережения", "вклад", "мой",
+  "моя", "мир", "mir", "visa", "mastercard", "наличные", "зарплатная", "зарплатный", "виртуальная", "золотая",
+  "platinum", "black", "премиум", "новая", "старая",
+]);
+
+/** Значимые слова названия счёта: «Альфа кредитка» → ["альфа"], «Т-Банк» → ["т банк"]. */
+function nameTokens(name: string): string[] {
+  const words = normalizeName(name).split(" ").filter(Boolean);
+  const tokens = words.filter((w) => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
+  // Короткое название банка («Т-Банк») — целиком.
+  if (!tokens.length && words.length > 1 && words.join(" ").length >= 4) tokens.push(words.join(" "));
+  return tokens;
+}
+
+/**
+ * Свой счёт по названию банка или получателя в СМС: «Перевод по СБП из Альфа-Банк +57р» при счёте «Альфа» —
+ * деньги пришли с этого счёта; «Оплата 4000р Альфа-банк» при кредитке «Альфа» — её погашение.
+ */
+function accountByName(state: State, text: string, exclude: string | undefined): Account | undefined {
+  const hay = normalizeName(text);
+  if (!hay) return undefined;
+  const words = hay.split(" ");
+  return accountsOf(state).find(
+    (a) =>
+      !a.archived &&
+      a.id !== exclude &&
+      nameTokens(a.name).some((t) => (t.includes(" ") ? ` ${hay} `.includes(` ${t} `) : words.some((w) => w.startsWith(t)))),
+  );
+}
+
+/** Банк, из которого пришёл перевод: «Перевод по СБП из Альфа-Банк +57р …» → «Альфа-Банк». */
+function smsFromBank(raw: string): string {
+  return /\s(?:из|с)\s+([^+\d*][^+]*?)\s+\+?\d/iu.exec(normalizeSms(raw))?.[1] ?? "";
 }
 
 /** Поле счёта для операции: основной счёт не пишем (его и так подразумевает операция без счёта). */
@@ -629,11 +667,11 @@ function bankBalanceActions(state: State, actions: Action[], ctx: { date: IsoDat
     return [];
   }
   const keys = smsAccountKeys(ctx.sms);
-  const anyKeys = accountsOf(state).some((a) => a.smsKeys.length > 0);
+  const anyKeys = accountsOf(state).some((a) => accountKeys(a).length > 0);
   const byKey = (key: string | null) => accountForKey(state, key) ?? (anyKeys ? undefined : findAccount(state, MAIN_ACCOUNT_ID));
   // Накопительные счета без цифр из СМС (в том числе «Сбережения» по умолчанию с «копилкой») — конверты внутри
   // основного счёта: в банке эти деньги лежат на нём же.
-  const envelopes = accountsOf(state).filter((a) => a.kind === "savings" && !a.smsKeys.length && !a.spending && !a.archived);
+  const envelopes = accountsOf(state).filter((a) => a.kind === "savings" && !accountKeys(a).length && !a.spending && !a.archived);
   const appBalance = (id: string) =>
     accountBalance(after, id, ctx.date) +
     (id === MAIN_ACCOUNT_ID ? envelopes.reduce((sum, a) => sum + accountBalance(after, a.id, ctx.date), 0) : 0);
@@ -733,6 +771,19 @@ function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; da
   }
 
   // Зачисление на счёт, на который уже записан перевод с другого своего счёта (СМС о списании пришла раньше).
+  // Свой счёт по названию банка или получателя: перевод из «Альфа-Банк» при счёте «Альфа», оплата «Альфа-банк»
+  // при кредитке «Альфа» — перемещение между своими счетами, а не доход или расход.
+  if (op.kind === "income" && (op.via === "transfer" || op.via === "deposit")) {
+    const receiving = source ?? main;
+    const from = accountByName(state, smsFromBank(ctx.sms), receiving?.id);
+    if (from && receiving) return planMove(state, op.amount, from, receiving, moveCtx);
+  }
+  if (op.kind === "expense" && (op.via === "transfer" || op.via === "payment") && op.counterparty) {
+    const paying = source ?? main;
+    const to = accountByName(state, op.counterparty, paying?.id);
+    if (to && paying) return planMove(state, op.amount, paying, to, moveCtx);
+  }
+
   // Зачисление-перевод на свой счёт: вторая СМС уже записанного перемещения — пропускаем; на накопительный —
   // это пополнение сбережений с основного счёта, а не доход. Зарплату так не проверяем.
   if (op.kind === "income" && (op.via === "transfer" || op.via === "deposit")) {
@@ -793,6 +844,8 @@ function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; da
           autoSaving,
           review: true,
           ...onAccount(source),
+          // Цифры из СМС — карта этого счёта (а не номер самого счёта): у операции видно, какой картой платили.
+          ...(source && keys.source && accountCards(source).some((c) => c.digits === keys.source) ? { card: keys.source } : {}),
         },
       },
     ],
