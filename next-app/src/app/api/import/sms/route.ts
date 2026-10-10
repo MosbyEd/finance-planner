@@ -79,10 +79,24 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
   return { text: body };
 }
 
-function authorize(req: NextRequest): User | null {
+/** Кто прислал СМС и как: ключом из настроек (автоматизация с адресом сервера) или токеном приложения (его действие). */
+function authorize(req: NextRequest): { user: User; via: "key" | "app" } | null {
   const key = smsKeyFromHeader(req.headers.get("authorization"));
-  if (key) return findUserBySmsKey(key);
-  return getSessionUser(bearerToken(req))?.user ?? null;
+  if (key) {
+    const user = findUserBySmsKey(key);
+    return user ? { user, via: "key" } : null;
+  }
+  const user = getSessionUser(bearerToken(req))?.user;
+  return user ? { user, via: "app" } : null;
+}
+
+/**
+ * Строка в журнале сервера на каждую СМС — без текста СМС: чтобы понять, какая из автоматизаций на телефоне
+ * сработала (ключ или действие приложения) и чем закончилось.
+ */
+function logImport(userId: number | null, via: string, status: string, queuedFor: number): void {
+  const queued = queuedFor > 60_000 ? ` queued=${Math.round(queuedFor / 60_000)}m` : "";
+  console.log(`[sms] user=${userId ?? "-"} via=${via} status=${status}${queued}`);
 }
 
 export async function POST(req: NextRequest) {
@@ -96,10 +110,12 @@ export async function POST(req: NextRequest) {
       message: "В запросе нет ключа: добавьте заголовок Authorization со значением «Bearer sms_…» из настроек приложения.",
     });
   }
-  const user = authorize(req);
-  if (!user) {
+  const auth = authorize(req);
+  if (!auth) {
+    logImport(null, "?", "unauthorized", 0);
     return reply(401, { status: "failed", message: "Ключ не подходит. Создайте новый: Настройки → Операции из СМС." });
   }
+  const { user, via } = auth;
   const byUser = rateLimit(`sms:${user.id}`, 60, 60_000);
   if (!byUser.ok) return reply(429, { status: "failed", message: "Слишком много СМС за минуту. Попробуйте позже." });
 
@@ -108,6 +124,7 @@ export async function POST(req: NextRequest) {
   const body = await smsBody(req, raw.text);
   const text = body.text.slice(0, MAX_SMS_CHARS);
   if (!text.trim()) {
+    logImport(user.id, via, "empty-text", 0);
     return reply(400, {
       status: "failed",
       message: "Пустой текст СМС. Проще всего заменить запрос на действие «Добавить операцию из СМС» приложения «Бюджет».",
@@ -116,7 +133,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const now = new Date();
-    return reply(200, importSms(user.id, text, now, receivedTime(body.receivedAt, now)));
+    const received = receivedTime(body.receivedAt, now);
+    const result = importSms(user.id, text, now, received);
+    logImport(user.id, via, result.status, now.getTime() - received.getTime());
+    return reply(200, result);
   } catch (error) {
     if (error instanceof StoredStateError) {
       return reply(423, { status: "failed", message: "Данные на сервере повреждены — откройте приложение." });
