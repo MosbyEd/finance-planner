@@ -139,7 +139,16 @@ function Shell() {
             <SyncStatus />
           </div>
           {(snapshot.aiEnabled || appleAi) && (
-            <IconButton icon="sparkles" label="AI-помощник" variant="soft" size={44} onClick={() => open({ kind: "ai" })} />
+            // Значок помощника — стеклянный «шар» в духе Siri из iOS 27.
+            <button
+              type="button"
+              aria-label="AI-помощник"
+              title="AI-помощник"
+              onClick={() => open({ kind: "ai" })}
+              className="glass-control inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-95"
+            >
+              <span className="siri-orb siri-orb-icon" aria-hidden="true" />
+            </button>
           )}
           <IconButton
             icon="settings"

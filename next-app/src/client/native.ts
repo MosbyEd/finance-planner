@@ -44,6 +44,7 @@ interface BudgetNativePlugin {
   addListener(event: "tabBarSelect", listener: (data: { id: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: "tabBarAction", listener: () => void): Promise<PluginListenerHandle>;
   openShortcuts(): Promise<void>;
+  siriOrb(options: { active: boolean }): Promise<void>;
   setSession(options: { apiBase: string; token: string | null; account: string | null }): Promise<void>;
   setSummary(options: { date: string; text: string; expenseCategories: string[]; incomeCategories: string[] }): Promise<void>;
   aiStatus(): Promise<AppleAiStatus>;
@@ -116,6 +117,17 @@ export async function nativeOpenShortcuts(): Promise<boolean> {
   if (!isNativeApp()) return false;
   try {
     await plugin.openShortcuts();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Нативный стеклянный «шар» Siri сверху экрана. false — в этой сборке его нет (тогда рисуем CSS-шар). */
+export async function nativeSiriOrb(active: boolean): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.siriOrb({ active });
     return true;
   } catch {
     return false;

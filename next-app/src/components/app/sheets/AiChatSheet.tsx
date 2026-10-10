@@ -18,7 +18,7 @@ import { formatMoney } from "@/domain/money";
 import type { State } from "@/domain/schema";
 import { ApiError, api, type AiChatMessage } from "@/client/api";
 import { AppleAiError, askApple, pickAppleModel } from "@/client/appleAi";
-import type { AppleModel } from "@/client/native";
+import { nativeSiriOrb, type AppleModel } from "@/client/native";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { Button, IconButton } from "../../ui/Button";
 import { EmptyState, Money, Notice, Segmented } from "../../ui/controls";
@@ -556,7 +556,7 @@ function Chat({
 
         {chat.pendingSince !== null && <TypingIndicator key={chat.pendingSince} since={chat.pendingSince} />}
         <div ref={endRef} />
-        <SiriGlow active={pending} />
+        <SiriFloat active={pending} />
       </div>
     </Sheet>
   );
@@ -707,26 +707,41 @@ function ErrorBubble({ message, onRetry }: { message: ErrorMessage; onRetry?: ()
 }
 
 /**
- * Свечение по краям экрана, пока помощник думает (как у Siri). Рисуется в body: внутри окна фиксированный
- * слой привязался бы к окну, а не к экрану. После ответа плавно гаснет и убирается.
+ * «Шар» Siri из iOS 27, пока помощник думает: выплывает сверху. В приложении — нативный, из системного стекла;
+ * в браузере (или в старой сборке без него) — CSS-шар, который рисуется в body, чтобы не привязаться к окну.
  */
-function SiriGlow({ active }: { active: boolean }) {
+function SiriFloat({ active }: { active: boolean }) {
+  // null — ещё не знаем, есть ли нативный шар; true — показывает приложение; false — рисуем сами.
+  const [native, setNative] = useState<boolean | null>(null);
   const [mounted, setMounted] = useState(active);
   const [visible, setVisible] = useState(false);
-  // Включили — сразу в разметку (видимость — со следующего кадра, чтобы сработал переход прозрачности).
   if (active && !mounted) setMounted(true);
+
   useEffect(() => {
-    if (!mounted) return;
+    let cancelled = false;
+    void nativeSiriOrb(active).then((ok) => {
+      if (!cancelled) setNative(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
+  // Окно закрыли, пока помощник думал, — нативный шар тоже убираем.
+  useEffect(() => () => void nativeSiriOrb(false), []);
+
+  useEffect(() => {
+    if (!mounted || native !== false) return;
     const frame = requestAnimationFrame(() => setVisible(active));
     if (active) return () => cancelAnimationFrame(frame);
-    const timer = setTimeout(() => setMounted(false), 750);
+    const timer = setTimeout(() => setMounted(false), 700);
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [active, mounted]);
-  if (!mounted || typeof document === "undefined") return null;
-  return createPortal(<div className="siri-glow" data-active={visible} aria-hidden="true" />, document.body);
+  }, [active, mounted, native]);
+
+  if (native !== false || !mounted || typeof document === "undefined") return null;
+  return createPortal(<div className="siri-float" data-active={visible} aria-hidden="true" />, document.body);
 }
 
 function TypingIndicator({ since }: { since: number }) {

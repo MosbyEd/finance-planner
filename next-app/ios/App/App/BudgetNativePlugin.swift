@@ -15,9 +15,32 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "tabBarShow", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "tabBarUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openShortcuts", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "siriOrb", returnType: CAPPluginReturnPromise),
     ]
 
     private var tabBar: GlassTabBar?
+    private var orb: SiriOrbView?
+
+    /// Стеклянный «шар» Siri сверху экрана, пока помощник думает (active: true/false).
+    @objc func siriOrb(_ call: CAPPluginCall) {
+        let active = call.getBool("active") ?? false
+        DispatchQueue.main.async {
+            guard let view = self.bridge?.viewController?.view else {
+                call.reject("Нет экрана приложения")
+                return
+            }
+            let orb = self.orb ?? {
+                let created = SiriOrbView()
+                self.orb = created
+                return created
+            }()
+            if orb.superview == nil { view.addSubview(orb) }
+            // Поверх окон интерфейса, но под системными экранами.
+            view.bringSubviewToFront(orb)
+            orb.setActive(active, topInset: view.safeAreaInsets.top, in: view)
+            call.resolve()
+        }
+    }
 
     // MARK: - Сессия и сводка для команд
 

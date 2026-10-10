@@ -38,7 +38,8 @@ export function AppleAiSection() {
     const reply = await appleAiRespond(
       "device",
       "Ты помощник в приложении бюджета. Отвечай по-русски одной короткой фразой.",
-      "Скажи, что ты работаешь прямо на этом iPhone, и посчитай: 1200 минус 350.",
+      // Нейтральный вопрос: просьбы «скажи, что ты на iPhone» маленькая модель понимает буквально и спорит.
+      "Сколько будет 1200 рублей минус 350 рублей? Ответь одним коротким предложением.",
     );
     const seconds = (performance.now() - started) / 1000;
     setCheck("text" in reply ? { kind: "done", text: reply.text, seconds } : { kind: "error", text: reply.message ?? reply.error });
