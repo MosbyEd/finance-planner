@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { activeAccounts } from "@/domain/accounts";
 import { useSnapshot } from "@/client/react";
 import { isNativeApp } from "@/client/runtime";
 import { APP_VERSION, AboutSection } from "./settings/AboutSection";
 import { AccountSection } from "./settings/AccountSection";
+import { AccountsSection } from "./settings/AccountsSection";
 import { AppleAiSection } from "./settings/AppleAiSection";
 import { CategoriesSection } from "./settings/CategoriesSection";
 import { DataSection } from "./settings/DataSection";
@@ -56,6 +58,13 @@ export function Settings() {
     {
       label: "Бюджет",
       rows: [
+        {
+          id: "accounts",
+          icon: "card",
+          title: "Счета",
+          summary: String(activeAccounts(state).length),
+          content: <AccountsSection />,
+        },
         {
           id: "savings",
           icon: "piggy",

@@ -22,6 +22,7 @@ import { SKIP_MANDATORY_KEY } from "../app/native/homeModel";
 import { useUi } from "../app/overlays";
 import { BALANCE_CONFIRMED_KEY } from "../app/sheets/MoneySheets";
 import { quickPicks, type QuickPick } from "../app/quickPicks";
+import { ACCOUNT_KINDS, accountRows, hasOwnAccounts } from "../app/accounts";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
@@ -362,7 +363,7 @@ export function Dashboard() {
               className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
             >
               <span className="flex items-center gap-1.5 text-sm text-muted">
-                <Icon name="wallet" size={16} /> На счёте
+                <Icon name="wallet" size={16} /> {hasOwnAccounts(state) ? "На счетах" : "На счёте"}
               </span>
               <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={formatMoney(data.balance)}>
                 <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />
@@ -386,6 +387,7 @@ export function Dashboard() {
             </button>
           </div>
 
+          {hasOwnAccounts(state) && <AccountsCard />}
           <MonthCard metrics={data.metrics} />
           <UpcomingCard events={data.upcoming} />
 
@@ -415,6 +417,45 @@ export function Dashboard() {
         </>
       )}
     </div>
+  );
+}
+
+/** Счета с остатками; у кредитки — долг и беспроцентный период. Нажатие открывает счёт. */
+function AccountsCard() {
+  const { state } = useSnapshot();
+  const today = useToday();
+  const { open } = useUi();
+  const rows = accountRows(state, today);
+  return (
+    <Card
+      title="Счета"
+      action={
+        <Button variant="ghost" size="sm" onClick={() => open({ kind: "transfer" })}>
+          Перевод
+        </Button>
+      }
+    >
+      <ul className="space-y-0.5">
+        {rows.map((row) => (
+          <li key={row.account.id}>
+            <button
+              type="button"
+              onClick={() => open({ kind: "account", accountId: row.account.id })}
+              className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-2 text-left hover:bg-surface-2"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent" aria-hidden>
+                <Icon name={ACCOUNT_KINDS[row.account.kind].icon} size={17} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px]">{row.account.name}</span>
+                <span className={`block truncate text-xs ${row.overdue ? "font-medium text-negative" : "text-muted"}`}>{row.detail}</span>
+              </span>
+              <span className={`shrink-0 font-semibold tabular-nums ${row.negative ? "text-negative" : ""}`}>{row.amount}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -564,17 +605,19 @@ function UpcomingCard({ events }: { events: UpcomingEvent[] }) {
                     </span>
                   </span>
                 </span>
-                <Money value={e.effect} sign whole tone={e.effect > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
+                <Money value={e.amount} sign whole tone={e.amount > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
               </>
             );
             // Будущая операция открывается на редактирование, начисление регулярного платежа — в окне «пропустить/изменить».
             // Отчисление в сбережения с ожидаемого дохода — расчётная строка, открывать нечего.
-            const { txId, templateId, month } = e;
+            const { txId, templateId, month, accountId } = e;
             const onClick = txId
               ? () => open({ kind: "tx", txId })
               : e.source === "template" && templateId && month
                 ? () => open({ kind: "planned", templateId, month })
-                : null;
+                : e.source === "credit" && accountId
+                  ? () => open({ kind: "transfer", to: accountId, amount: -e.amount })
+                  : null;
             return (
               <li key={e.key}>
                 {onClick ? (

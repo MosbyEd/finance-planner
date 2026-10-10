@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountSheet, TransferSheet } from "./sheets/AccountSheets";
 import { AiChatSheet } from "./sheets/AiChatSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
@@ -31,7 +32,11 @@ export function OverlayHost() {
     case "savings":
       return <SavingsSheet direction={overlay.direction} />;
     case "balance":
-      return <BalanceSheet />;
+      return <BalanceSheet key={overlay.accountId ?? "main"} accountId={overlay.accountId} />;
+    case "account":
+      return <AccountSheet key={overlay.accountId ?? "new"} accountId={overlay.accountId} preset={overlay.preset} />;
+    case "transfer":
+      return <TransferSheet from={overlay.from} to={overlay.to} amount={overlay.amount} />;
     case "explain":
       return <ExplainSheet />;
     case "planned":

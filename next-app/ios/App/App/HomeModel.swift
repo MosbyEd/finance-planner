@@ -143,6 +143,7 @@ struct HomeModel: Codable, Equatable, Sendable {
     }
 
     struct Tiles: Codable, Equatable, Sendable {
+        var balanceLabel: String?
         var balance: String
         var balanceNegative: Bool
         var balanceHint: String
@@ -184,6 +185,24 @@ struct HomeModel: Codable, Equatable, Sendable {
         var command: JSONValue
     }
 
+    /** Счёт на Главной: остаток, у кредитки — долг и беспроцентный период. */
+    struct Account: Codable, Equatable, Sendable, Identifiable {
+        var id: String
+        var name: String
+        var symbol: String
+        var amount: String
+        var negative: Bool
+        var detail: String
+        var overdue: Bool
+        var command: JSONValue
+    }
+
+    struct AccountChoice: Codable, Equatable, Sendable, Hashable, Identifiable {
+        var id: String
+        var name: String
+        var symbol: String
+    }
+
     struct Pick: Codable, Equatable, Sendable, Hashable {
         var title: String
         var category: String
@@ -198,6 +217,10 @@ struct HomeModel: Codable, Equatable, Sendable {
         var lastExpense: String?
         var lastIncome: String?
         var picks: [Pick]
+        /// Счета для выбора; пусто — выбора нет, всё на основном.
+        var accounts: [AccountChoice]?
+        var lastExpenseAccount: String?
+        var lastIncomeAccount: String?
     }
 
     var date: String
@@ -209,6 +232,7 @@ struct HomeModel: Codable, Equatable, Sendable {
     var onboarding: Onboarding?
     var quick: [Quick]
     var tiles: Tiles?
+    var accounts: [Account]?
     var month: Month?
     var upcoming: [Upcoming]
     var recent: [Recent]

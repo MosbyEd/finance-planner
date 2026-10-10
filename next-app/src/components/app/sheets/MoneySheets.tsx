@@ -2,35 +2,47 @@
 
 import { useState } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type MonthKey } from "@/domain/dates";
+import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID } from "@/domain/accounts";
 import { balanceAt, goalsReserved, monthMetrics, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
 import { plural } from "@/domain/text";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
+import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { Money, Segmented } from "../../ui/controls";
 import { useToast } from "../../ui/feedback";
 import { TextInput } from "../../ui/Field";
 import { Sheet } from "../../ui/Sheet";
+import { hasOwnAccounts } from "../accounts";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 
 /** Человек подтвердил остаток, совпавший с расчётным (корректировка не создаётся). */
 export const BALANCE_CONFIRMED_KEY = "fp:onboarding-balance-confirmed";
 
-/** Сверка остатка: человек вводит, сколько реально на счёте, приложение добавляет корректировку. */
-export function BalanceSheet() {
+/**
+ * Сверка остатка: человек вводит, сколько реально на счёте, приложение добавляет корректировку.
+ * Счетов несколько — сверяется выбранный; у кредитки вводится долг.
+ */
+export function BalanceSheet({ accountId: presetAccount }: { accountId?: string }) {
   const { state } = useSnapshot();
   const { close } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
   const toast = useToast();
-  const computed = balanceAt(state, today);
+  const multiple = hasOwnAccounts(state) || Boolean(presetAccount && presetAccount !== MAIN_ACCOUNT_ID);
+  const [accountId, setAccountId] = useState(presetAccount ?? MAIN_ACCOUNT_ID);
+  const account = findAccount(state, accountId);
+  const isCredit = account?.kind === "credit";
+  const computed = multiple ? accountBalance(state, accountId, today) : balanceAt(state, today);
   // Операций ещё нет — это не сверка, а стартовый остаток.
   const fresh = state.transactions.length === 0;
-  const [actual, setActual] = useState<Kopecks | null>(null);
+  // У кредитки человек вводит долг (положительное число), остаток счёта — минус долг.
+  const [entered, setEntered] = useState<Kopecks | null>(null);
+  const actual = entered === null ? null : isCredit ? -entered : entered;
   const [error, setError] = useState<string | null>(null);
   const delta = actual === null ? 0 : actual - computed;
 
@@ -46,8 +58,14 @@ export function BalanceSheet() {
       close();
       return;
     }
-    if (dispatch({ type: "balance.set", id: newId(), date: today, actual })) {
-      toast(fresh ? `Стартовый остаток: ${formatMoney(actual)}` : `Остаток обновлён: ${formatMoney(actual)}`);
+    if (dispatch({ type: "balance.set", id: newId(), date: today, actual, ...(multiple ? { accountId } : {}) })) {
+      toast(
+        isCredit
+          ? `Долг по карте: ${formatMoney(-actual)}`
+          : fresh
+            ? `Стартовый остаток: ${formatMoney(actual)}`
+            : `Остаток обновлён: ${formatMoney(actual)}`,
+      );
       close();
     }
   };
@@ -57,7 +75,7 @@ export function BalanceSheet() {
       open
       onClose={close}
       dirty={actual !== null}
-      title={fresh ? "Сколько сейчас денег?" : "Сколько на счёте?"}
+      title={isCredit ? "Сколько должны по карте?" : fresh ? "Сколько сейчас денег?" : "Сколько на счёте?"}
       footer={
         <Button className="w-full" onClick={save}>
           Сохранить
@@ -71,7 +89,23 @@ export function BalanceSheet() {
           save();
         }}
       >
-        {fresh ? (
+        {multiple && (
+          <AccountPicker
+            label="Счёт"
+            accounts={activeAccounts(state)}
+            value={accountId}
+            onChange={(id) => {
+              setAccountId(id);
+              setEntered(null);
+            }}
+          />
+        )}
+        {isCredit ? (
+          <p className="text-[15px] text-muted">
+            По операциям долг по карте сейчас <Money value={Math.max(0, -computed)} className="font-semibold text-text" />. Если в
+            банке другая сумма — введите её.
+          </p>
+        ) : fresh ? (
           <p className="text-[15px] text-muted">
             Сколько сейчас денег на картах и наличными? Это будет стартовый остаток.
           </p>
@@ -82,13 +116,14 @@ export function BalanceSheet() {
           </p>
         )}
         <AmountInput
-          label={fresh ? "Остаток сейчас" : "Реальный остаток"}
-          value={actual}
+          key={accountId}
+          label={isCredit ? "Долг по карте" : fresh ? "Остаток сейчас" : "Реальный остаток"}
+          value={entered}
           onChange={(v) => {
-            setActual(v);
+            setEntered(v);
             setError(null);
           }}
-          allowNegative
+          allowNegative={!isCredit}
           autoFocus
           error={error}
         />

@@ -14,6 +14,7 @@ import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import type { Snapshot } from "@/client/store";
 import { quickPicks, type QuickPick } from "../quickPicks";
+import { ACCOUNT_KINDS, accountRows, hasOwnAccounts, lastAccountId, payableAccounts } from "../accounts";
 import type { NativeCommand } from "./commands";
 
 /**
@@ -105,11 +106,27 @@ export interface QuickModel {
   amount: string;
 }
 
+export interface AccountModel {
+  id: string;
+  name: string;
+  /** SF Symbol вида счёта. */
+  symbol: string;
+  amount: string;
+  negative: boolean;
+  detail: string;
+  overdue: boolean;
+  command: NativeCommand;
+}
+
 export interface AddModel {
   expense: string[];
   income: string[];
   lastExpense: string | null;
   lastIncome: string | null;
+  /** Счета для выбора (пусто — выбор не показывается, всё на основном). */
+  accounts: { id: string; name: string; symbol: string }[];
+  lastExpenseAccount: string;
+  lastIncomeAccount: string;
   /** Частые траты: заполняют форму одним касанием (сумма в копейках). */
   picks: { title: string; category: string; amount: number; amountText: string }[];
 }
@@ -123,7 +140,9 @@ export interface HomeModel {
   attention: AttentionModel[];
   onboarding: OnboardingModel | null;
   quick: QuickModel[];
-  tiles: { balance: string; balanceNegative: boolean; balanceHint: string; savings: string } | null;
+  tiles: { balanceLabel: string; balance: string; balanceNegative: boolean; balanceHint: string; savings: string } | null;
+  /** Счета с остатками — когда пользователь завёл свои (иначе пусто). */
+  accounts: AccountModel[];
   month: MonthModel | null;
   upcoming: UpcomingModel[];
   recent: RecentModel[];
@@ -360,11 +379,17 @@ export function buildHomeModel(input: HomeInput): HomeModel {
 
   const metrics = monthMetrics(state, month, today);
   const picks = quickPicks(state, today, 6);
+  const ownAccounts = hasOwnAccounts(state);
   const add: AddModel = {
     expense: expenseCategories(state),
     income: state.categories.income,
     lastExpense: lastCategory(state, "expense"),
     lastIncome: lastCategory(state, "income"),
+    accounts: ownAccounts
+      ? payableAccounts(state).map((a) => ({ id: a.id, name: a.name, symbol: ACCOUNT_KINDS[a.kind].symbol }))
+      : [],
+    lastExpenseAccount: lastAccountId(state, "expense"),
+    lastIncomeAccount: lastAccountId(state, "income"),
     picks: picks.map((p) => ({ title: p.title || p.category, category: p.category, amount: p.amount, amountText: formatMoney(p.amount) })),
   };
   const base = {
@@ -383,6 +408,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       onboarding: onboarding(input, hasData, steps),
       quick: [],
       tiles: null,
+      accounts: [],
       month: null,
       upcoming: [],
       recent: [],
@@ -432,11 +458,24 @@ export function buildHomeModel(input: HomeInput): HomeModel {
     onboarding: onboarding(input, hasData, steps),
     quick: picks.map((p) => ({ key: quickKey(p), title: p.title || p.category, amount: formatMoney(p.amount) })),
     tiles: {
+      balanceLabel: ownAccounts ? "На счетах" : "На счёте",
       balance: formatMoney(balance, { whole: true }),
       balanceNegative: balance < 0,
       balanceHint: steps.balance ? "Сверить остаток" : "Указать остаток",
       savings: formatMoney(savingsTotal(state, today), { whole: true }),
     },
+    accounts: ownAccounts
+      ? accountRows(state, today).map((row) => ({
+          id: row.account.id,
+          name: row.account.name,
+          symbol: ACCOUNT_KINDS[row.account.kind].symbol,
+          amount: row.amount,
+          negative: row.negative,
+          detail: row.detail,
+          overdue: row.overdue,
+          command: { type: "open", overlay: { kind: "account", accountId: row.account.id } },
+        }))
+      : [],
     month: {
       title: formatMonth(month),
       label: f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете",
@@ -458,13 +497,15 @@ export function buildHomeModel(input: HomeInput): HomeModel {
         when: formatRelativeDay(e.date, today).replace(/, .*/, ""),
         after: `останется ${formatMoney(e.balanceAfter, { whole: true })}`,
         afterNegative: e.balanceAfter < 0,
-        amount: formatMoney(e.effect, { sign: true, whole: true }),
-        positive: e.effect > 0,
+        amount: formatMoney(e.amount, { sign: true, whole: true }),
+        positive: e.amount > 0,
         command: e.txId
           ? { type: "open", overlay: { kind: "tx", txId: e.txId } }
           : e.source === "template" && e.templateId && e.month
             ? { type: "open", overlay: { kind: "planned", templateId: e.templateId, month: e.month } }
-            : null,
+            : e.source === "credit" && e.accountId
+              ? { type: "open", overlay: { kind: "transfer", to: e.accountId, amount: -e.amount } }
+              : null,
       })),
     recent: recent.map((tx) => recentRow(tx, today, autoSavings.get(tx.id) ?? 0)),
   };

@@ -5,6 +5,7 @@ import { balanceEffect } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { useSnapshot } from "@/client/react";
 import { Money } from "../ui/controls";
+import { transactionAccountLabel } from "./accounts";
 import { Icon, type IconName } from "../ui/Icon";
 
 const TYPE_META: Record<Transaction["type"], { icon: IconName; label: string; tint: string }> = {
@@ -71,13 +72,16 @@ export function TransactionRow({
   const effect = balanceEffect(tx);
   const savingNote = tx.type === "saving" ? (tx.amount > 0 ? "в сбережения" : "из сбережений") : null;
   const tags: string[] = [];
+  // Счетов несколько — у операции видно, с какого счёта (у перевода — откуда и куда).
+  const accountLabel = transactionAccountLabel(state, tx);
   if (savingNote) tags.push(savingNote);
   else if (loanAdjustment) tags.push(transactionCategoryLabel(tx));
   else if (tx.title && tx.category) tags.push(tx.category);
+  if (accountLabel) tags.push(accountLabel);
   if (tx.type === "expense" && tx.mandatory) tags.push("обязательный");
   if (tx.templateId) tags.push("регулярный");
   if (tx.linkedTo) tags.push("автоматически");
-  const secondary = subtitle ? [subtitle, savingNote].filter(Boolean).join(" · ") : tags.join(" · ");
+  const secondary = subtitle ? [subtitle, accountLabel, savingNote].filter(Boolean).join(" · ") : tags.join(" · ");
 
   const content = (
     <>
@@ -89,12 +93,17 @@ export function TransactionRow({
         {secondary && <span className="block truncate text-sm text-muted">{secondary}</span>}
       </span>
       <span className="flex shrink-0 flex-col items-end">
-        <Money
-          value={effect}
-          sign
-          tone={tx.type === "income" ? "positive" : tx.type === "adjustment" ? "auto" : "default"}
-          className="text-[15px] font-semibold"
-        />
+        {tx.type === "transfer" ? (
+          // Перевод между своими счетами деньги не меняет — сумма без знака.
+          <Money value={tx.amount} className="text-[15px] font-semibold" />
+        ) : (
+          <Money
+            value={effect}
+            sign
+            tone={tx.type === "income" ? "positive" : tx.type === "adjustment" ? "auto" : "default"}
+            className="text-[15px] font-semibold"
+          />
+        )}
         {autoSaving !== 0 && (
           // Как кешбэк в банковских приложениях: под суммой, чтобы не отнимать место у названия и категории.
           <span className="inline-flex items-center gap-1 whitespace-nowrap text-[13px] text-muted">

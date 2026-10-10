@@ -13,7 +13,11 @@ export type Overlay =
   | { kind: "loan"; loanId?: string }
   | { kind: "loanPayment"; loanId: string }
   | { kind: "savings"; direction: "in" | "out" }
-  | { kind: "balance" }
+  | { kind: "balance"; accountId?: string }
+  /** Счёт: новый или правка (название, вид, цифры карты, лимит кредитки). */
+  | { kind: "account"; accountId?: string; preset?: { kind?: "debit" | "cash" | "savings" | "credit" } }
+  /** Перевод между своими счетами; amount — подставить (погашение всего долга кредитки). */
+  | { kind: "transfer"; from?: string; to?: string; amount?: number }
   | { kind: "explain" }
   | { kind: "planned"; templateId: string; month: MonthKey }
   | { kind: "ai"; prompt?: string }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { diffDays, formatDay, type IsoDate } from "@/domain/dates";
+import { creditDebts, type CreditStatus } from "@/domain/accounts";
 import { goalSaved, loanRemaining, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Goal, Loan, LoanKind } from "@/domain/schema";
@@ -231,6 +232,9 @@ interface LoanItem {
 function DebtsView() {
   const { state } = useSnapshot();
   const { open } = useUi();
+  const today = useToday();
+  // Кредитки с долгом — тоже мои долги: погасить до конца беспроцентного периода.
+  const cards = useMemo(() => creditDebts(state, today), [state, today]);
 
   const data = useMemo(() => {
     const items: LoanItem[] = state.loans
@@ -244,10 +248,10 @@ function DebtsView() {
     const mine = items.filter((i) => i.loan.kind !== "lend");
     const theirs = items.filter((i) => i.loan.kind === "lend");
     const sum = (list: LoanItem[]) => list.reduce((s, i) => s + i.remaining, 0);
-    return { mine, theirs, iOwe: sum(mine), owedToMe: sum(theirs) };
-  }, [state]);
+    return { mine, theirs, iOwe: sum(mine) + cards.reduce((s, c) => s + c.debt, 0), owedToMe: sum(theirs) };
+  }, [state, cards]);
 
-  if (state.loans.length === 0) {
+  if (state.loans.length === 0 && cards.length === 0) {
     return (
       <EmptyState
         title="Долгов нет"
@@ -270,9 +274,59 @@ function DebtsView() {
 
       <ListHeader title="Долги" addLabel="Новый долг" onAdd={() => open({ kind: "loan" })} />
 
+      {cards.length > 0 && (
+        <section className="space-y-3" aria-label="Кредитные карты">
+          <h3 className="px-1 text-sm font-medium text-muted">Кредитные карты</h3>
+          <ul className="space-y-3">
+            {cards.map((card) => (
+              <li key={card.account.id}>
+                <CreditCardDebt credit={card} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {data.mine.length > 0 && <LoanGroup title="Мои долги" items={data.mine} />}
       {data.theirs.length > 0 && <LoanGroup title="Мне должны" items={data.theirs} />}
     </>
+  );
+}
+
+/** Долг по кредитке: сумма, беспроцентный период, использованный лимит и «Погасить». */
+function CreditCardDebt({ credit }: { credit: CreditStatus }) {
+  const { open } = useUi();
+  const today = useToday();
+  return (
+    <Card>
+      <div className="flex items-start gap-3">
+        <EditTitle
+          label="Открыть счёт"
+          subtitle="Кредитная карта"
+          onClick={() => open({ kind: "account", accountId: credit.account.id })}
+        >
+          {credit.account.name}
+        </EditTitle>
+        <div className="shrink-0 pt-1 text-right">
+          <Money value={credit.debt} className="block text-[17px] font-semibold" />
+          {credit.limit !== null && <span className="block text-xs text-muted">лимит {formatMoney(credit.limit)}</span>}
+        </div>
+      </div>
+      {credit.limit !== null && (
+        <div className="mt-3">
+          <Progress value={credit.debt} max={credit.limit} tone="warning" label={`Использовано лимита: «${credit.account.name}»`} />
+        </div>
+      )}
+      {credit.graceEnd && (
+        <p className={`mt-2 text-sm ${credit.overdue ? "font-medium text-negative" : "text-muted"}`}>
+          {credit.overdue
+            ? `Беспроцентный период закончился ${formatDay(credit.graceEnd, today)} — погасите долг`
+            : `Без процентов до ${formatDay(credit.graceEnd, today)}`}
+        </p>
+      )}
+      <Button className="mt-3 w-full" variant="soft" onClick={() => open({ kind: "transfer", to: credit.account.id, amount: credit.debt })}>
+        Погасить
+      </Button>
+    </Card>
   );
 }
 

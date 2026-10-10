@@ -80,6 +80,9 @@ private struct HomeContent: View {
             if let tiles = model.tiles {
                 Tiles(tiles: tiles)
             }
+            if let accounts = model.accounts, !accounts.isEmpty {
+                AccountsCard(accounts: accounts)
+            }
             if let month = model.month {
                 MonthCard(month: month)
             }
@@ -484,7 +487,7 @@ private struct Tiles: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Tile(symbol: "wallet.bifold", title: "На счёте", amount: tiles.balance, negative: tiles.balanceNegative, hint: tiles.balanceHint) {
+            Tile(symbol: "wallet.bifold", title: tiles.balanceLabel ?? "На счёте", amount: tiles.balance, negative: tiles.balanceNegative, hint: tiles.balanceHint) {
                 AppShell.shared.open(["kind": .string("balance")])
             }
             Tile(symbol: "banknote", title: "Сбережения", amount: tiles.savings, negative: false, hint: "Пополнить или снять") {
@@ -522,6 +525,51 @@ private struct Tile: View {
             .glassCard(interactive: true)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Счета
+
+private struct AccountsCard: View {
+    let accounts: [HomeModel.Account]
+
+    var body: some View {
+        HomeCard(title: "Счета") {
+            LinkButton(title: "Перевод") { AppShell.shared.open(["kind": .string("transfer")]) }
+        } content: {
+            VStack(spacing: 0) {
+                ForEach(accounts) { account in
+                    Button {
+                        Task { await AppShell.shared.perform(account.command) }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: account.symbol)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 36, height: 36)
+                                .background(Theme.accentSoft, in: .circle)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
+                                Text(account.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(account.overdue ? Theme.negative : Theme.muted)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(account.amount)
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(account.negative ? Theme.negative : Theme.text)
+                        }
+                        .padding(.vertical, 6)
+                        .frame(minHeight: 48)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(PressableStyle())
+                }
+            }
+        }
     }
 }
 

@@ -1,0 +1,92 @@
+import {
+  accountBalances,
+  activeAccounts,
+  creditStatus,
+  findAccount,
+  isSpendingAccount,
+  MAIN_ACCOUNT_ID,
+  sourceAccountId,
+} from "@/domain/accounts";
+import { formatDay, type IsoDate } from "@/domain/dates";
+import { formatMoney, type Kopecks } from "@/domain/money";
+import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
+import type { IconName } from "../ui/Icon";
+
+/** Подписи и значки видов счетов. */
+export const ACCOUNT_KINDS: Record<AccountKind, { label: string; icon: IconName; symbol: string }> = {
+  debit: { label: "Обычный счёт", icon: "card", symbol: "creditcard" },
+  cash: { label: "Наличные", icon: "wallet", symbol: "banknote" },
+  savings: { label: "Накопительный", icon: "piggy", symbol: "building.columns" },
+  credit: { label: "Кредитная карта", icon: "card", symbol: "creditcard.trianglebadge.exclamationmark" },
+};
+
+/** Завёл ли пользователь свои счета — иначе интерфейс не показывает выбор счёта (у всех операций основной). */
+export function hasOwnAccounts(state: State): boolean {
+  return activeAccounts(state).length > 2 || activeAccounts(state).some((a) => a.kind === "credit" || a.kind === "cash");
+}
+
+/** Счета, с которых можно платить и на которые приходят деньги: всё, кроме накопительных. */
+export function payableAccounts(state: State): Account[] {
+  return activeAccounts(state).filter((a) => a.kind !== "savings");
+}
+
+/** Счёт последней операции этого вида — его и предлагаем по умолчанию. */
+export function lastAccountId(state: State, type: "income" | "expense"): string {
+  const open = new Set(payableAccounts(state).map((a) => a.id));
+  for (let i = state.transactions.length - 1; i >= 0; i--) {
+    const tx = state.transactions[i];
+    if (tx.type === type && !tx.templateId && !tx.linkedTo && open.has(sourceAccountId(tx))) return sourceAccountId(tx);
+  }
+  return open.has(MAIN_ACCOUNT_ID) ? MAIN_ACCOUNT_ID : [...open][0] ?? MAIN_ACCOUNT_ID;
+}
+
+export interface AccountRow {
+  account: Account;
+  balance: Kopecks;
+  /** «50 000 ₽» или «Долг 3 000 ₽». */
+  amount: string;
+  negative: boolean;
+  /** Пояснение: «до 1 февраля без процентов · лимит 100 000 ₽», «учитывается в лимите». */
+  detail: string;
+  overdue: boolean;
+}
+
+/** Строки счетов: остаток, у кредитки — долг и беспроцентный период. */
+export function accountRows(state: State, today: IsoDate): AccountRow[] {
+  const balances = accountBalances(state, today);
+  return activeAccounts(state).map((account) => {
+    const balance = balances.get(account.id) ?? 0;
+    if (account.kind === "credit") {
+      const credit = creditStatus(state, account, today);
+      const parts: string[] = [];
+      if (credit.debt > 0 && credit.graceEnd) {
+        parts.push(credit.overdue ? `льготный период закончился ${formatDay(credit.graceEnd, today)}` : `без процентов до ${formatDay(credit.graceEnd, today)}`);
+      }
+      if (credit.available !== null) parts.push(`доступно ${formatMoney(credit.available, { whole: true })}`);
+      return {
+        account,
+        balance,
+        amount: credit.debt > 0 ? `Долг ${formatMoney(credit.debt, { whole: true })}` : "Долга нет",
+        negative: credit.debt > 0,
+        detail: parts.join(" · "),
+        overdue: credit.overdue,
+      };
+    }
+    return {
+      account,
+      balance,
+      amount: formatMoney(balance, { whole: true }),
+      negative: balance < 0,
+      detail: isSpendingAccount(account) ? "Учитывается в лимите на день" : ACCOUNT_KINDS[account.kind].label,
+      overdue: false,
+    };
+  });
+}
+
+/** Подпись счёта у операции, когда счетов несколько: «Кредитка», у перевода — «Основной → Кредитка». */
+export function transactionAccountLabel(state: State, tx: Transaction): string | null {
+  if (!hasOwnAccounts(state)) return null;
+  const name = (id: string) => findAccount(state, id)?.name ?? "счёт";
+  if (tx.type === "transfer") return `${name(sourceAccountId(tx))} → ${name(tx.toAccountId ?? "")}`;
+  return name(sourceAccountId(tx));
+}

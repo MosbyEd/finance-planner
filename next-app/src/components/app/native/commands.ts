@@ -26,6 +26,8 @@ export interface AddDraft {
   category: string;
   title: string;
   date: IsoDate;
+  /** Счёт (нет — основной). */
+  accountId?: string;
 }
 
 /** Ответ на команду: для добавления — id операции (для «Отменить») и текст уведомления. */
@@ -48,6 +50,8 @@ const OVERLAY_KINDS = [
   "auth",
   "limit",
   "review",
+  "account",
+  "transfer",
 ] as const satisfies readonly Overlay["kind"][];
 
 const isoDate = z.string().refine((v) => isValidIsoDate(v), "Некорректная дата") as unknown as z.ZodType<IsoDate>;
@@ -74,6 +78,7 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
       category: z.string().trim().min(1).max(100),
       title: z.string().max(200),
       date: isoDate,
+      accountId: z.string().min(1).max(120).optional(),
     }),
   }),
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),

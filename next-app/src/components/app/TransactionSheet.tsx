@@ -8,6 +8,8 @@ import { occurrenceDate } from "@/domain/recurring";
 import { autoSavingAmount, autoSavingByDefault } from "@/domain/savings";
 import type { State, Transaction } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
+import { sourceAccountId } from "@/domain/accounts";
+import { AccountPicker } from "../ui/AccountPicker";
 import { AmountInput } from "../ui/AmountInput";
 import { Button } from "../ui/Button";
 import { CategoryPicker } from "../ui/CategoryPicker";
@@ -15,6 +17,7 @@ import { Segmented, Switch } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { DateInput, TextInput } from "../ui/Field";
 import { Sheet } from "../ui/Sheet";
+import { hasOwnAccounts, lastAccountId, payableAccounts } from "./accounts";
 import { useDeleteTransaction, useDispatch } from "./hooks";
 import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
@@ -49,7 +52,7 @@ export function TransactionSheet({
   preset?: { type?: Kind; mandatory?: boolean; date?: IsoDate };
 }) {
   const { state } = useSnapshot();
-  const { close } = useUi();
+  const { close, open } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
   const deleteTx = useDeleteTransaction();
@@ -73,6 +76,9 @@ export function TransactionSheet({
   const [mandatoryTouched, setMandatoryTouched] = useState(false);
   const [amount, setAmount] = useState<Kopecks | null>(existing?.amount ?? null);
   const [title, setTitle] = useState(existing?.title ?? "");
+  // Счёт: показываем выбор, только когда счетов несколько (у всех остальных — основной).
+  const showAccounts = hasOwnAccounts(state);
+  const [accountId, setAccountId] = useState(() => (existing ? sourceAccountId(existing) : lastAccountId(state, kind)));
   const [date, setDate] = useState<IsoDate>(existing?.date ?? preset?.date ?? today);
   const [autoSavingTouched, setAutoSavingTouched] = useState(false);
   const [autoSavingChoice, setAutoSavingChoice] = useState(existing?.autoSaving ?? false);
@@ -81,8 +87,9 @@ export function TransactionSheet({
   const [mandatoryBeforeRepeat, setMandatoryBeforeRepeat] = useState(mandatory);
   const [errors, setErrors] = useState<{ amount?: string; category?: string; date?: string }>({});
   // Исходные значения формы — чтобы понять, есть ли несохранённые изменения.
-  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date }));
+  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date, accountId }));
   const dirty =
+    accountId !== initial.accountId ||
     kind !== initial.kind ||
     mandatory !== initial.mandatory ||
     category !== initial.category ||
@@ -162,6 +169,7 @@ export function TransactionSheet({
             title: title.trim(),
             mandatory: kind === "expense" ? mandatory : false,
             autoSaving: autoSavingAvailable && autoSaving,
+            ...(showAccounts && accountId !== sourceAccountId(existing) ? { accountId } : {}),
           },
         })
       : dispatch({
@@ -176,6 +184,7 @@ export function TransactionSheet({
             note: "",
             mandatory: kind === "expense" ? mandatory || repeat : false,
             autoSaving: autoSavingAvailable && autoSaving,
+            ...(showAccounts ? { accountId } : {}),
             ...(repeat ? { repeat: { templateId: newId(), startDate: date > today ? date : today } } : {}),
           },
         });
@@ -221,17 +230,28 @@ export function TransactionSheet({
           save();
         }}
       >
-        <Segmented
+        <Segmented<Kind | "transfer">
           label="Тип операции"
           value={kind}
-          onChange={switchKind}
+          onChange={(next) => (next === "transfer" ? open({ kind: "transfer" }) : switchKind(next))}
           options={[
             { value: "expense", label: "Расход" },
             { value: "income", label: "Доход" },
+            // Перевод между своими счетами — отдельное окно (погашение кредитки, пополнение накопительного).
+            ...(showAccounts && !editing ? [{ value: "transfer" as const, label: "Перевод" }] : []),
           ]}
         />
 
         <AmountInput label="Сумма" value={amount} onChange={setAmount} error={errors.amount} autoFocus={!editing} />
+
+        {showAccounts && (
+          <AccountPicker
+            label={kind === "income" ? "На какой счёт" : "С какого счёта"}
+            accounts={payableAccounts(state)}
+            value={accountId}
+            onChange={setAccountId}
+          />
+        )}
 
         {picks.length > 0 && (
           <div className="space-y-1.5">

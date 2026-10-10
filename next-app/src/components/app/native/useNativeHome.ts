@@ -156,7 +156,7 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           return { ok: true, txId: id, message: `${pick.title || pick.category} · ${formatMoney(pick.amount)} — добавлено` };
         }
         case "add": {
-          const { kind, amount, title, date } = command.draft;
+          const { kind, amount, title, date, accountId } = command.draft;
           const category = command.draft.category.trim();
           const autoSaving =
             autoSavingAmount({ type: kind, amount, category, autoSaving: true }, state.settings) > 0 &&
@@ -174,6 +174,7 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
               note: "",
               mandatory: kind === "expense" && isMandatoryCategory(state, category),
               autoSaving,
+              ...(accountId ? { accountId } : {}),
             },
           });
           if (!result.ok) return result;
