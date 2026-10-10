@@ -23,6 +23,8 @@ export interface Occurrence {
   title: string;
   category: string;
   amount: number;
+  /** Счёт шаблона (нет — основной). */
+  accountId?: string;
 }
 
 /**
@@ -125,6 +127,7 @@ function toOccurrence(template: Template, month: MonthKey, date: IsoDate): Occur
     title: template.title,
     category: template.category,
     amount: template.amount,
+    ...(template.accountId ? { accountId: template.accountId } : {}),
   };
 }
 

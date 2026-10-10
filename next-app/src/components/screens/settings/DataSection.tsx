@@ -49,6 +49,9 @@ function csvKind(tx: Transaction): { label: string; effect: Kopecks } {
       return { label: tx.amount >= 0 ? "В сбережения" : "Из сбережений", effect: -tx.amount };
     case "adjustment":
       return { label: "Корректировка", effect: tx.amount };
+    case "transfer":
+      // Деньги остаются у владельца — в CSV сумма перевода без знака.
+      return { label: "Перевод между счетами", effect: tx.amount };
   }
 }
 

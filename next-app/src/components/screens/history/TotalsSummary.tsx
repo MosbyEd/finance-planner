@@ -33,6 +33,8 @@ function collapsedStats(totals: Totals, type: TypeFilter): Stat[] {
       return [{ label: savingsLabel(totals), value: -totals.savings, tone: "default" }];
     case "adjustment":
       return [{ label: adjustmentsLabel(totals), value: totals.adjustments, tone: "auto" }];
+    case "transfer":
+      return [{ label: "Переведено между счетами", value: totals.transfers, tone: "default" }];
   }
 }
 

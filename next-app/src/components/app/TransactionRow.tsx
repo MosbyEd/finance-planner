@@ -12,6 +12,7 @@ const TYPE_META: Record<Transaction["type"], { icon: IconName; label: string; ti
   expense: { icon: "arrowUp", label: "Расход", tint: "bg-surface-2 text-muted" },
   saving: { icon: "piggy", label: "Сбережения", tint: "bg-accent-soft text-accent" },
   adjustment: { icon: "wallet", label: "Корректировка", tint: "bg-warning-soft text-warning" },
+  transfer: { icon: "swap", label: "Перевод между счетами", tint: "bg-accent-soft text-accent" },
 };
 
 /** Корректировка по долгу: деньги долга прошли через счёт (взяли или вернули), бюджет месяца не затронут. */

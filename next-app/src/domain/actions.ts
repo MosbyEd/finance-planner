@@ -8,6 +8,14 @@ import {
   LOAN_RETURN_CATEGORY,
   SAVINGS_CATEGORY,
 } from "./defaults";
+import {
+  MAIN_ACCOUNT_ID,
+  SAVINGS_ACCOUNT_ID,
+  accountBalance,
+  accountsOf,
+  findAccount,
+  sourceAccountId,
+} from "./accounts";
 import { formatMoney } from "./money";
 import {
   balanceAt,
@@ -24,6 +32,7 @@ import { dueOccurrences, occurrenceTxId, skippedMonths } from "./recurring";
 import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount } from "./savings";
 import {
   LIMITS,
+  accountSchema,
   categoryNameSchema,
   goalSchema,
   idSchema,
@@ -39,6 +48,7 @@ import {
   templateSchema,
   titleSchema,
   transactionSchema,
+  type Account,
   type CategoryGroup,
   type Settings,
   type State,
@@ -73,6 +83,8 @@ const txInputSchema = z.object({
   repeat: z.object({ templateId: idSchema, startDate: isoDateSchema }).optional(),
   /** Добавлена автоматически — показать пользователю на проверку (см. Transaction.review). */
   review: z.boolean().optional(),
+  /** Счёт: откуда списано или куда пришло. Нет — основной. */
+  accountId: idSchema.optional(),
 });
 export type TxInput = z.infer<typeof txInputSchema>;
 
@@ -86,6 +98,18 @@ const txPatchSchema = z
     note: noteSchema,
     mandatory: z.boolean(),
     autoSaving: z.boolean(),
+    accountId: idSchema,
+  })
+  .partial()
+  .strict();
+
+const accountPatchSchema = accountSchema
+  .omit({ id: true })
+  .extend({
+    // null — убрать лимит или срок (стал не кредиткой, данных больше нет).
+    creditLimit: accountSchema.shape.creditLimit.unwrap().nullable(),
+    graceDays: accountSchema.shape.graceDays.unwrap().nullable(),
+    archived: z.boolean(),
   })
   .partial()
   .strict();
@@ -99,7 +123,14 @@ export const actionSchema = z.discriminatedUnion("type", [
     transactions: z.array(transactionSchema).min(1).max(10),
     unskip: z.object({ templateId: idSchema, month: monthKeySchema }).optional(),
   }),
-  z.object({ type: z.literal("balance.set"), id: idSchema, date: isoDateSchema, actual: kopecksSchema }),
+  z.object({
+    type: z.literal("balance.set"),
+    id: idSchema,
+    date: isoDateSchema,
+    actual: kopecksSchema,
+    /** Какой счёт сверяем. Нет — основной. */
+    accountId: idSchema.optional(),
+  }),
   z.object({
     type: z.literal("savings.move"),
     id: idSchema,
@@ -108,7 +139,26 @@ export const actionSchema = z.discriminatedUnion("type", [
     note: noteSchema,
     goalId: idSchema.optional(),
     review: z.boolean().optional(),
+    /** Счёт, с которого откладываем (или на который снимаем). Нет — основной. */
+    accountId: idSchema.optional(),
+    /** Накопительный счёт. Нет — счёт цели или «Сбережения». */
+    toAccountId: idSchema.optional(),
   }),
+  /** Перевод между своими счетами: погашение кредитки, пополнение накопительного, снятие наличных. */
+  z.object({
+    type: z.literal("transfer.add"),
+    id: idSchema,
+    date: isoDateSchema,
+    from: idSchema,
+    to: idSchema,
+    amount: positiveKopecksSchema,
+    title: titleSchema.optional(),
+    note: noteSchema,
+    review: z.boolean().optional(),
+  }),
+  z.object({ type: z.literal("account.add"), account: accountSchema }),
+  z.object({ type: z.literal("account.update"), id: idSchema, patch: accountPatchSchema }),
+  z.object({ type: z.literal("account.delete"), id: idSchema }),
   z.object({ type: z.literal("template.add"), template: templateSchema }),
   z.object({
     type: z.literal("template.update"),
@@ -131,6 +181,8 @@ export const actionSchema = z.discriminatedUnion("type", [
     date: isoDateSchema,
     note: noteSchema,
     review: z.boolean().optional(),
+    /** Счёт из СМС (по цифрам карты). Нет — счёт шаблона. */
+    accountId: idSchema.optional(),
   }),
   /**
    * Операция ошибочно засчитана как регулярный платёж (например, по СМС): сделать её обычной операцией
@@ -270,6 +322,43 @@ function groupFor(type: "income" | "expense", mandatory: boolean): CategoryGroup
   return mandatory ? "mandatory" : "flexible";
 }
 
+/** Счёт для операции: должен существовать, а для новых записей — быть открытым. */
+function assertAccount(state: State, id: string, forNew = true): Account {
+  const account = findAccount(state, id);
+  if (!account) throw new DomainError("Счёт не найден — возможно, его удалили.");
+  if (forNew && account.archived) throw new DomainError(`Счёт «${account.name}» закрыт — выберите другой.`);
+  return account;
+}
+
+function assertSavingsAccount(state: State, id: string): Account {
+  const account = assertAccount(state, id, false);
+  if (account.kind !== "savings") throw new DomainError("Деньги цели могут лежать только на накопительном счёте.");
+  return account;
+}
+
+/** Счета по умолчанию нельзя удалить или закрыть: на них ссылаются все операции, записанные до появления счетов. */
+function isBuiltinAccount(id: string): boolean {
+  return id === MAIN_ACCOUNT_ID || id === SAVINGS_ACCOUNT_ID;
+}
+
+/** Одни и те же цифры карты у двух счетов — СМС не поймёт, куда записать. */
+function assertUniqueSmsKeys(accounts: Account[]): void {
+  const seen = new Map<string, string>();
+  for (const account of accounts) {
+    for (const key of account.smsKeys) {
+      const other = seen.get(key);
+      if (other) throw new DomainError(`Цифры ${key} уже указаны у счёта «${other}».`);
+      seen.set(key, account.name);
+    }
+  }
+}
+
+/** Откуда автоотчисление: со счёта операции, если это обычный счёт или наличные; иначе (кредитка) — с основного. */
+function linkedSavingSource(state: State, tx: Transaction): string {
+  const account = findAccount(state, sourceAccountId(tx));
+  return account && (account.kind === "debit" || account.kind === "cash") ? account.id : MAIN_ACCOUNT_ID;
+}
+
 // Записи skipped читаются и пишутся только через getOwn/withKey/withoutKey: ключи — id от пользователя.
 function addSkip(state: State, templateId: string, month: MonthKey): State {
   const months = skippedMonths(state, templateId);
@@ -306,7 +395,7 @@ function syncLinkedSaving(state: State, source: Transaction): State {
   }
   if (existing === null) throw new DomainError("Не удалось создать автоотчисление: такой id уже занят.");
   const others = existing ? state.transactions.filter((t) => t !== existing) : state.transactions;
-  return { ...state, transactions: [...others, buildLinkedSaving(source, desired)] };
+  return { ...state, transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source))] };
 }
 
 /**
@@ -318,7 +407,7 @@ function syncLinkedSaving(state: State, source: Transaction): State {
 function moveLinkedSaving(state: State, source: Transaction): State {
   const existing = findLinkedSaving(state, source);
   if (!existing) return state;
-  const rebuilt = buildLinkedSaving(source, existing.amount);
+  const rebuilt = buildLinkedSaving(source, existing.amount, linkedSavingSource(state, source));
   if (existing.date === rebuilt.date && existing.title === rebuilt.title) return state;
   const moved: Transaction = { ...existing, date: rebuilt.date, title: rebuilt.title };
   return { ...state, transactions: state.transactions.map((t) => (t === existing ? moved : t)) };
@@ -345,6 +434,7 @@ function materialize(state: State, today: IsoDate): State {
       note: notes.get(occ.templateId) ?? "",
       templateId: occ.templateId,
       occurrenceMonth: occ.month,
+      ...(occ.accountId ? { accountId: occ.accountId } : {}),
       ...(occ.kind === "expense"
         ? { mandatory: true, autoSaving: false }
         : { autoSaving: salarySavingAmount(occ.amount, occ.category, state.settings) > 0 }),
@@ -354,7 +444,7 @@ function materialize(state: State, today: IsoDate): State {
     const savingId = linkedSavingId(id);
     if (saving > 0 && !existing.has(savingId)) {
       existing.add(savingId);
-      created.push(buildLinkedSaving(tx, saving));
+      created.push(buildLinkedSaving(tx, saving, linkedSavingSource(state, tx)));
     }
   }
   // Все начисления упёрлись в занятые id — состояние не меняется (повторная синхронизация — тот же объект).
@@ -390,6 +480,7 @@ export function applyAction(state: State, action: Action): State {
       const input = { ...action.tx, category: canonicalCategory(state, action.tx.category) };
       assertNewId(state, input.id);
       assertTxCapacity(state, 2);
+      if (input.accountId) assertAccount(state, input.accountId);
       const tx: Transaction = {
         id: input.id,
         type: input.type,
@@ -401,6 +492,7 @@ export function applyAction(state: State, action: Action): State {
         autoSaving: input.autoSaving,
         ...(input.type === "expense" ? { mandatory: input.mandatory } : {}),
         ...(input.review ? { review: true as const } : {}),
+        ...(input.accountId ? { accountId: input.accountId } : {}),
       };
       let next = ensureCategory(state, groupFor(input.type, input.mandatory), input.category);
       if (input.repeat) {
@@ -418,6 +510,7 @@ export function applyAction(state: State, action: Action): State {
           active: true,
           startDate: input.repeat.startDate > input.date ? input.repeat.startDate : input.date,
           note: input.note,
+          ...(input.accountId ? { accountId: input.accountId } : {}),
         };
         tx.templateId = template.id;
         tx.occurrenceMonth = monthKeyOf(input.date);
@@ -435,7 +528,10 @@ export function applyAction(state: State, action: Action): State {
     case "tx.update": {
       const current = findTx(state, action.id);
       if (current.type !== "income" && current.type !== "expense") {
-        throw new DomainError("Сбережения и корректировки нельзя редактировать — удалите и создайте заново.");
+        throw new DomainError("Сбережения, переводы и корректировки нельзя редактировать — удалите и создайте заново.");
+      }
+      if (action.patch.accountId !== undefined && action.patch.accountId !== current.accountId) {
+        assertAccount(state, action.patch.accountId);
       }
       const type = action.patch.type ?? current.type;
       const patch =
@@ -455,6 +551,7 @@ export function applyAction(state: State, action: Action): State {
         updated.type !== current.type ||
         updated.amount !== current.amount ||
         updated.category !== current.category ||
+        sourceAccountId(updated) !== sourceAccountId(current) ||
         Boolean(updated.autoSaving) !== Boolean(current.autoSaving);
       return savingInputsChanged ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
     }
@@ -542,18 +639,101 @@ export function applyAction(state: State, action: Action): State {
     case "balance.set": {
       assertNewId(state, action.id);
       assertTxCapacity(state, 1);
-      const delta = action.actual - balanceAt(state, action.date);
+      const accountId = action.accountId ?? MAIN_ACCOUNT_ID;
+      const account = assertAccount(state, accountId, false);
+      const delta = action.actual - accountBalance(state, accountId, action.date);
       if (delta === 0) return state;
+      const multiple = accountsOf(state).length > 2 || accountId !== MAIN_ACCOUNT_ID;
       const tx: Transaction = {
         id: action.id,
         type: "adjustment",
         amount: delta,
         date: action.date,
         category: ADJUSTMENT_CATEGORY,
-        title: "Корректировка остатка",
+        title: clipTitle(multiple ? `Корректировка остатка: ${account.name}` : "Корректировка остатка"),
         note: "",
+        ...(action.accountId ? { accountId: action.accountId } : {}),
       };
       return { ...state, transactions: [...state.transactions, tx] };
+    }
+
+    case "transfer.add": {
+      assertNewId(state, action.id);
+      assertTxCapacity(state, 1);
+      if (action.from === action.to) throw new DomainError("Выберите два разных счёта.");
+      const from = assertAccount(state, action.from);
+      const to = assertAccount(state, action.to);
+      if (from.kind === "savings") {
+        const available = accountBalance(state, from.id);
+        if (available < action.amount) {
+          throw new DomainError(`На счёте «${from.name}» только ${formatMoney(Math.max(0, available))}.`);
+        }
+      }
+      const title = action.title?.trim() || (to.kind === "credit" ? `Погашение: ${to.name}` : `Перевод: ${from.name} → ${to.name}`);
+      const tx: Transaction = {
+        id: action.id,
+        type: "transfer",
+        amount: action.amount,
+        date: action.date,
+        category: "",
+        title: clipTitle(title),
+        note: action.note,
+        accountId: from.id,
+        toAccountId: to.id,
+        ...(action.review ? { review: true as const } : {}),
+      };
+      return { ...state, transactions: [...state.transactions, tx] };
+    }
+
+    case "account.add": {
+      const accounts = accountsOf(state);
+      if (accounts.some((a) => a.id === action.account.id)) throw new DomainError("Такой счёт уже есть.");
+      if (accounts.length >= LIMITS.accounts) throw new DomainError("Слишком много счетов.");
+      const account: Account = { ...action.account, spending: action.account.kind === "credit" ? false : action.account.spending };
+      const next = [...accounts, account];
+      assertUniqueSmsKeys(next);
+      return { ...state, accounts: next };
+    }
+
+    case "account.update": {
+      const accounts = accountsOf(state);
+      const current = accounts.find((a) => a.id === action.id);
+      if (!current) throw new DomainError("Счёт не найден.");
+      const { creditLimit, graceDays, archived, ...rest } = action.patch;
+      const updated: Account = { ...current, ...rest };
+      if (creditLimit !== undefined) {
+        if (creditLimit === null) delete updated.creditLimit;
+        else updated.creditLimit = creditLimit;
+      }
+      if (graceDays !== undefined) {
+        if (graceDays === null) delete updated.graceDays;
+        else updated.graceDays = graceDays;
+      }
+      if (archived !== undefined) {
+        if (archived && isBuiltinAccount(current.id)) throw new DomainError("Этот счёт нельзя закрыть — его можно переименовать.");
+        if (archived) updated.archived = true;
+        else delete updated.archived;
+      }
+      if (updated.kind === "credit") updated.spending = false;
+      if (isBuiltinAccount(current.id) && updated.kind !== current.kind && (updated.kind === "credit") !== (current.kind === "credit")) {
+        throw new DomainError("Основной счёт и «Сбережения» не могут стать кредитной картой.");
+      }
+      const next = accounts.map((a) => (a.id === current.id ? updated : a));
+      assertUniqueSmsKeys(next);
+      return { ...state, accounts: next };
+    }
+
+    case "account.delete": {
+      const accounts = accountsOf(state);
+      const current = accounts.find((a) => a.id === action.id);
+      if (!current) throw new DomainError("Счёт не найден.");
+      if (isBuiltinAccount(current.id)) throw new DomainError("Этот счёт нельзя удалить — его можно переименовать.");
+      const used =
+        state.transactions.some((t) => t.accountId === current.id || t.toAccountId === current.id) ||
+        state.templates.some((t) => t.accountId === current.id) ||
+        state.goals.some((g) => g.accountId === current.id);
+      if (used) throw new DomainError("По счёту есть операции — закройте его, тогда он останется в истории.");
+      return { ...state, accounts: accounts.filter((a) => a.id !== current.id) };
     }
 
     case "savings.move": {
@@ -561,6 +741,11 @@ export function applyAction(state: State, action: Action): State {
       assertTxCapacity(state, 1);
       const goal = action.goalId ? state.goals.find((g) => g.id === action.goalId) : undefined;
       if (action.goalId && !goal) throw new DomainError("Цель не найдена.");
+      const fromId = action.accountId ?? MAIN_ACCOUNT_ID;
+      const toId = action.toAccountId ?? goal?.accountId ?? SAVINGS_ACCOUNT_ID;
+      assertAccount(state, fromId);
+      const target = assertAccount(state, toId);
+      if (target.kind !== "savings") throw new DomainError("Откладывать можно только на накопительный счёт.");
       if (action.amount < 0) {
         const total = savingsTotal(state);
         if (goal) {
@@ -579,6 +764,11 @@ export function applyAction(state: State, action: Action): State {
             );
           }
         }
+        // Сбережения разложены по счетам — снять можно только то, что лежит на выбранном.
+        const onAccount = accountBalance(state, toId);
+        if (onAccount + action.amount < 0) {
+          throw new DomainError(`На счёте «${target.name}» только ${formatMoney(Math.max(0, onAccount))}.`);
+        }
       }
       const title = goal
         ? `${action.amount > 0 ? "Пополнение" : "Снятие"}: цель «${goal.name}»`
@@ -595,6 +785,8 @@ export function applyAction(state: State, action: Action): State {
         note: action.note,
         ...(goal ? { goalId: goal.id } : {}),
         ...(action.review ? { review: true as const } : {}),
+        ...(fromId !== MAIN_ACCOUNT_ID ? { accountId: fromId } : {}),
+        ...(toId !== SAVINGS_ACCOUNT_ID ? { toAccountId: toId } : {}),
       };
       return { ...state, transactions: [...state.transactions, tx] };
     }
@@ -604,6 +796,7 @@ export function applyAction(state: State, action: Action): State {
         throw new DomainError("Шаблон с таким id уже существует.");
       }
       if (state.templates.length >= LIMITS.templates) throw new DomainError("Слишком много регулярных платежей.");
+      if (action.template.accountId) assertAccount(state, action.template.accountId);
       const t = { ...action.template, category: canonicalCategory(state, action.template.category) };
       const next = ensureCategory(state, t.kind === "income" ? "income" : "mandatory", t.category);
       return { ...next, templates: [...next.templates, t] };
@@ -611,6 +804,7 @@ export function applyAction(state: State, action: Action): State {
 
     case "template.update": {
       const current = findTemplate(state, action.id);
+      if (action.patch.accountId && action.patch.accountId !== current.accountId) assertAccount(state, action.patch.accountId);
       const patch =
         action.patch.category === undefined
           ? action.patch
@@ -649,6 +843,7 @@ export function applyAction(state: State, action: Action): State {
 
     case "occurrence.confirm": {
       const template = findTemplate(state, action.templateId);
+      if (action.accountId) assertAccount(state, action.accountId);
       const current = state.transactions.find((t) => t.templateId === template.id && t.occurrenceMonth === action.month);
       if (current) {
         const updated: Transaction = {
@@ -657,6 +852,7 @@ export function applyAction(state: State, action: Action): State {
           date: action.date,
           note: action.note,
           ...(action.review ? { review: true as const } : {}),
+          ...(action.accountId ? { accountId: action.accountId } : {}),
         };
         const next = { ...state, transactions: state.transactions.map((t) => (t.id === current.id ? updated : t)) };
         return updated.amount !== current.amount ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
@@ -675,6 +871,7 @@ export function applyAction(state: State, action: Action): State {
         templateId: template.id,
         occurrenceMonth: action.month,
         ...(action.review ? { review: true as const } : {}),
+        ...(action.accountId || template.accountId ? { accountId: action.accountId ?? template.accountId } : {}),
         // Как у начислений из recurring.sync: расход по шаблону обязательный и без «копилки с покупок».
         ...(template.kind === "expense"
           ? { mandatory: true, autoSaving: false }
@@ -713,11 +910,13 @@ export function applyAction(state: State, action: Action): State {
     case "goal.add": {
       if (state.goals.some((g) => g.id === action.goal.id)) throw new DomainError("Цель уже существует.");
       if (state.goals.length >= LIMITS.goals) throw new DomainError("Слишком много целей.");
+      if (action.goal.accountId) assertSavingsAccount(state, action.goal.accountId);
       return { ...state, goals: [...state.goals, action.goal] };
     }
 
     case "goal.update": {
       if (!state.goals.some((g) => g.id === action.id)) throw new DomainError("Цель не найдена.");
+      if (action.patch.accountId) assertSavingsAccount(state, action.patch.accountId);
       return { ...state, goals: state.goals.map((g) => (g.id === action.id ? { ...g, ...action.patch } : g)) };
     }
 

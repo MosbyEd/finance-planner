@@ -11,6 +11,7 @@ export const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
   { value: "income", label: "Доходы" },
   { value: "saving", label: "Сбережения" },
   { value: "adjustment", label: "Корректировки" },
+  { value: "transfer", label: "Переводы" },
 ];
 
 export function normalizeText(value: string): string {
@@ -25,6 +26,8 @@ export interface Totals {
   /** Из отложенного — перенос остатка прошлого месяца (в «Отложено» месяца на главной он не входит). */
   rollover: Kopecks;
   adjustments: Kopecks;
+  /** Переводы между своими счетами (на остаток в целом не влияют). */
+  transfers: Kopecks;
   /** Среди корректировок есть движения по долгам через счёт. */
   loanAdjustments: boolean;
   /** Изменение остатка на счёте: доходы − расходы − отложено + корректировки. */
@@ -39,6 +42,7 @@ export function totalsOf(list: readonly Transaction[]): Totals {
     savings: 0,
     rollover: 0,
     adjustments: 0,
+    transfers: 0,
     loanAdjustments: false,
     net: 0,
   };
@@ -50,6 +54,8 @@ export function totalsOf(list: readonly Transaction[]): Totals {
     } else if (tx.type === "saving") {
       t.savings += tx.amount;
       if (tx.rolloverOf) t.rollover += tx.amount;
+    } else if (tx.type === "transfer") {
+      t.transfers += tx.amount;
     } else {
       t.adjustments += tx.amount;
       if (tx.loanId) t.loanAdjustments = true;

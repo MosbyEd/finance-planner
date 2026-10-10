@@ -312,6 +312,7 @@ const TX_META: Record<Transaction["type"], { symbol: string; tint: Tone }> = {
   expense: { symbol: "arrow.up", tint: "muted" },
   saving: { symbol: "banknote", tint: "accent" },
   adjustment: { symbol: "wallet.bifold", tint: "warning" },
+  transfer: { symbol: "arrow.left.arrow.right", tint: "accent" },
 };
 
 function recentRow(tx: Transaction, today: IsoDate, autoSaving: number): RecentModel {
@@ -327,9 +328,12 @@ function recentRow(tx: Transaction, today: IsoDate, autoSaving: number): RecentM
     tx.type === "income" ? "positive" : tx.type === "adjustment" ? (effect > 0 ? "positive" : effect < 0 ? "negative" : "default") : "default";
   return {
     id: tx.id,
-    title: tx.title || tx.category || { income: "Доход", expense: "Расход", saving: "Сбережения", adjustment: "Корректировка" }[tx.type],
+    title:
+      tx.title ||
+      tx.category ||
+      { income: "Доход", expense: "Расход", saving: "Сбережения", adjustment: "Корректировка", transfer: "Перевод" }[tx.type],
     subtitle,
-    amount: formatMoney(effect, { sign: true }),
+    amount: tx.type === "transfer" ? formatMoney(tx.amount) : formatMoney(effect, { sign: true }),
     amountTone,
     symbol: meta.symbol,
     tint: meta.tint,

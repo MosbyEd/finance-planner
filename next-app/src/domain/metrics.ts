@@ -14,9 +14,20 @@ import { formatMoney, percentOf, type Kopecks } from "./money";
 import { getOwn } from "./records";
 import { plannedOccurrences } from "./recurring";
 import { salarySavingAmount } from "./savings";
+import {
+  MAIN_ACCOUNT_ID,
+  accountBalances,
+  creditDebts,
+  savingsAccountIds,
+  spendingAccountIds,
+  spendingEffect,
+} from "./accounts";
 import type { Goal, Loan, Settings, State, Transaction } from "./schema";
 
-/** Как операция меняет деньги на счёте. Сбережения уходят со счёта в копилку. */
+/**
+ * Сумма операции со знаком для показа: доходы и корректировки — как есть, расходы и отчисления в сбережения —
+ * минусом. Перевод между своими счетами деньги не меняет — 0 (его сумму показывают отдельно).
+ */
 export function balanceEffect(tx: Pick<Transaction, "type" | "amount">): Kopecks {
   switch (tx.type) {
     case "income":
@@ -25,22 +36,24 @@ export function balanceEffect(tx: Pick<Transaction, "type" | "amount">): Kopecks
     case "expense":
     case "saving":
       return -tx.amount;
+    case "transfer":
+      return 0;
   }
 }
 
-/** Деньги на счёте на конец дня date (все операции с датой ≤ date). */
+/** Деньги на счетах, которые учитываются в тратах, на конец дня date (все операции с датой ≤ date). */
 export function balanceAt(state: State, date: IsoDate): Kopecks {
+  const spending = spendingAccountIds(state);
   let sum = 0;
-  for (const tx of state.transactions) if (tx.date <= date) sum += balanceEffect(tx);
+  for (const tx of state.transactions) if (tx.date <= date) sum += spendingEffect(spending, tx);
   return sum;
 }
 
-/** Всего в сбережениях к дате (включительно). */
+/** Всего в сбережениях к дате (включительно): остатки накопительных счетов, которые не учитываются в тратах. */
 export function savingsTotal(state: State, date?: IsoDate): Kopecks {
+  const balances = accountBalances(state, date);
   let sum = 0;
-  for (const tx of state.transactions) {
-    if (tx.type === "saving" && (!date || tx.date <= date)) sum += tx.amount;
-  }
+  for (const id of savingsAccountIds(state)) sum += balances.get(id) ?? 0;
   return sum;
 }
 
@@ -265,20 +278,29 @@ export interface UpcomingEvent {
   type: Transaction["type"];
   title: string;
   category: string;
-  /** Влияние на деньги на счёте (со знаком). */
+  /** Влияние на деньги на счетах, которые учитываются в тратах (со знаком). Покупка по кредитке — 0. */
   effect: Kopecks;
+  /** Сумма для показа со знаком: расход по кредитке тоже −, хотя деньги на счетах он не меняет. */
+  amount: Kopecks;
   mandatory: boolean;
-  source: "transaction" | "template" | "auto-saving";
+  source: "transaction" | "template" | "auto-saving" | "credit";
   txId?: string;
+  /** Кредитная карта, долг которой нужно погасить (source = credit). */
+  accountId?: string;
   templateId?: string;
   month?: MonthKey;
   balanceAfter: Kopecks;
 }
 
-const TYPE_ORDER: Record<Transaction["type"], number> = { income: 0, adjustment: 1, saving: 2, expense: 3 };
+const TYPE_ORDER: Record<Transaction["type"], number> = { income: 0, adjustment: 1, saving: 2, transfer: 3, expense: 4 };
 
-/** Будущие события в (today, until] с прогнозом остатка на счёте. */
+/**
+ * Будущие события в (today, until] с прогнозом остатка на счетах, которые учитываются в тратах.
+ * Долг кредитной карты — событие «погасить» в последний день беспроцентного периода (просрочен — завтра).
+ */
 export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): UpcomingEvent[] {
+  const spending = spendingAccountIds(state);
+  const onSpending = (accountId: string | undefined) => spending.has(accountId ?? MAIN_ACCOUNT_ID);
   const events: Omit<UpcomingEvent, "balanceAfter">[] = [];
   for (const tx of state.transactions) {
     if (tx.date <= today || tx.date > until) continue;
@@ -288,7 +310,8 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
       type: tx.type,
       title: tx.title || tx.category,
       category: tx.category,
-      effect: balanceEffect(tx),
+      effect: spendingEffect(spending, tx),
+      amount: tx.type === "transfer" ? -tx.amount : balanceEffect(tx),
       mandatory: tx.type === "expense" && Boolean(tx.mandatory),
       source: tx.linkedTo ? "auto-saving" : "transaction",
       txId: tx.id,
@@ -303,7 +326,8 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
       type: occ.kind,
       title: occ.title,
       category: occ.category,
-      effect: occ.kind === "income" ? occ.amount : -occ.amount,
+      effect: onSpending(occ.accountId) ? (occ.kind === "income" ? occ.amount : -occ.amount) : 0,
+      amount: occ.kind === "income" ? occ.amount : -occ.amount,
       mandatory: occ.kind === "expense",
       source: "template",
       templateId: occ.templateId,
@@ -318,7 +342,8 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
           type: "saving",
           title: `Отложить с «${occ.title}»`,
           category: "Сбережения",
-          effect: -saving,
+          effect: onSpending(occ.accountId) ? -saving : 0,
+          amount: -saving,
           mandatory: false,
           source: "auto-saving",
           templateId: occ.templateId,
@@ -326,6 +351,23 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
         });
       }
     }
+  }
+  for (const credit of creditDebts(state, today)) {
+    if (!credit.graceEnd) continue;
+    const date = credit.graceEnd > today ? credit.graceEnd : addDays(today, 1);
+    if (date > until) continue;
+    events.push({
+      key: `credit:${credit.account.id}`,
+      date,
+      type: "transfer",
+      title: credit.overdue ? `Погасить «${credit.account.name}» — льготный период прошёл` : `Погасить «${credit.account.name}»`,
+      category: "",
+      effect: -credit.debt,
+      amount: -credit.debt,
+      mandatory: true,
+      source: "credit",
+      accountId: credit.account.id,
+    });
   }
   events.sort((a, b) => a.date.localeCompare(b.date) || TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
 
@@ -386,7 +428,14 @@ export function safeToSpend(state: State, today: IsoDate): SafeToSpend {
     if (inWindow && e.effect < 0) plannedOut += -e.effect;
   }
 
-  const cashNow = balanceAt(state, today) + spentToday;
+  // Деньги до сегодняшних гибких трат: возвращаем только траты со счетов, которые учитываются (покупка
+  // по кредитке денег на счетах не уменьшала).
+  const spending = spendingAccountIds(state);
+  let spentTodayCash = 0;
+  for (const tx of state.transactions) {
+    if (tx.date === today && tx.type === "expense" && !tx.mandatory) spentTodayCash -= spendingEffect(spending, tx);
+  }
+  const cashNow = balanceAt(state, today) + spentTodayCash;
   const cashAvailable = cashNow - plannedOut;
   const cashPerDay = floorToRubles(cashAvailable / daysUntil);
   const budgetPerDay = metrics.daily.availableToday;
@@ -493,7 +542,7 @@ export function periodTotals(state: State, from: IsoDate, to: IsoDate): PeriodTo
       if (tx.mandatory) totals.mandatory += tx.amount;
       else totals.flexible += tx.amount;
     } else if (tx.type === "saving") totals.savings += tx.amount;
-    else totals.adjustments += tx.amount;
+    else if (tx.type === "adjustment") totals.adjustments += tx.amount;
   }
   return totals;
 }

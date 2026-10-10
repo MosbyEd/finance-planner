@@ -8,6 +8,7 @@ export const LIMITS = {
   templates: 500,
   goals: 200,
   loans: 200,
+  accounts: 50,
   categoriesPerGroup: 100,
   title: 80,
   note: 500,
@@ -36,14 +37,15 @@ export const categoryNameSchema = z
 export const titleSchema = z.string().trim().max(LIMITS.title);
 export const noteSchema = z.string().trim().max(LIMITS.note);
 
-export const transactionTypeSchema = z.enum(["income", "expense", "saving", "adjustment"]);
+/** transfer — перевод между своими счетами (погашение кредитки, пополнение накопительного): не доход и не расход. */
+export const transactionTypeSchema = z.enum(["income", "expense", "saving", "adjustment", "transfer"]);
 export type TransactionType = z.infer<typeof transactionTypeSchema>;
 
 export const transactionSchema = z
   .object({
     id: idSchema,
     type: transactionTypeSchema,
-    /** Для income/expense — положительная сумма; для saving/adjustment — со знаком. */
+    /** Для income/expense/transfer — положительная сумма; для saving/adjustment — со знаком. */
     amount: kopecksSchema,
     date: isoDateSchema,
     /** Пустая — у корректировок; служебные имена запрещены, как и у категорий в справочнике. */
@@ -65,6 +67,10 @@ export const transactionSchema = z
     linkedTo: idSchema.optional(),
     goalId: idSchema.optional(),
     loanId: idSchema.optional(),
+    /** Счёт операции (у сбережений и переводов — откуда). Нет — основной счёт (данные до появления счетов). */
+    accountId: idSchema.optional(),
+    /** Куда: у перевода — обязательно, у сбережений — накопительный счёт (нет — «Сбережения»). */
+    toAccountId: idSchema.optional(),
     /**
      * Перенос остатка гибкого бюджета за этот месяц (rollover.resolve «saved»). Такое отчисление уменьшает
      * деньги на счёте и пополняет сбережения, но не считается сбережениями месяца, в котором создано.
@@ -82,7 +88,7 @@ export const transactionSchema = z
     review: z.literal(true).optional(),
   })
   .superRefine((tx, ctx) => {
-    if ((tx.type === "income" || tx.type === "expense") && tx.amount <= 0) {
+    if ((tx.type === "income" || tx.type === "expense" || tx.type === "transfer") && tx.amount <= 0) {
       ctx.addIssue({ code: "custom", message: "Сумма должна быть больше нуля", path: ["amount"] });
     }
     if ((tx.type === "saving" || tx.type === "adjustment") && tx.amount === 0) {
@@ -90,6 +96,9 @@ export const transactionSchema = z
     }
     if ((tx.templateId === undefined) !== (tx.occurrenceMonth === undefined)) {
       ctx.addIssue({ code: "custom", message: "Неполная привязка к регулярному платежу", path: ["templateId"] });
+    }
+    if (tx.type === "transfer" && (tx.toAccountId === undefined || tx.toAccountId === (tx.accountId ?? "main"))) {
+      ctx.addIssue({ code: "custom", message: "Перевод — между двумя разными счетами", path: ["toAccountId"] });
     }
     if (tx.loanOpening && (tx.type !== "adjustment" || tx.loanId === undefined)) {
       ctx.addIssue({ code: "custom", message: "Отметка открытия долга — только у корректировки долга", path: ["loanOpening"] });
@@ -108,6 +117,8 @@ export const templateSchema = z.object({
   /** С какой даты шаблон начинает начислять операции. */
   startDate: isoDateSchema,
   note: noteSchema,
+  /** С какого счёта платёж или на какой приходит доход. Нет — основной счёт. */
+  accountId: idSchema.optional(),
 });
 export type Template = z.infer<typeof templateSchema>;
 
@@ -120,8 +131,33 @@ export const goalSchema = z.object({
   dueDate: isoDateSchema.nullable(),
   note: noteSchema,
   createdAt: isoDateSchema,
+  /** На каком накопительном счёте лежат деньги цели. Нет — «Сбережения». */
+  accountId: idSchema.optional(),
 });
 export type Goal = z.infer<typeof goalSchema>;
+
+/**
+ * Счёт: debit — обычный (карта, расчётный счёт), cash — наличные, savings — накопительный (сбережения, цели),
+ * credit — кредитная карта (её остаток — долг со знаком минус).
+ */
+export const accountKindSchema = z.enum(["debit", "cash", "savings", "credit"]);
+export type AccountKind = z.infer<typeof accountKindSchema>;
+
+export const accountSchema = z.object({
+  id: idSchema,
+  name: titleSchema.min(1, "Укажите название"),
+  kind: accountKindSchema,
+  /** Учитывать деньги счёта в «Сколько можно потратить» (у кредитной карты не учитываются никогда). */
+  spending: z.boolean(),
+  /** Последние четыре цифры карты или счёта, как в СМС банка («MIR-7759», «СЧЁТ5804»): по ним СМС узнаёт счёт. */
+  smsKeys: z.array(z.string().regex(/^\d{4}$/, "Четыре цифры карты или счёта")).max(10),
+  /** Кредитная карта: кредитный лимит и беспроцентный период — дней с первой покупки, когда долга не было. */
+  creditLimit: positiveKopecksSchema.optional(),
+  graceDays: z.number().int().min(1).max(365).optional(),
+  /** Закрыт: не предлагается для новых операций, но остаётся в истории. */
+  archived: z.literal(true).optional(),
+});
+export type Account = z.infer<typeof accountSchema>;
 
 export const loanKindSchema = z.enum(["borrow", "lend", "credit"]);
 export type LoanKind = z.infer<typeof loanKindSchema>;
@@ -203,6 +239,8 @@ export const stateSchema = z
     templates: z.array(templateSchema).max(LIMITS.templates),
     goals: z.array(goalSchema).max(LIMITS.goals),
     loans: z.array(loanSchema).max(LIMITS.loans),
+    /** Счета. Нет — два счёта по умолчанию: «Основной счёт» и «Сбережения» (см. accounts.ts). */
+    accounts: z.array(accountSchema).max(LIMITS.accounts).optional(),
     categories: categoriesSchema,
     categoryLimits: z.record(categoryNameSchema, positiveKopecksSchema),
     /** Пропущенные начисления шаблонов: templateId → месяцы. */
@@ -217,5 +255,6 @@ export const stateSchema = z
     checkUniqueIds(state.templates, "templates", ctx);
     checkUniqueIds(state.goals, "goals", ctx);
     checkUniqueIds(state.loans, "loans", ctx);
+    if (state.accounts) checkUniqueIds(state.accounts, "accounts", ctx);
   });
 export type State = z.infer<typeof stateSchema>;

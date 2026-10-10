@@ -1,3 +1,4 @@
+import { MAIN_ACCOUNT_ID } from "./accounts";
 import { SAVINGS_CATEGORY } from "./defaults";
 import { percentOf, type Kopecks } from "./money";
 import { LIMITS, type Settings, type Transaction } from "./schema";
@@ -42,7 +43,11 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-export function buildLinkedSaving(source: Transaction, amount: Kopecks): Transaction {
+/**
+ * Автоотчисление с операции. fromAccountId — откуда уходят деньги (у покупки по кредитке — основной счёт:
+ * откладывать в долг не нужно); нет — основной счёт.
+ */
+export function buildLinkedSaving(source: Transaction, amount: Kopecks, fromAccountId?: string): Transaction {
   const name = source.title || source.category;
   const title = source.type === "income" ? `Отложено с дохода «${name}»` : `Отложено с покупки «${name}»`;
   return {
@@ -54,5 +59,6 @@ export function buildLinkedSaving(source: Transaction, amount: Kopecks): Transac
     title: truncate(title, LIMITS.title),
     note: "",
     linkedTo: source.id,
+    ...(fromAccountId && fromAccountId !== MAIN_ACCOUNT_ID ? { accountId: fromAccountId } : {}),
   };
 }

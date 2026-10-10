@@ -37,6 +37,8 @@ const PATHS = {
   download: "M12 4v12M6 10l6 6 6-6M4 20h16",
   upload: "M12 20V8M6 14l6-6 6 6M4 4h16",
   handshake: "M3 11l4-4 4 2 3-2 7 5-3 3M11 9l-3 3a1.5 1.5 0 0 0 2 2l3-2 3 3M7 15l-2 2M10 18l-2 2",
+  swap: "M4 8h14l-3-3M20 16H6l3 3",
+  card: "M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3 10h18M7 15h3",
 } as const;
 
 export type IconName = keyof typeof PATHS;
