@@ -9,9 +9,13 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       login TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL
+      password_hash TEXT NOT NULL,
+      name TEXT
     )
   `);
+
+  // На случай старой схемы без поля name — пробуем добавить, игнорируя ошибку, если уже есть.
+  db.run("ALTER TABLE users ADD COLUMN name TEXT", () => {});
 
   db.run(`
     CREATE TABLE IF NOT EXISTS user_states (

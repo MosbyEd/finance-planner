@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="finance">
   <head>
     <meta charset="UTF-8" />
     <title>Финансовый планировщик</title>
@@ -7,12 +7,14 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#020617" />
+    <meta name="theme-color" content="#fafaf9" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="manifest.json" />
-    <!-- Tailwind via CDN for modern UI -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="tailwind.css" />
     <style>
       html {
         -webkit-text-size-adjust: 100%;
@@ -21,17 +23,17 @@
 
       body {
         height: 100%;
-        background: radial-gradient(circle at top left, #1d2433 0, #050816 45%, #020617 100%);
-        /* iOS standalone: убираем задержку тапа и делаем клики стабильными */
+        background-color: #f5f5f4;
+        color: #1c1917;
+        font-family: "DM Sans", system-ui, sans-serif;
         touch-action: manipulation;
-        -webkit-tap-highlight-color: rgba(148, 163, 184, 0.2);
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0.06);
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
       }
 
-      /* Кликабельные элементы в standalone Safari на iOS */
       button,
       a,
       input,
@@ -41,7 +43,6 @@
         cursor: pointer;
       }
 
-      /* Минимальная зона нажатия для табов и главной кнопки (Apple HIG) */
       nav button,
       #headerAddOperationButton,
       #toggleMonthPanel {
@@ -50,13 +51,15 @@
       }
 
       .glass {
-        background: rgba(15, 23, 42, 0.85);
-        backdrop-filter: blur(18px);
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        background-color: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #e7e5e4;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
       }
 
       .card {
-        background: radial-gradient(circle at top left, #0f172a 0, #020617 60%);
+        background-color: #ffffff;
+        border: 1px solid #e7e5e4;
       }
 
       .number-input::-webkit-outer-spin-button,
@@ -84,9 +87,74 @@
         -webkit-appearance: none;
         appearance: none;
       }
+
+      /* Светлая тема: переопределение тёмных утилит под тёплый нейтрал */
+      .bg-slate-950\/70,
+      .bg-slate-950\/50 {
+        background-color: #fafaf9 !important;
+      }
+      .bg-slate-900\/80,
+      .bg-slate-900\/70,
+      .bg-slate-900\/60,
+      .bg-slate-900\/50 {
+        background-color: #f5f5f4 !important;
+      }
+      .border-slate-800\/60,
+      .border-slate-800\/70,
+      .border-slate-700\/80,
+      .border-slate-700\/70 {
+        border-color: #e7e5e4 !important;
+      }
+      .text-slate-100,
+      .text-slate-200,
+      .text-slate-300 {
+        color: #1c1917 !important;
+      }
+      .text-slate-400 {
+        color: #57534e !important;
+      }
+      .text-slate-500 {
+        color: #78716c !important;
+      }
+      .text-slate-600 {
+        color: #44403c !important;
+      }
+      .backdrop-blur.bg-slate-950\/70 {
+        background-color: rgba(250, 250, 249, 0.95) !important;
+      }
+
+      .bg-emerald-500\/10,
+      .bg-emerald-500\/20 {
+        color: #047857 !important;
+      }
+      .bg-rose-500\/10,
+      .bg-rose-500\/20 {
+        color: #b91c1c !important;
+      }
+      .bg-sky-500\/10,
+      .bg-sky-500\/20 {
+        color: #0369a1 !important;
+      }
+      .bg-amber-500\/10,
+      .bg-amber-500\/20 {
+        color: #92400e !important;
+      }
+
+      #analyticsSection thead,
+      #analyticsSection thead th,
+      #plannerSection thead,
+      #plannerSection thead th {
+        color: #44403c !important;
+      }
+      #analyticsSection tbody,
+      #analyticsSection tbody td,
+      #plannerSection tbody,
+      #plannerSection tbody td {
+        color: #1c1917 !important;
+      }
     </style>
   </head>
-  <body class="text-slate-100 antialiased overflow-x-hidden">
+  <body class="text-base-content antialiased overflow-x-hidden bg-base-300">
     <script>
       (function () {
         var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -97,22 +165,199 @@
     <div class="min-h-full flex flex-col">
       <header class="border-b border-slate-800/60 bg-slate-950/70 backdrop-blur">
         <div class="max-w-6xl mx-auto px-4 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-          <div class="flex flex-wrap items-center justify-start sm:justify-end gap-2 sm:gap-3 text-xs text-slate-400 mt-1 sm:mt-0">
-            <span
-              class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/30 text-emerald-300"
-              title="Все данные сохраняются только локально в вашем браузере."
-            >
+          <div class="flex flex-wrap items-center gap-3 text-xs text-slate-300 mt-1 sm:mt-0">
+            <span id="accountLabel" class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-900/70 border border-slate-700/80">
               <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Локальное хранение
+              Аккаунт:
+              <span id="accountLogin" class="font-semibold text-slate-100">гость</span>
             </span>
+            <span id="syncLabel" class="inline-flex items-center gap-1 text-slate-400">
+              <span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+              Последняя синхронизация:
+              <span id="syncLabelValue">—</span>
+            </span>
+          </div>
+          <div class="flex items-center gap-2 text-xs mt-1 sm:mt-0">
+            <button
+              type="button"
+              id="openAuthModalButton"
+              class="inline-flex items-center justify-center rounded-lg border border-slate-600/80 bg-slate-900/70 px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+            >
+              Управление аккаунтом
+            </button>
           </div>
         </div>
       </header>
 
       <main class="flex-1">
         <div class="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-5">
-          <!-- Month line + add button -->
-          <div class="flex items-center justify-between gap-2 sm:gap-3">
+          <!-- Auth modal -->
+          <div
+            id="authModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-xs max-h-[80vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Аккаунт
+                </h2>
+                <button
+                  type="button"
+                  id="authModalCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <p class="text-[11px] text-slate-400" id="authDescription">
+                Войдите в существующий аккаунт или создайте новый, чтобы хранить историю отдельно.
+              </p>
+              <form id="authForm" class="space-y-3 text-xs">
+                <!-- Login view -->
+                <div id="authLoginView" class="space-y-3">
+                  <div class="flex flex-col gap-1.5">
+                    <label for="loginInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Логин
+                    </label>
+                    <input
+                      id="loginInput"
+                      type="text"
+                      autocomplete="username"
+                      placeholder="Например: ivan"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <label for="passwordInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Пароль
+                    </label>
+                    <input
+                      id="passwordInput"
+                      type="password"
+                      autocomplete="current-password"
+                      placeholder="Минимум 6 символов"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <p id="authError" class="text-[11px] text-rose-400 min-h-[1.2em]"></p>
+                  <div class="flex items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      id="loginButton"
+                      class="inline-flex flex-1 items-center justify-center rounded-lg bg-emerald-500 px-3 py-2 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                    >
+                      Войти
+                    </button>
+                    <button
+                      type="button"
+                      id="goToRegisterButton"
+                      class="inline-flex flex-1 items-center justify-center rounded-lg border border-emerald-500/70 bg-transparent px-3 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                    >
+                      Регистрация
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Register view -->
+                <div id="authRegisterView" class="space-y-3 hidden">
+                  <div class="flex flex-col gap-1.5">
+                    <label for="registerNameInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Имя
+                    </label>
+                    <input
+                      id="registerNameInput"
+                      type="text"
+                      autocomplete="name"
+                      placeholder="Как к вам обращаться"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <label for="registerLoginInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Логин
+                    </label>
+                    <input
+                      id="registerLoginInput"
+                      type="text"
+                      autocomplete="username"
+                      placeholder="Например: ivan"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <label for="registerPasswordInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Пароль
+                    </label>
+                    <input
+                      id="registerPasswordInput"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder="Минимум 6 символов"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <label for="registerPasswordRepeatInput" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Повтор пароля
+                    </label>
+                    <input
+                      id="registerPasswordRepeatInput"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder="Повторите пароль"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+                  <p id="authRegisterError" class="text-[11px] text-rose-400 min-h-[1.2em]"></p>
+                  <div class="flex items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      id="registerSubmitButton"
+                      class="inline-flex flex-1 items-center justify-center rounded-lg bg-emerald-500 px-3 py-2 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                    >
+                      Создать аккаунт
+                    </button>
+                    <button
+                      type="button"
+                      id="goToLoginButton"
+                      class="inline-flex flex-1 items-center justify-center rounded-lg border border-slate-600/80 bg-transparent px-3 py-2 text-[11px] font-semibold text-slate-200 hover:bg-slate-800 transition-colors"
+                    >
+                      Уже есть аккаунт
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Profile view -->
+                <div id="authProfileView" class="space-y-3 hidden">
+                  <div class="flex flex-col gap-1.5">
+                    <span class="text-[11px] text-slate-300 uppercase tracking-wide">Имя</span>
+                    <span id="authProfileName" class="text-sm text-slate-100">—</span>
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <span class="text-[11px] text-slate-300 uppercase tracking-wide">Логин</span>
+                    <span id="authProfileLogin" class="text-sm text-slate-100">—</span>
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <span class="text-[11px] text-slate-300 uppercase tracking-wide">Последняя синхронизация</span>
+                    <span id="authProfileSync" class="text-sm text-slate-100">—</span>
+                  </div>
+                  <button
+                    type="button"
+                    id="logoutButton"
+                    class="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-slate-600/80 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Выйти из аккаунта
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Month line + add button + AI -->
+          <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
               <label for="monthSelect" class="text-xs font-medium text-slate-300 uppercase tracking-wide">
                 Месяц
@@ -131,14 +376,163 @@
                 <span class="hidden xs:inline">Редактировать</span>
               </button>
             </div>
-            <button
-              type="button"
-              id="headerAddOperationButton"
-              class="inline-flex items-center justify-center gap-1 rounded-full bg-emerald-500 px-4 py-2 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-md shadow-emerald-500/40 flex-shrink-0"
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                id="headerAiButton"
+                class="inline-flex items-center justify-center gap-1 rounded-full border border-sky-500/70 bg-sky-500/10 px-3 py-2 text-[11px] font-semibold text-sky-200 hover:bg-sky-500/20 hover:border-sky-400 transition-colors shadow-sm shadow-sky-500/30"
+              >
+                <span class="text-xs leading-none">⚡</span>
+                <span>AI</span>
+              </button>
+              <button
+                type="button"
+                id="headerAddOperationButton"
+                class="inline-flex items-center justify-center rounded-full bg-emerald-500 px-4 py-2 text-[15px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-md shadow-emerald-500/40"
+                aria-label="Добавить операцию"
+              >
+                <span class="leading-none">+</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Savings withdraw modal -->
+          <div
+            id="savingsWithdrawModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-xs max-h-[80vh] overflow-hidden p-4 space-y-3"
             >
-              <span class="text-base leading-none">+</span>
-              <span>Добавить</span>
-            </button>
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Вывод из сбережений
+                </h2>
+                <button
+                  type="button"
+                  id="savingsWithdrawCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <form id="savingsWithdrawForm" class="space-y-3 text-xs">
+                <div class="flex flex-col gap-1.5">
+                  <label for="savingsWithdrawAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Сумма вывода, ₽
+                  </label>
+                  <input
+                    id="savingsWithdrawAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="savingsWithdrawNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Комментарий (необязательно)
+                  </label>
+                  <input
+                    id="savingsWithdrawNote"
+                    type="text"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    id="savingsWithdrawCancelButton"
+                    class="rounded-lg border border-slate-600/80 px-3 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    class="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    Вывести
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Savings deposit modal -->
+          <div
+            id="savingsDepositModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-xs max-h-[80vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Внести в сбережения
+                </h2>
+                <button
+                  type="button"
+                  id="savingsDepositCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <form id="savingsDepositForm" class="space-y-3 text-xs">
+                <div class="flex flex-col gap-1.5">
+                  <label for="savingsDepositAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Сумма, ₽
+                  </label>
+                  <input
+                    id="savingsDepositAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="savingsDepositDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Дата операции
+                  </label>
+                  <input
+                    id="savingsDepositDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="savingsDepositNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Комментарий (необязательно)
+                  </label>
+                  <textarea
+                    id="savingsDepositNote"
+                    rows="2"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                    placeholder="Например: перевод с карты в копилку"
+                  ></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    id="savingsDepositCancelButton"
+                    class="px-3 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    class="px-4 py-1.5 rounded-lg bg-emerald-500 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    Внести
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
 
           <!-- Month details modal -->
@@ -314,8 +708,10 @@
                   </label>
                   <input
                     id="editTransactionAmount"
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
                     class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   />
                 </div>
@@ -358,14 +754,569 @@
             </div>
           </div>
 
+          <!-- Add operation modal -->
+          <div
+            id="addOperationModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[90vh] overflow-y-auto p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Добавить операцию
+                </h2>
+                <button
+                  type="button"
+                  id="closeAddOperationModalButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <div id="operationsPanelBody" class="space-y-3">
+                <!-- Существующая форма добавления операций -->
+                <form id="transactionForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div class="sm:col-span-2">
+                    <div class="flex gap-2">
+                      <button
+                        type="button"
+                        id="typeExpenseButton"
+                        class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-rose-500/20 hover:border-rose-400/80 transition-colors"
+                      >
+                        Расход
+                      </button>
+                      <button
+                        type="button"
+                        id="typeIncomeButton"
+                        class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-emerald-500/20 hover:border-emerald-400/80 transition-colors"
+                      >
+                        Доход
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    id="expenseKindRow"
+                    class="hidden sm:col-span-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-300"
+                  >
+                    <span class="uppercase tracking-wide text-[10px] text-slate-400">
+                      Тип расхода:
+                    </span>
+                    <div class="inline-flex rounded-full border border-slate-700/80 bg-slate-900/70 p-0.5">
+                      <button
+                        type="button"
+                        id="expenseKindNormalButton"
+                        class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-200"
+                      >
+                        Обычный
+                      </button>
+                      <button
+                        type="button"
+                        id="expenseKindFixedButton"
+                        class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300"
+                      >
+                        Крупная покупка
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5 sm:col-span-2 hidden">
+                    <label for="transactionType" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Тип операции
+                    </label>
+                    <select
+                      id="transactionType"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    >
+                      <option value="flexibleExpense">Обычный расход</option>
+                      <option value="income">Доход</option>
+                      <option value="fixedExpense">Крупная покупка</option>
+                    </select>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5 sm:col-span-2">
+                    <label class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Категория
+                    </label>
+                    <select
+                      id="transactionCategory"
+                      class="hidden w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    >
+                      <!-- варианты категорий заполняются из JS -->
+                    </select>
+                    <div
+                      id="transactionCategoryButtons"
+                      class="flex flex-wrap gap-1.5 mt-0.5"
+                    >
+                    </div>
+                    <div class="mt-1 flex items-center gap-1.5">
+                      <input
+                        id="newCategoryName"
+                        type="text"
+                        placeholder="Новая категория"
+                        class="flex-1 rounded-lg bg-slate-900/70 border border-slate-700/80 px-2 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        id="addCategoryButton"
+                        class="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5">
+                    <label for="transactionTitle" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Название
+                    </label>
+                    <input
+                      id="transactionTitle"
+                      type="text"
+                      placeholder="Например: Зарплата, Аренда, Продукты"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div class="flex flex-col gap-1.5">
+                    <label for="transactionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Сумма, ₽
+                    </label>
+<input
+                    id="transactionAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <div class="mt-1 flex items-center justify-between">
+                      <span id="transactionDateLabel" class="text-[10px] text-slate-500">
+                      </span>
+                      <button
+                        type="button"
+                        id="transactionDateToggleButton"
+                        class="text-[10px] text-sky-300 hover:text-sky-100 px-2 py-1 rounded-md hover:bg-slate-800/80 transition-colors"
+                      >
+                        Изменить дату
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5 hidden" id="transactionDateRow">
+                    <label for="transactionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Дата операции
+                    </label>
+                    <input
+                      id="transactionDate"
+                      type="date"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div class="flex flex-col gap-1.5 sm:col-span-2">
+                    <label for="transactionNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                      Комментарий (необязательно)
+                    </label>
+                    <input
+                      id="transactionNote"
+                      type="text"
+                      placeholder="Любые дополнительные детали"
+                      class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div
+                    id="expenseTransferRow"
+                    class="sm:col-span-2 flex items-center gap-2 text-[11px] text-slate-300 hidden"
+                  >
+                    <input
+                      id="expenseTransferCheckbox"
+                      type="checkbox"
+                      class="h-3.5 w-3.5 rounded border-slate-600/80 bg-slate-900/70 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <label for="expenseTransferCheckbox" class="select-none">
+                      Перевод
+                    </label>
+                  </div>
+
+                  <div
+                    id="expenseRepeatRow"
+                    class="sm:col-span-2 flex items-center gap-2 text-[11px] text-slate-300 hidden"
+                  >
+                    <input
+                      id="expenseRepeatCheckbox"
+                      type="checkbox"
+                      class="h-3.5 w-3.5 rounded border-slate-600/80 bg-slate-900/70 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <label for="expenseRepeatCheckbox" class="select-none">
+                      Повторяемое (добавить в шаблоны с днём текущей даты)
+                    </label>
+                  </div>
+
+                  <div class="flex justify-between sm:col-span-2 mt-1.5 gap-2">
+                    <button
+                      type="button"
+                      id="fillSalaryExample"
+                      class="inline-flex items-center px-3 py-2 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                    >
+                      Пример: Зарплата
+                    </button>
+                    <button
+                      type="submit"
+                      id="transactionSubmitBtn"
+                      class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/30"
+                    >
+                      Сохранить операцию
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI chat modal -->
+          <div
+            id="aiChatModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[90vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  AI помощник
+                </h2>
+                <button
+                  type="button"
+                  id="aiChatCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                >
+                  ×
+                </button>
+              </div>
+              <div
+                id="aiChatMessages"
+                class="rounded-lg border border-slate-800/80 bg-slate-950/50 p-2 text-xs space-y-2 max-h-[40vh] overflow-y-auto"
+              >
+                <div class="text-[11px] text-slate-400">
+                  Опиши доходы и расходы, задай вопрос по бюджету.
+                  AI может предложить план и создать операции на основе текста.
+                  Можно прикрепить скриншоты или фото чеков.
+                </div>
+              </div>
+              <div id="aiChatPromptButtons" class="flex flex-wrap gap-1.5">
+                <button type="button" data-ai-prompt="day" class="ai-prompt-btn rounded-lg border border-slate-600/80 bg-slate-800/60 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-700/80 transition-colors">
+                  Рекомендация на день
+                </button>
+                <button type="button" data-ai-prompt="month" class="ai-prompt-btn rounded-lg border border-slate-600/80 bg-slate-800/60 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-700/80 transition-colors">
+                  Рекомендация на месяц
+                </button>
+                <button type="button" data-ai-prompt="analysis" class="ai-prompt-btn rounded-lg border border-slate-600/80 bg-slate-800/60 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-700/80 transition-colors">
+                  Анализ расходов в месяц
+                </button>
+                <button type="button" data-ai-prompt="goal" class="ai-prompt-btn rounded-lg border border-slate-600/80 bg-slate-800/60 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-700/80 transition-colors">
+                  Накопить на цель
+                </button>
+                <button type="button" data-ai-prompt="debt" class="ai-prompt-btn rounded-lg border border-slate-600/80 bg-slate-800/60 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-700/80 transition-colors">
+                  Закрыть долг
+                </button>
+              </div>
+              <div id="aiChatPromptChoice" class="hidden space-y-1.5">
+                <div id="aiChatPromptChoiceLabel" class="text-[10px] text-slate-400"></div>
+                <div class="flex gap-2 items-center">
+                  <select id="aiChatGoalSelect" class="hidden flex-1 rounded-lg bg-slate-900/70 border border-slate-600/80 px-2 py-1.5 text-[11px] text-slate-200">
+                    <option value="">— выберите цель —</option>
+                  </select>
+                  <select id="aiChatLoanSelect" class="hidden flex-1 rounded-lg bg-slate-900/70 border border-slate-600/80 px-2 py-1.5 text-[11px] text-slate-200">
+                    <option value="">— выберите долг —</option>
+                  </select>
+                  <button type="button" id="aiChatPromptChoiceSend" class="rounded-lg bg-sky-500/80 px-3 py-1.5 text-[10px] font-medium text-sky-950 hover:bg-sky-400 transition-colors">
+                    Спросить
+                  </button>
+                </div>
+              </div>
+              <form id="aiChatForm" class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      id="aiImageButton"
+                      class="inline-flex items-center gap-1 rounded-full border border-slate-600/80 bg-slate-900/70 px-2.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-800 transition-colors"
+                    >
+                      <span>📎</span>
+                      <span>Изображение</span>
+                    </button>
+                    <input
+                      id="aiImageInput"
+                      type="file"
+                      accept="image/*"
+                      class="hidden"
+                      multiple
+                    />
+                  </div>
+                  <div
+                    id="aiImagePreview"
+                    class="flex flex-wrap gap-1 max-w-[140px]"
+                  ></div>
+                </div>
+                <textarea
+                  id="aiChatInput"
+                  rows="2"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 resize-none"
+                  placeholder="Например: «Добавь расход 1200 ₽ на продукты сегодня» или «Разбери мои траты за месяц»"
+                ></textarea>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] text-slate-500">
+                    Reasoning — дольше, глубже. Быстрый — ответ за секунды.
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      id="aiChatSendReasoning"
+                      class="inline-flex items-center justify-center gap-1 rounded-full bg-violet-600 px-3 py-2 text-[11px] font-semibold text-white hover:bg-violet-500 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      title="Модель с рассуждением (медленнее, детальнее)"
+                    >
+                      <span>Reasoning</span>
+                      <span class="opacity-80">(R)</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="aiChatSendFast"
+                      class="inline-flex items-center justify-center gap-1 rounded-full bg-sky-500 px-3 py-2 text-[11px] font-semibold text-sky-950 hover:bg-sky-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      title="Быстрая модель"
+                    >
+                      <span>Быстрый</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Daily recommendation explanation modal -->
+          <div
+            id="aiDailyExplainModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[80vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Пояснение рекомендации на сегодня
+                </h2>
+                <button
+                  type="button"
+                  id="aiDailyExplainCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                >
+                  ×
+                </button>
+              </div>
+              <div
+                id="aiDailyExplainText"
+                class="text-[11px] text-slate-100 leading-snug max-h-[60vh] overflow-y-auto whitespace-pre-line"
+              >
+              </div>
+            </div>
+          </div>
+
+          <!-- Loans: action modal (pay/receive) -->
+          <div
+            id="loanActionModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-xs max-h-[85vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 id="loanActionTitle" class="text-sm font-semibold text-slate-100">
+                  Операция по займу
+                </h2>
+                <button
+                  type="button"
+                  id="loanActionCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <form id="loanActionForm" class="space-y-3 text-xs">
+                <div class="flex flex-col gap-1.5">
+                  <label for="loanActionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Сумма, ₽
+                  </label>
+                  <input
+                    id="loanActionAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="loanActionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Дата операции
+                  </label>
+                  <input
+                    id="loanActionDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="loanActionNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Комментарий (необязательно)
+                  </label>
+                  <textarea
+                    id="loanActionNote"
+                    rows="2"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                  ></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    id="loanActionCancelButton"
+                    class="px-3 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    id="loanActionSubmitButton"
+                    class="px-4 py-1.5 rounded-lg bg-emerald-500 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Loans: edit modal -->
+          <div
+            id="loanEditModal"
+            class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+          >
+            <div
+              class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[85vh] overflow-hidden p-4 space-y-3"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-100">
+                  Редактирование займа
+                </h2>
+                <button
+                  type="button"
+                  id="loanEditCloseButton"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+              <form id="loanEditForm" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div class="flex flex-col gap-1.5 sm:col-span-2">
+                  <label for="loanEditKind" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Тип
+                  </label>
+                  <select
+                    id="loanEditKind"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                    <option value="borrow">Я должен (занял у)</option>
+                    <option value="lend">Мне должны (занял кому-то)</option>
+                    <option value="credit">Кредит</option>
+                  </select>
+                </div>
+                <div class="flex flex-col gap-1.5 sm:col-span-2">
+                  <label for="loanEditName" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Имя / банк
+                  </label>
+                  <input
+                    id="loanEditName"
+                    type="text"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="loanEditAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Сумма займа, ₽
+                  </label>
+                  <input
+                    id="loanEditAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label for="loanEditBalance" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Остаток, ₽
+                  </label>
+                  <input
+                    id="loanEditBalance"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0"
+                    class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5 sm:col-span-2">
+                  <label for="loanEditDueDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Вернуть до
+                  </label>
+                  <input
+                    id="loanEditDueDate"
+                    type="date"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div class="flex flex-col gap-1.5 sm:col-span-2">
+                  <label for="loanEditNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                    Комментарий (необязательно)
+                  </label>
+                  <textarea
+                    id="loanEditNote"
+                    rows="2"
+                    class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                  ></textarea>
+                </div>
+                <div class="sm:col-span-2 flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    id="loanEditCancelButton"
+                    class="px-3 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    class="px-4 py-1.5 rounded-lg bg-emerald-500 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
           <!-- Today summary (Dashboard & Operations, above tabs) -->
           <div
             id="todaySummaryRow"
             class="hidden mt-3 grid grid-cols-3 gap-2"
           >
-            <div class="rounded-xl border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-[11px]">
+            <div class="rounded-xl border border-emerald-400/70 bg-white px-3 py-2 text-[11px]">
               <div class="flex items-center justify-between mb-0.5">
-                <div class="text-[10px] uppercase tracking-wide text-emerald-300/90 font-semibold">
+                <div class="text-[10px] uppercase tracking-wide text-emerald-700 font-semibold">
                   Остаток на балансе
                 </div>
                 <button
@@ -378,24 +1329,66 @@
                   ✎
                 </button>
               </div>
-              <div id="todayBalance" class="text-base font-semibold text-emerald-100">
+              <div id="todayBalance" class="text-base font-semibold text-emerald-700">
                 0 ₽
               </div>
             </div>
-            <div class="rounded-xl border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
-              <div class="text-[10px] uppercase tracking-wide text-fuchsia-300/90 font-semibold mb-0.5">
-                Рекомендуется потратить сегодня
+            <div class="rounded-xl border border-fuchsia-400/60 bg-white px-3 py-2 text-[11px]">
+              <div class="flex items-center justify-between mb-0.5">
+                <div class="text-[10px] uppercase tracking-wide text-fuchsia-700 font-semibold">
+                  Рекомендуется потратить сегодня
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    id="todayRecommendedRefreshReasoning"
+                    class="inline-flex items-center justify-center min-w-[1.75rem] h-6 rounded-full border border-violet-400/70 text-[10px] text-violet-600 hover:bg-violet-50 hover:border-violet-500 transition-colors disabled:opacity-50"
+                    title="Рассчитать через Reasoning (медленнее, детальнее)"
+                  >
+                    ⟳ R
+                  </button>
+                  <button
+                    type="button"
+                    id="todayRecommendedRefreshFast"
+                    class="inline-flex items-center justify-center w-6 h-6 rounded-full border border-fuchsia-400/70 text-[11px] text-fuchsia-600 hover:bg-fuchsia-50 hover:border-fuchsia-500 transition-colors disabled:opacity-50"
+                    title="Рассчитать быстро"
+                  >
+                    ⟳
+                  </button>
+                </div>
               </div>
-              <div id="todayRecommended" class="text-base font-semibold text-fuchsia-100">
-                0 ₽
+              <div class="flex items-baseline gap-1.5">
+                <div id="todayRecommended" class="text-base font-semibold text-fuchsia-700">0 ₽</div>
+                <div id="todayRecommendedLabel" class="text-[9px] text-fuchsia-500/80"></div>
               </div>
+              <div id="todayRecommendedAfter" class="text-[10px] text-slate-600 mt-0.5 hidden">
+                После дохода: <span id="todayRecommendedAfterValue" class="font-semibold">0 ₽</span>
+              </div>
+              <div id="todayRecommendedUpdatedAt" class="mt-0.5 text-[9px] text-slate-500">
+                ⟳ R — reasoning, ⟳ — быстрый расчёт
+              </div>
+              <button
+                type="button"
+                id="todayRecommendedExplainButton"
+                class="mt-1 text-[9px] text-slate-500 underline-offset-2 hover:underline"
+              >
+                Почему такая сумма?
+              </button>
             </div>
-            <div class="rounded-xl border border-slate-600/70 bg-slate-900/70 px-3 py-2 text-[11px] text-right">
-              <div class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-0.5">
+            <div class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-[11px] text-right">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-0.5">
                 Уже потрачено сегодня
               </div>
-              <div id="todaySpent" class="text-base font-semibold text-slate-100">
+              <div id="todaySpent" class="text-base font-semibold text-slate-800">
                 0 ₽
+              </div>
+              <div class="mt-1.5 pt-1.5 border-t border-slate-200">
+                <div class="text-[10px] text-slate-500">
+                  Остаток для трат
+                </div>
+                <div id="todaySpentRemainder" class="text-sm font-semibold text-slate-700">
+                  0 ₽
+                </div>
               </div>
             </div>
           </div>
@@ -409,8 +1402,10 @@
               </label>
               <input
                 id="todayBalanceInput"
-                type="number"
-                step="0.01"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                placeholder="0"
                 class="number-input w-full sm:max-w-[160px] rounded-lg bg-slate-950/70 border border-slate-700/80 px-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
               />
             </div>
@@ -446,13 +1441,6 @@
           <div class="mt-2 border-b border-slate-800/70 overflow-x-auto">
             <nav class="flex flex-nowrap gap-1 sm:gap-2 text-[11px] sm:text-xs whitespace-nowrap">
               <button
-                id="tabOperations"
-                type="button"
-                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium bg-slate-800/80 border-slate-500/60 text-slate-50"
-              >
-                Операции
-              </button>
-              <button
                 id="tabDashboard"
                 type="button"
                 class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
@@ -472,6 +1460,20 @@
                 class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
               >
                 Шаблоны
+              </button>
+              <button
+                id="tabGoals"
+                type="button"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                Цели
+              </button>
+              <button
+                id="tabLoans"
+                type="button"
+                class="px-2.5 sm:px-3 py-1.5 rounded-lg border font-medium border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 transition-colors"
+              >
+                Займы
               </button>
               <button
                 id="tabAnalytics"
@@ -500,6 +1502,10 @@
               <p id="totalIncome" class="text-xl sm:text-2xl font-semibold text-emerald-200">
                 0 ₽
               </p>
+              <p class="text-[11px] text-slate-600 mt-1">
+                Планируемые до конца месяца:
+                <span id="totalIncomePlanned" class="text-emerald-700 font-medium">0 ₽</span>
+              </p>
             </div>
 
             <!-- Fixed purchases -->
@@ -514,6 +1520,10 @@
               </div>
               <p id="totalFixedExpenses" class="text-xl sm:text-2xl font-semibold text-amber-200">
                 0 ₽
+              </p>
+              <p class="text-[11px] text-slate-600 mt-1">
+                Планируемые до конца месяца:
+                <span id="totalFixedPlanned" class="text-amber-700 font-medium">0 ₽</span>
               </p>
             </div>
 
@@ -530,13 +1540,22 @@
               <p id="flexibleBudget" class="text-xl sm:text-2xl font-semibold text-sky-200">
                 0 ₽
               </p>
-              <p class="text-[11px] text-slate-400 mt-1">
-                Плановый дневной лимит:
-                <span id="plannedDailyLimit" class="text-sky-100 font-medium">0 ₽</span>
+              <p class="text-[11px] text-slate-600 mt-1 flex items-center gap-1">
+                <span>Плановый дневной лимит:</span>
+                <span id="plannedDailyLimit" class="text-sky-700 font-medium">0 ₽</span>
+                <button
+                  type="button"
+                  id="plannedDailyLimitHelpButton"
+                  class="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-400 text-[9px] text-slate-600 hover:bg-slate-100"
+                  aria-label="Что такое плановый дневной лимит"
+                  title="Что такое плановый дневной лимит"
+                >
+                  ?
+                </button>
               </p>
-              <p class="text-[11px] text-slate-400 mt-0.5">
+              <p class="text-[11px] text-slate-600 mt-0.5">
                 Потрачено обычных расходов:
-                <span id="totalFlexibleExpenses" class="text-sky-100 font-medium">0 ₽</span>
+                <span id="totalFlexibleExpenses" class="text-sky-700 font-medium">0 ₽</span>
               </p>
             </div>
 
@@ -550,11 +1569,217 @@
                   учитываются как расход
                 </span>
               </div>
-              <p id="autoSavings" class="text-xl sm:text-2xl font-semibold text-emerald-200">
+              <p id="autoSavingsReal" class="text-xl sm:text-2xl font-semibold text-emerald-200">
                 0 ₽
               </p>
+              <p class="text-[11px] text-slate-600 mt-1">
+                План сбережений (15% доходов):
+                <span id="autoSavings" class="text-emerald-700 font-medium">0 ₽</span>
+              </p>
+              <div class="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  id="savingsDepositOpenButton"
+                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/70 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-500/20 hover:border-emerald-300 transition-colors"
+                >
+                  <span>Внести</span>
+                </button>
+                <button
+                  type="button"
+                  id="savingsWithdrawOpenButton"
+                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/70 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-500/20 hover:border-emerald-300 transition-colors"
+                >
+                  <span>Вывести</span>
+                </button>
+              </div>
             </div>
           </section>
+
+        <!-- Goals: edit modal -->
+        <div
+          id="goalEditModal"
+          class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+        >
+          <div
+            class="glass rounded-2xl border border-slate-700/70 w-full max-w-md max-h-[85vh] overflow-hidden p-4 space-y-3"
+          >
+            <div class="flex items-center justify-between mb-1">
+              <h2 class="text-sm font-semibold text-slate-100">
+                Редактирование цели
+              </h2>
+              <button
+                type="button"
+                id="goalEditCloseButton"
+                class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <form id="goalEditForm" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div class="flex flex-col gap-1.5 sm:col-span-2">
+                <label for="goalEditName" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Цель
+                </label>
+                <input
+                  id="goalEditName"
+                  type="text"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalEditCategory" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Категория
+                </label>
+                <select
+                  id="goalEditCategory"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                >
+                  <option value="">Без категории</option>
+                  <option value="Путешествия">Путешествия</option>
+                  <option value="Техника">Техника</option>
+                  <option value="Ремонт">Ремонт</option>
+                  <option value="Образование">Образование</option>
+                  <option value="Другое">Другое</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalEditTargetAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Сумма цели, ₽
+                </label>
+                <input
+                  id="goalEditTargetAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  placeholder="0"
+                  class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5 sm:col-span-2">
+                <label class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Уже накоплено
+                </label>
+                <div
+                  id="goalEditCurrentAmountDisplay"
+                  class="rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs text-slate-200"
+                >
+                  0 ₽
+                </div>
+              </div>
+              <div class="flex flex-col gap-1.5 sm:col-span-2">
+                <label for="goalEditDueDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  До какой даты
+                </label>
+                <input
+                  id="goalEditDueDate"
+                  type="date"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5 sm:col-span-2">
+                <label for="goalEditNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Комментарий (необязательно)
+                </label>
+                <textarea
+                  id="goalEditNote"
+                  rows="2"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                ></textarea>
+              </div>
+              <div class="sm:col-span-2 flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  id="goalEditCancelButton"
+                  class="px-3 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  class="px-4 py-1.5 rounded-lg bg-emerald-500 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                >
+                  Сохранить
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Goals: deposit/withdraw modal -->
+        <div
+          id="goalActionModal"
+          class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 px-4"
+        >
+          <div
+            class="glass rounded-2xl border border-slate-700/70 w-full max-w-xs max-h-[85vh] overflow-hidden p-4 space-y-3"
+          >
+            <div class="flex items-center justify-between mb-1">
+              <h2 id="goalActionTitle" class="text-sm font-semibold text-slate-100">
+                Операция по цели
+              </h2>
+              <button
+                type="button"
+                id="goalActionCloseButton"
+                class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-600/80 text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <form id="goalActionForm" class="space-y-3 text-xs">
+              <div class="flex flex-col gap-1.5">
+                <label for="goalActionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Сумма, ₽
+                </label>
+                <input
+                  id="goalActionAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  placeholder="0"
+                  class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalActionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Дата операции
+                </label>
+                <input
+                  id="goalActionDate"
+                  type="date"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalActionNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Комментарий (необязательно)
+                </label>
+                <textarea
+                  id="goalActionNote"
+                  rows="2"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                ></textarea>
+              </div>
+              <div class="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  id="goalActionCancelButton"
+                  class="px-3 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  id="goalActionSubmitButton"
+                  class="px-4 py-1.5 rounded-lg bg-emerald-500 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                >
+                  Сохранить
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
 
           <!-- Saldo and alerts (Dashboard) -->
           <section
@@ -573,7 +1798,7 @@
                 </div>
                 <div
                   id="saldoBadge"
-                  class="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-100 max-w-xs"
+                  class="px-3 py-2 rounded-xl border border-emerald-400/60 bg-white text-xs text-emerald-700 max-w-xs"
                 >
                 </div>
               </div>
@@ -615,6 +1840,181 @@
           </section>
 
           <!-- Analytics by category -->
+          <!-- Loans and Goals sections -->
+          <section
+            id="goalsSection"
+            class="hidden glass rounded-2xl p-4 border border-slate-700/70"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                Цели
+              </p>
+              <span class="text-[11px] text-slate-500">
+                Накопления на крупные цели
+              </span>
+            </div>
+            <form id="goalForm" class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs mb-3">
+              <div class="flex flex-col gap-1.5">
+                <label for="goalName" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Цель
+                </label>
+                <input
+                  id="goalName"
+                  type="text"
+                  placeholder="Например: Путешествие, ремонт"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalCategory" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Категория
+                </label>
+                <select
+                  id="goalCategory"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                >
+                  <option value="">Без категории</option>
+                  <option value="Путешествия">Путешествия</option>
+                  <option value="Техника">Техника</option>
+                  <option value="Ремонт">Ремонт</option>
+                  <option value="Образование">Образование</option>
+                  <option value="Другое">Другое</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalTargetAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Сумма цели, ₽
+                </label>
+                <input
+                  id="goalTargetAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  placeholder="0"
+                  class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="goalDueDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  До какой даты
+                </label>
+                <input
+                  id="goalDueDate"
+                  type="date"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="sm:col-span-4 flex flex-col gap-1.5">
+                <label for="goalNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Комментарий (необязательно)
+                </label>
+                <textarea
+                  id="goalNote"
+                  rows="2"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                ></textarea>
+              </div>
+              <div class="sm:col-span-4 flex justify-end">
+                <button
+                  type="submit"
+                  class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                >
+                  Сохранить цель
+                </button>
+              </div>
+            </form>
+            <div id="goalsEmptyState" class="text-[11px] text-slate-500 border border-dashed border-slate-700/70 rounded-xl px-3 py-3">
+              Пока нет целей. Добавьте, например, «Путешествие», «Ноутбук» или «Ремонт».
+            </div>
+            <div id="goalsList" class="hidden mt-2 space-y-2 text-xs"></div>
+          </section>
+
+          <section
+            id="loansSection"
+            class="hidden glass rounded-2xl p-4 border border-slate-700/70"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                Займы
+              </p>
+              <span class="text-[11px] text-slate-500">
+                Я должен / Мне должны
+              </span>
+            </div>
+            <form id="loanForm" class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs mb-3">
+              <div class="flex flex-col gap-1.5">
+                <label for="loanKind" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Тип
+                </label>
+                <select
+                  id="loanKind"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                >
+                  <option value="borrow">Я должен (занял у)</option>
+                  <option value="lend">Мне должны (занял кому-то)</option>
+                  <option value="credit">Кредит</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="loanName" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Имя / банк
+                </label>
+                <input
+                  id="loanName"
+                  type="text"
+                  placeholder="Кому или у кого"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="loanAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Сумма, ₽
+                </label>
+                <input
+                  id="loanAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  placeholder="0"
+                  class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="loanDueDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Вернуть до
+                </label>
+                <input
+                  id="loanDueDate"
+                  type="date"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div class="sm:col-span-4 flex flex-col gap-1.5">
+                <label for="loanNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
+                  Комментарий (необязательно)
+                </label>
+                <textarea
+                  id="loanNote"
+                  rows="2"
+                  class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                ></textarea>
+              </div>
+              <div class="sm:col-span-4 flex justify-end">
+                <button
+                  type="submit"
+                  class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors"
+                >
+                  Сохранить счёт
+                </button>
+              </div>
+            </form>
+            <div id="loansEmptyState" class="text-[11px] text-slate-500 border border-dashed border-slate-700/70 rounded-xl px-3 py-3">
+              Пока нет займов. Добавьте счёт «Я должен» или «Мне должны».
+            </div>
+            <div id="loansList" class="hidden mt-2 space-y-2 text-xs"></div>
+          </section>
+
+          <!-- Analytics by category -->
           <section
             id="analyticsSection"
             class="hidden glass rounded-2xl p-4 border border-slate-700/70"
@@ -643,187 +2043,8 @@
 
           <!-- Forms and transactions list -->
           <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <!-- Forms -->
+            <!-- Presets -->
             <div class="space-y-4">
-              <div
-                id="addOperationCard"
-                class="glass rounded-2xl p-4 border border-slate-700/70"
-              >
-                <div class="flex items-center justify-between mb-3">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                    Добавить операцию
-                  </p>
-                </div>
-                <div id="operationsPanelBody" class="space-y-3">
-                  <form id="transactionForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div class="sm:col-span-2">
-                      <div class="flex gap-2">
-                        <button
-                          type="button"
-                          id="typeExpenseButton"
-                          class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-rose-500/20 hover:border-rose-400/80 transition-colors"
-                        >
-                          Расход
-                        </button>
-                        <button
-                          type="button"
-                          id="typeIncomeButton"
-                          class="flex-1 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-100 hover:bg-emerald-500/20 hover:border-emerald-400/80 transition-colors"
-                        >
-                          Доход
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      id="expenseKindRow"
-                      class="hidden sm:col-span-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-300"
-                    >
-                      <span class="uppercase tracking-wide text-[10px] text-slate-400">
-                        Тип расхода:
-                      </span>
-                      <div class="inline-flex rounded-full border border-slate-700/80 bg-slate-900/70 p-0.5">
-                        <button
-                          type="button"
-                          id="expenseKindNormalButton"
-                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-200"
-                        >
-                          Обычный
-                        </button>
-                        <button
-                          type="button"
-                          id="expenseKindFixedButton"
-                          class="px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300"
-                        >
-                          Крупная покупка
-                        </button>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5 sm:col-span-2 hidden">
-                      <label for="transactionType" class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Тип операции
-                      </label>
-                      <select
-                        id="transactionType"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      >
-                        <option value="flexibleExpense">Обычный расход</option>
-                        <option value="income">Доход</option>
-                        <option value="fixedExpense">Крупная покупка</option>
-                      </select>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5 sm:col-span-2">
-                      <label class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Категория
-                      </label>
-                      <select
-                        id="transactionCategory"
-                        class="hidden w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      >
-                        <!-- варианты категорий заполняются из JS -->
-                      </select>
-                      <div
-                        id="transactionCategoryButtons"
-                        class="flex flex-wrap gap-1.5 mt-0.5"
-                      >
-                      </div>
-                      <div class="mt-1 flex items-center gap-1.5">
-                        <input
-                          id="newCategoryName"
-                          type="text"
-                          placeholder="Новая категория"
-                          class="flex-1 rounded-lg bg-slate-900/70 border border-slate-700/80 px-2 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                        />
-                        <button
-                          type="button"
-                          id="addCategoryButton"
-                          class="inline-flex items-center px-2.5 py-1.5 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                      <label for="transactionTitle" class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Название
-                      </label>
-                      <input
-                        id="transactionTitle"
-                        type="text"
-                        placeholder="Например: Зарплата, Аренда, Продукты"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                      <label for="transactionAmount" class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Сумма, ₽
-                      </label>
-                      <input
-                        id="transactionAmount"
-                        type="number"
-                        step="0.01"
-                        class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                      <div class="mt-1 flex items-center justify-between">
-                        <span id="transactionDateLabel" class="text-[10px] text-slate-500">
-                        </span>
-                        <button
-                          type="button"
-                          id="transactionDateToggleButton"
-                          class="text-[10px] text-sky-300 hover:text-sky-100 px-2 py-1 rounded-md hover:bg-slate-800/80 transition-colors"
-                        >
-                          Изменить дату
-                        </button>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5 hidden" id="transactionDateRow">
-                      <label for="transactionDate" class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Дата операции
-                      </label>
-                      <input
-                        id="transactionDate"
-                        type="date"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div class="flex flex-col gap-1.5 sm:col-span-2">
-                      <label for="transactionNote" class="text-[11px] text-slate-300 uppercase tracking-wide">
-                        Комментарий (необязательно)
-                      </label>
-                      <input
-                        id="transactionNote"
-                        type="text"
-                        placeholder="Любые дополнительные детали"
-                        class="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div class="flex justify-between sm:col-span-2 mt-1.5 gap-2">
-                      <button
-                        type="button"
-                        id="fillSalaryExample"
-                        class="inline-flex items-center px-3 py-2 rounded-lg border border-slate-600/80 text-[11px] text-slate-200 hover:bg-slate-800 transition-colors"
-                      >
-                        Пример: Зарплата
-                      </button>
-                      <button
-                        type="submit"
-                        id="transactionSubmitBtn"
-                        class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/30"
-                      >
-                        Сохранить операцию
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-
               <div
                 id="presetsCard"
                 class="hidden glass rounded-2xl p-4 border border-slate-700/70"
@@ -896,8 +2117,10 @@
                       </label>
                       <input
                         id="presetAmount"
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        placeholder="0"
                         class="number-input w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       />
                     </div>
@@ -932,7 +2155,7 @@
                   >
                     Пока нет повторяемых операций. Добавьте, например, ипотеку, аренду, аванс или зарплату.
                   </div>
-                  <div id="presetList" class="hidden mt-1.5 max-h-40 overflow-y-auto text-xs"></div>
+                  <div id="presetList" class="hidden mt-1.5 text-xs"></div>
 
                 </div>
               </div>
@@ -1038,6 +2261,9 @@
                     Очистить фильтр периода
                   </button>
                 </div>
+                <div id="historyPeriodTotals" class="text-[11px] text-slate-400 mt-1.5">
+                  <!-- Доходы и расходы за период подставляются из JS -->
+                </div>
               </div>
               <div id="transactionsPanelBody">
                 <div
@@ -1051,6 +2277,31 @@
                   class="hidden mt-1.5 text-xs divide-y divide-slate-800/80"
                 >
                   <!-- rows injected by JS -->
+                </div>
+              </div>
+              <div class="mt-4 pt-4 border-t border-slate-700/70">
+                <p class="text-[11px] text-slate-400 mb-2">Резервная копия: история операций, остаток на балансе, цели, займы, шаблоны, сумма сбережений. Загрузите файл на новом устройстве, чтобы продолжить с того же места.</p>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    id="exportDataButton"
+                    class="px-3 py-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600/80 border border-slate-600/80 text-[11px] font-medium text-slate-200"
+                  >
+                    Выгрузить в файл
+                  </button>
+                  <input
+                    type="file"
+                    id="importDataInput"
+                    accept=".json,application/json"
+                    class="hidden"
+                  />
+                  <button
+                    type="button"
+                    id="importDataButton"
+                    class="px-3 py-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600/80 border border-slate-600/80 text-[11px] font-medium text-slate-200"
+                  >
+                    Загрузить из файла
+                  </button>
                 </div>
               </div>
             </div>
