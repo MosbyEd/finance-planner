@@ -398,6 +398,59 @@ describe("счета в СМС", () => {
     expect(result.transactions.map((t) => t.type)).toEqual(["transfer"]);
   });
 
+  it("две СМС одного пополнения накопительного — одно перемещение, в любом порядке", () => {
+    const outgoing = "СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150";
+    const incoming = "Накопительный счет *3150 09:00 Зачисление 1000р";
+    const apply = (state: ReturnType<typeof stateWith>, sms: string, id: string) => {
+      const p = planSmsImport(state, parseSberSms(sms)!, { idBase: id, date: "2026-10-10", sms });
+      return { plan: p, state: p.skip ? state : applyActions(state, p.actions) };
+    };
+    for (const [first, second] of [
+      [outgoing, incoming],
+      [incoming, outgoing],
+    ]) {
+      const a = apply(accounts(), first, "sms-a");
+      expect(a.plan.actions[0]).toMatchObject({ type: "savings.move", amount: 100_000, toAccountId: "dep" });
+      const b = apply(a.state, second, "sms-b");
+      expect(b.plan.skip?.status).toBe("duplicate");
+      expect(b.state.transactions).toHaveLength(1);
+    }
+  });
+
+  it("два разных пополнения на одну сумму в один день — две операции", () => {
+    const first = "СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150";
+    const second = "СЧЁТ5804 18:00 Перевод 1000р на Накопительный счет *3150";
+    const s1 = applyActions(accounts(), plan(accounts(), first).actions);
+    const p2 = planSmsImport(s1, parseSberSms(second)!, { idBase: "sms-c", date: "2026-10-10", sms: second });
+    expect(p2.skip).toBeUndefined();
+    expect(p2.actions[0]).toMatchObject({ type: "savings.move", toAccountId: "dep" });
+  });
+
+  it("зачисление на накопительный счёт — пополнение сбережений, а не доход", () => {
+    const s = accounts();
+    s.accounts![3] = { ...s.accounts![3], smsKeys: ["3150", "4444"] };
+    const result = plan(s, "СЧЁТ4444 10:00 Зачисление 5000р Баланс: 5000р");
+    expect(result.actions).toEqual([expect.objectContaining({ type: "savings.move", amount: 500_000, toAccountId: "dep" })]);
+  });
+
+  it("снятие с накопительного: зачисление на карту — та же операция; пришедшее раньше — заменяется", () => {
+    const withdraw = "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р";
+    const income = "СЧЁТ5804 16:16 Зачисление 9501.32р Баланс: 10000р";
+    const funded = applyActions(accounts(), [
+      { type: "savings.move", id: "fund", date: "2026-10-01", amount: 1_000_000, note: "", toAccountId: "dep" },
+    ]);
+    const afterWithdraw = applyActions(funded, plan(funded, withdraw).actions);
+    expect(planSmsImport(afterWithdraw, parseSberSms(income)!, { idBase: "sms-d", date: "2026-10-10", sms: income }).skip?.status).toBe(
+      "duplicate",
+    );
+
+    const afterIncome = applyActions(funded, plan(funded, income).actions);
+    const replaced = planSmsImport(afterIncome, parseSberSms(withdraw)!, { idBase: "sms-e", date: "2026-10-10", sms: withdraw });
+    expect(replaced.actions.map((a) => a.type)).toEqual(["tx.delete", "savings.move"]);
+    const result = applyActions(afterIncome, replaced.actions);
+    expect(result.transactions.filter((t) => t.type === "income")).toHaveLength(0);
+  });
+
   it("накопительный счёт по цифрам: снятие с него и пополнение его", () => {
     const withdraw = plan(accounts(), "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р");
     expect(withdraw.actions[0]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });

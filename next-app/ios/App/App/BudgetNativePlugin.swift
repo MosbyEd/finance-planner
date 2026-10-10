@@ -15,6 +15,8 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "tabBarShow", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "tabBarUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openShortcuts", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "addSmsShortcut", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openShortcutsApp", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "siriOrb", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "shellInfo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "homeModel", returnType: CAPPluginReturnPromise),

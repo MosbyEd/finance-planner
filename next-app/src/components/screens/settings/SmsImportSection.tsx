@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Share } from "@capacitor/share";
 import { ApiError, api, type SmsKeyStatus } from "@/client/api";
 import { useSnapshot } from "@/client/react";
-import { nativeOpenShortcuts } from "@/client/native";
+import { nativeAddSmsShortcut, nativeOpenShortcuts, nativeOpenShortcutsApp } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
 import { Notice } from "../../ui/controls";
@@ -68,6 +68,7 @@ export function SmsImportSection() {
 function AppActionSetup() {
   const toast = useToast();
   const [manual, setManual] = useState(false);
+  const [siri, setSiri] = useState(false);
   const [keyWay, setKeyWay] = useState(false);
   const copy = async () => {
     if (await copyText(APP_ACTION_PROMPT)) toast("Задание для Siri скопировано");
@@ -81,35 +82,74 @@ function AppActionSetup() {
           отмечаются фактической суммой. Новые операции приложение покажет при запуске — их можно подтвердить или
           поправить.
         </p>
-        <p className="text-[15px] text-muted">
-          Нужна автоматизация в «Командах» с действием «Добавить операцию из СМС» этого приложения. Создать её iOS
-          разрешает только вам: «Siri и Команды» откроет действия приложения и покажет шаги, а задание можно вставить в
-          Siri — она соберёт автоматизацию сама. Без интернета СМС подождёт и отправится позже.
+        <ol className="space-y-3 text-[15px]">
+          <li>
+            <p className="font-medium">1. Добавьте команду «Бюджет СМС»</p>
+            <p className="text-sm text-muted">В окне «Поделиться» выберите «Команды» → «Добавить быструю команду».</p>
+            <Button
+              className="mt-2"
+              icon="plus"
+              onClick={() =>
+                void nativeAddSmsShortcut().then((ok) => {
+                  if (!ok) toast("Обновите приложение — в этой сборке команды нет.", { kind: "error" });
+                })
+              }
+            >
+              Добавить команду
+            </Button>
+          </li>
+          <li>
+            <p className="font-medium">2. Создайте автоматизацию</p>
+            <p className="text-sm text-muted">
+              «Команды» → «Автоматизация» → «+» → «Сообщение». Отправитель — 900, включите «Запускать сразу» → «Новая
+              пустая автоматизация» → действие «Запустить быструю команду» → «Бюджет СМС», ввод — «Ввод команды».
+            </p>
+            <Button
+              className="mt-2"
+              variant="secondary"
+              onClick={() =>
+                void nativeOpenShortcutsApp().then((ok) => {
+                  if (!ok) toast("Не удалось открыть «Команды».", { kind: "error" });
+                })
+              }
+            >
+              Открыть «Команды»
+            </Button>
+          </li>
+        </ol>
+        <p className="text-sm text-muted">
+          Создать автоматизацию по сообщениям iOS разрешает только вам — приложение не может добавить её само. Без
+          интернета СМС подождёт и отправится, когда связь появится.
         </p>
-        <textarea
-          readOnly
-          rows={5}
-          value={APP_ACTION_PROMPT}
-          aria-label="Задание для Siri"
-          onFocus={(e) => e.currentTarget.select()}
-          className={`${controlClass} h-auto py-3 text-sm`}
-        />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            icon="sparkles"
-            onClick={() =>
-              void nativeOpenShortcuts().then((ok) => {
-                if (!ok) toast("Обновите приложение, чтобы открыть «Siri и Команды».", { kind: "error" });
-              })
-            }
-          >
-            Siri и Команды
-          </Button>
-          <Button variant="secondary" onClick={() => void copy()}>
-            Скопировать задание для Siri
-          </Button>
-        </div>
-        <Disclosure label="Настроить вручную" open={manual} onToggle={() => setManual((v) => !v)}>
+        <Disclosure label="Задание для Siri и действия приложения" open={siri} onToggle={() => setSiri((v) => !v)}>
+          <div className="space-y-3">
+            <textarea
+              readOnly
+              rows={5}
+              value={APP_ACTION_PROMPT}
+              aria-label="Задание для Siri"
+              onFocus={(e) => e.currentTarget.select()}
+              className={`${controlClass} h-auto py-3 text-sm`}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => void copy()}>
+                Скопировать задание для Siri
+              </Button>
+              <Button
+                variant="secondary"
+                icon="sparkles"
+                onClick={() =>
+                  void nativeOpenShortcuts().then((ok) => {
+                    if (!ok) toast("Обновите приложение, чтобы открыть «Siri и Команды».", { kind: "error" });
+                  })
+                }
+              >
+                Siri и Команды
+              </Button>
+            </div>
+          </div>
+        </Disclosure>
+        <Disclosure label="Без команды — действием приложения" open={manual} onToggle={() => setManual((v) => !v)}>
           <ol className="list-decimal space-y-2 pl-5 text-sm">
             <li>В «Контактах» создайте контакт «900» с номером 900 — чтобы выбрать его отправителем.</li>
             <li>

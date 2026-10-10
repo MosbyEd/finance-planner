@@ -58,6 +58,8 @@ interface BudgetNativePlugin {
   addListener(event: "tabBarSelect", listener: (data: { id: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: "tabBarAction", listener: () => void): Promise<PluginListenerHandle>;
   openShortcuts(): Promise<void>;
+  addSmsShortcut(): Promise<void>;
+  openShortcutsApp(): Promise<void>;
   siriOrb(options: { active: boolean }): Promise<void>;
   setSession(options: { apiBase: string; token: string | null; account: string | null }): Promise<void>;
   setSummary(options: { date: string; text: string; expenseCategories: string[]; incomeCategories: string[] }): Promise<void>;
@@ -181,4 +183,26 @@ export function onNativeCommand(handler: (command: unknown) => Promise<unknown>)
   return () => {
     void handle.then((h) => h.remove()).catch(() => {});
   };
+}
+
+/** Окно «Поделиться» с командой «Бюджет СМС» (в нём «Команды» → «Добавить»). false — в этой сборке её нет. */
+export async function nativeAddSmsShortcut(): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.addSmsShortcut();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Открывает приложение «Команды». false — не получилось или старая сборка. */
+export async function nativeOpenShortcutsApp(): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.openShortcutsApp();
+    return true;
+  } catch {
+    return false;
+  }
 }

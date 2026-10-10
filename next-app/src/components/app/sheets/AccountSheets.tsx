@@ -240,8 +240,8 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
           label="Цифры карты или счёта из СМС"
           inputMode="numeric"
           value={keys}
-          placeholder="7759, 5804"
-          hint="Последние четыре цифры, как в СМС банка («MIR-7759», «СЧЁТ5804») — операции из СМС попадут на этот счёт"
+          placeholder={kind === "savings" ? "3150" : "7759, 5804"}
+          hint="Последние четыре цифры, как в СМС банка: карта «MIR-7759», счёт «СЧЁТ5804», накопительный «*3150» — операции и переводы из СМС попадут на этот счёт"
           onChange={(e) => {
             setKeys(e.target.value);
             setErrors((v) => ({ ...v, keys: undefined }));
