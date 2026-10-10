@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { deleteUser, displayNameSchema, findUserById, updateUserName, verifyPassword } from "@/server/auth";
-import { clearSessionCookie, jsonError, jsonOk, readBody, tooManyRequests, withUser } from "@/server/http";
+import { clearSessionCookie, jsonError, jsonOk, readBody, tooManyRequests, withUser, corsPreflight } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
 
 const patchSchema = z.object({ name: displayNameSchema });
 const deleteSchema = z.object({ password: z.string().min(1, "Введите пароль").max(200) });
+
+export const OPTIONS = corsPreflight;
 
 export const PATCH = withUser(async (req, { user }) => {
   const body = await readBody(req, patchSchema, 10_000);

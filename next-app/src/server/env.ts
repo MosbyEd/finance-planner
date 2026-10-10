@@ -35,6 +35,16 @@ export const env = {
    *    (nginx: proxy_set_header X-Real-IP $remote_addr), иначе клиент подставит любой адрес.
    * X-Real-IP по умолчанию не читается: прокси, который его не выставляет, пропустил бы заголовок клиента.
    */
+  /**
+   * Откуда разрешены запросы к API с другого источника: iOS-приложение (Capacitor) открывает интерфейс
+   * из своего пакета (capacitor://localhost) и ходит к серверу по токену. Через запятую.
+   */
+  get corsOrigins(): string[] {
+    return (process.env.CORS_ORIGINS ?? "capacitor://localhost")
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
+  },
   get trustProxyHeader(): "x-forwarded-for" | "x-real-ip" {
     return process.env.TRUST_PROXY_HEADER?.trim().toLowerCase() === "x-real-ip" ? "x-real-ip" : "x-forwarded-for";
   },

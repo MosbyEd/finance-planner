@@ -18,10 +18,60 @@ export function tooManyRequests(retryAfterSeconds: number): NextResponse {
   return res;
 }
 
+/** Токен сессии из заголовка Authorization: Bearer (так входит iOS-приложение). */
+export function bearerToken(req: NextRequest): string | undefined {
+  const match = /^Bearer ([A-Za-z0-9_-]{20,200})$/.exec(req.headers.get("authorization") ?? "");
+  return match?.[1];
+}
+
+/** Приложение просит выдать токен в ответе на вход (у веб-версии токен живёт только в httpOnly-cookie). */
+export function wantsToken(req: NextRequest): boolean {
+  return req.headers.get("x-client") === "native";
+}
+
+/** Источник запроса, которому разрешён доступ к API (iOS-приложение). */
+function allowedCorsOrigin(req: NextRequest): string | null {
+  const origin = req.headers.get("origin");
+  return origin && env.corsOrigins.includes(origin) ? origin : null;
+}
+
+/** Ответ на предварительный CORS-запрос (OPTIONS). */
+export function corsPreflight(req: NextRequest): NextResponse {
+  const res = new NextResponse(null, { status: 204 });
+  const origin = allowedCorsOrigin(req);
+  if (origin) {
+    res.headers.set("Access-Control-Allow-Origin", origin);
+    res.headers.set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    res.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Account, X-Client");
+    res.headers.set("Access-Control-Max-Age", "600");
+    res.headers.set("Vary", "Origin");
+  }
+  return res;
+}
+
+/** Разрешает приложению читать ответ (только для источников из CORS_ORIGINS; cookie не участвуют). */
+export function withCors(
+  handler: (req: NextRequest) => Promise<NextResponse> | NextResponse,
+): (req: NextRequest) => Promise<NextResponse> {
+  return async (req) => {
+    const res = await handler(req);
+    const origin = allowedCorsOrigin(req);
+    if (origin) {
+      res.headers.set("Access-Control-Allow-Origin", origin);
+      res.headers.set("Access-Control-Expose-Headers", "Retry-After");
+      res.headers.append("Vary", "Origin");
+    }
+    return res;
+  };
+}
+
 /**
  * Защита от CSRF в дополнение к SameSite=Lax: изменяющие запросы принимаем только со своего сайта.
+ * Запросы с токеном в Authorization подделать с чужого сайта нельзя (браузер не подставит его сам),
+ * а iOS-приложение приходит со своего источника из CORS_ORIGINS.
  */
 export function isSameOrigin(req: NextRequest): boolean {
+  if (bearerToken(req) || allowedCorsOrigin(req)) return true;
   const fetchSite = req.headers.get("sec-fetch-site");
   if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return false;
   const origin = req.headers.get("origin");
@@ -154,11 +204,16 @@ export function clearSessionCookie(res: NextResponse): void {
   res.cookies.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "lax", secure: env.cookieSecure, path: "/", maxAge: 0 });
 }
 
-/** Текущий пользователь по cookie. Если сессию продлили — обновляет cookie в ответе через onResponse. */
-export function currentUser(req: NextRequest): { user: User; token: string; renewedUntil: number | null } | null {
-  const token = req.cookies.get(SESSION_COOKIE)?.value;
+/** Текущий пользователь по токену (Authorization: Bearer) или cookie сессии. */
+export function currentUser(
+  req: NextRequest,
+): { user: User; token: string; renewedUntil: number | null; viaBearer: boolean } | null {
+  const bearer = bearerToken(req);
+  const token = bearer ?? req.cookies.get(SESSION_COOKIE)?.value;
   const session = getSessionUser(token);
-  return session && token ? { user: session.user, token, renewedUntil: session.renewedUntil } : null;
+  return session && token
+    ? { user: session.user, token, renewedUntil: session.renewedUntil, viaBearer: Boolean(bearer) }
+    : null;
 }
 
 /**
@@ -168,17 +223,18 @@ export function currentUser(req: NextRequest): { user: User; token: string; rene
 export function withUser(
   handler: (req: NextRequest, ctx: { user: User; token: string }) => Promise<NextResponse> | NextResponse,
 ) {
-  return async (req: NextRequest): Promise<NextResponse> => {
+  return withCors(async (req: NextRequest): Promise<NextResponse> => {
     if (req.method !== "GET" && !isSameOrigin(req)) return jsonError(403, "Запрос с чужого сайта отклонён.");
     const session = currentUser(req);
     if (!session) {
       const res = jsonError(401, "Нужно войти в аккаунт.");
-      if (req.cookies.get(SESSION_COOKIE)) clearSessionCookie(res);
+      if (!bearerToken(req) && req.cookies.get(SESSION_COOKIE)) clearSessionCookie(res);
       return res;
     }
     if (isAccountMismatch(req, session.user)) return accountMismatch();
     const res = await handler(req, { user: session.user, token: session.token });
-    if (session.renewedUntil) setSessionCookie(res, session.token, session.renewedUntil);
+    // Токен приложения продлевается на сервере сам; cookie обновляем только веб-версии.
+    if (session.renewedUntil && !session.viaBearer) setSessionCookie(res, session.token, session.renewedUntil);
     return res;
-  };
+  });
 }

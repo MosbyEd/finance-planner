@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { actionSchema } from "@/domain/actions";
 import { todayLocal } from "@/domain/dates";
-import { jsonError, jsonOk, readBody, tooManyRequests, withUser } from "@/server/http";
+import { jsonError, jsonOk, readBody, tooManyRequests, withUser, corsPreflight } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
 import {
   ActionError,
@@ -25,6 +25,8 @@ const ACTIONS_PER_MINUTE = 120;
  * 15 полных пачек. Один пользователь не займёт процессор целиком.
  */
 const OPS_PER_MINUTE = 1500;
+
+export const OPTIONS = corsPreflight;
 
 export const POST = withUser(async (req, { user }) => {
   // До чтения и разбора тела: они сами по себе дорогие для больших пачек.

@@ -1,11 +1,14 @@
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, deleteSession } from "@/server/auth";
-import { clearSessionCookie, isSameOrigin, jsonError, jsonOk } from "@/server/http";
+import { bearerToken, clearSessionCookie, corsPreflight, isSameOrigin, jsonError, jsonOk, withCors } from "@/server/http";
 
-export async function POST(req: NextRequest) {
+export const OPTIONS = corsPreflight;
+
+export const POST = withCors(async (req: NextRequest) => {
   if (!isSameOrigin(req)) return jsonError(403, "Запрос с чужого сайта отклонён.");
-  deleteSession(req.cookies.get(SESSION_COOKIE)?.value);
+  const bearer = bearerToken(req);
+  deleteSession(bearer ?? req.cookies.get(SESSION_COOKIE)?.value);
   const res = jsonOk({ ok: true });
-  clearSessionCookie(res);
+  if (!bearer) clearSessionCookie(res);
   return res;
-}
+});

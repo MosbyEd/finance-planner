@@ -43,5 +43,5 @@ next-env.d.ts
 # local databases
 /data/
 
-# адрес сервера для iOS-оболочки (генерируется npm run ios:sync)
-/capacitor-shell/config.js
+# сборка интерфейса iOS-приложения (npm run ios:sync)
+/dist-app/

@@ -4,7 +4,7 @@ import { addDays, todayLocal } from "@/domain/dates";
 import { isoDateSchema } from "@/domain/schema";
 import { AiProviderError, deepseekChat } from "@/server/deepseek";
 import { env } from "@/server/env";
-import { jsonError, jsonOk, readBody, tooManyRequests, withUser } from "@/server/http";
+import { jsonError, jsonOk, readBody, tooManyRequests, withUser, corsPreflight } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
 import { StoredStateError, loadState, type StoredState } from "@/server/stateStore";
 
@@ -27,6 +27,8 @@ export const maxDuration = 200;
 
 /** Запросов к AI в час от всех пользователей вместе — предел расходов на API. */
 const AI_REQUESTS_PER_HOUR = 200;
+
+export const OPTIONS = corsPreflight;
 
 export const POST = withUser(async (req, { user }) => {
   if (!env.deepseekApiKey) return jsonError(503, "AI-помощник не настроен на сервере (нет DEEPSEEK_API_KEY).");

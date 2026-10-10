@@ -10,6 +10,9 @@ import {
   readBody,
   setSessionCookie,
   tooManyRequests,
+  corsPreflight,
+  wantsToken,
+  withCors,
 } from "@/server/http";
 import { rateLimit, resetRateLimit } from "@/server/rateLimit";
 
@@ -40,7 +43,9 @@ const UNKNOWN_LOGINS_PER_MINUTE = 60;
 
 const invalidCredentials = () => jsonError(401, "Неверный логин или пароль.");
 
-export async function POST(req: NextRequest) {
+export const OPTIONS = corsPreflight;
+
+export const POST = withCors(async (req: NextRequest) => {
   if (!isSameOrigin(req)) return jsonError(403, "Запрос с чужого сайта отклонён.");
   const body = await readBody(req, bodySchema, 10_000);
   if (!body.ok) return body.response;
@@ -81,7 +86,10 @@ export async function POST(req: NextRequest) {
   resetRateLimit(perLoginKey);
   resetRateLimit(slowKey);
   const session = createSession(user.id);
-  const res = jsonOk({ user: { login: user.login, name: user.name } });
+  const publicUser = { login: user.login, name: user.name };
+  // iOS-приложение хранит токен у себя и шлёт его в Authorization; веб-версия — только httpOnly-cookie.
+  if (wantsToken(req)) return jsonOk({ user: publicUser, token: session.token, expiresAt: session.expiresAt });
+  const res = jsonOk({ user: publicUser });
   setSessionCookie(res, session.token, session.expiresAt);
   return res;
-}
+});

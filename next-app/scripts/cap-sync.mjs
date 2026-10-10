@@ -1,6 +1,6 @@
-// Обновляет iOS-оболочку: прописывает адрес этого компьютера в локальной сети.
-//   npm run ios:sync            — имя компьютера в сети (*.local) определяется автоматически
-//   CAP_SERVER_URL=http://192.168.1.10:3001 npm run ios:sync
+// Собирает интерфейс iOS-приложения (Vite → dist-app), прописывает адрес сервера и синхронизирует проект.
+//   npm run ios:sync                                         — сервер этого компьютера в локальной сети
+//   CAP_API_BASE=https://budget.example.ru npm run ios:sync — сервер в интернете
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -17,21 +17,22 @@ function bonjourName() {
   if (process.platform !== "darwin") return null;
   try {
     const name = execSync("scutil --get LocalHostName", { encoding: "utf8" }).trim();
-    // Строчными: адрес страницы WebView приводит к нижнему регистру, а Capacitor сравнивает хост
-    // с server.url с учётом регистра — иначе переход считается внешним и открывается Safari.
     return name ? `${name.toLowerCase()}.local` : null;
   } catch {
     return null;
   }
 }
 
-const host = process.env.CAP_SERVER_HOST ?? bonjourName() ?? lanAddress();
-const url = process.env.CAP_SERVER_URL ?? `http://${host}:3001`;
-if (!url || url.includes("undefined")) {
-  console.error("Не удалось определить адрес в локальной сети. Задайте CAP_SERVER_URL.");
+const apiBase = (process.env.CAP_API_BASE ?? `http://${bonjourName() ?? lanAddress()}:3001`).replace(/\/+$/, "");
+if (!/^https?:\/\/[^/]+$/.test(apiBase)) {
+  console.error(`Некорректный адрес сервера: ${apiBase}`);
   process.exit(1);
 }
-console.log(`iOS-приложение будет открывать ${url}`);
-// Экран «нет связи» внутри приложения повторяет подключение по этому адресу.
-fs.writeFileSync(new URL("../capacitor-shell/config.js", import.meta.url), `window.SERVER_URL = ${JSON.stringify(url)};\n`);
-execSync("npx cap sync ios", { stdio: "inherit", env: { ...process.env, CAP_SERVER_URL: url } });
+console.log(`Приложение будет обращаться к серверу ${apiBase}`);
+
+execSync("npx vite build --config vite.config.mts", { stdio: "inherit" });
+fs.writeFileSync(
+  new URL("../dist-app/config.js", import.meta.url),
+  `window.__BUDGET_CONFIG__ = ${JSON.stringify({ native: true, apiBase })};\n`,
+);
+execSync("npx cap sync ios", { stdio: "inherit" });

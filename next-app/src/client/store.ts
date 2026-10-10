@@ -4,7 +4,7 @@ import { emptyState } from "@/domain/defaults";
 import { newId } from "@/domain/ids";
 import { MigrationError, migrateState, type MigrationReport } from "@/domain/migrate";
 import { stateSchema, type State } from "@/domain/schema";
-import { ApiError, api, type Op, type PublicUser } from "./api";
+import { ApiError, TOKEN_KEY, api, type Op, type PublicUser } from "./api";
 import { storage } from "./storage";
 
 export type SyncStatus = "synced" | "saving" | "offline" | "error";
@@ -267,6 +267,7 @@ export class FinanceStore {
       try {
         await api.logout();
         storage.remove(LOGOUT_PENDING_KEY);
+        storage.remove(TOKEN_KEY);
       } catch {
         this.needsReinit = true;
         if (this.snapshot.mode !== "guest" || this.snapshot.phase === "loading") this.enterGuest();
@@ -311,6 +312,7 @@ export class FinanceStore {
         return;
       }
       this.dropAccountCache(shown);
+      storage.remove(TOKEN_KEY);
       this.emitSignOut(shown);
     }
     this.enterGuest();
@@ -891,6 +893,7 @@ export class FinanceStore {
     }
     const login = this.currentLogin;
     if (login) this.dropAccountCache(login);
+    storage.remove(TOKEN_KEY); // токен приложения больше не действует
     this.emitSignOut(login);
     this.notify("Сессия истекла — войдите снова.", "info");
     this.enterGuest();
@@ -904,7 +907,8 @@ export class FinanceStore {
    */
   async login(login: string, password: string, options: { discardPending?: boolean } = {}): Promise<void> {
     this.assertCanSwitchAccount(login, options.discardPending);
-    const { user } = await api.login(login, password);
+    const { user, token } = await api.login(login, password);
+    if (token) storage.set(TOKEN_KEY, token);
     await this.afterSignIn(user);
   }
 
@@ -915,7 +919,8 @@ export class FinanceStore {
     options: { discardPending?: boolean } = {},
   ): Promise<void> {
     this.assertCanSwitchAccount(login, options.discardPending);
-    const { user } = await api.register(login, password, name);
+    const { user, token } = await api.register(login, password, name);
+    if (token) storage.set(TOKEN_KEY, token);
     await this.afterSignIn(user);
   }
 
@@ -962,6 +967,8 @@ export class FinanceStore {
     if (!reached) {
       storage.set(LOGOUT_PENDING_KEY, "1");
       this.needsReinit = true;
+    } else {
+      storage.remove(TOKEN_KEY);
     }
     if (login) this.dropAccountCache(login);
     this.emitSignOut(login);
@@ -972,6 +979,7 @@ export class FinanceStore {
   /** Аккаунт удалён на сервере — чистим всё локальное. */
   forgetAccount(): void {
     const login = this.currentLogin;
+    storage.remove(TOKEN_KEY);
     this.cancelRetry();
     this.needsReinit = false;
     if (login) this.dropAccountCache(login);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { findUserById, hashPassword, newPasswordSchema, updatePassword, verifyPassword } from "@/server/auth";
-import { jsonError, jsonOk, readBody, withUser } from "@/server/http";
+import { jsonError, jsonOk, readBody, withUser, corsPreflight } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
 import { tooManyRequests } from "@/server/http";
 
@@ -8,6 +8,8 @@ const bodySchema = z.object({
   currentPassword: z.string().min(1, "Введите текущий пароль").max(200),
   newPassword: newPasswordSchema,
 });
+
+export const OPTIONS = corsPreflight;
 
 export const POST = withUser(async (req, { user, token }) => {
   const limit = rateLimit(`password:${user.id}`, 10, 15 * 60 * 1000);

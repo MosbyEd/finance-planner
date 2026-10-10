@@ -3,6 +3,11 @@ import type { Action } from "@/domain/actions";
 import type { AiProposal } from "@/domain/ai";
 import type { IsoDate } from "@/domain/dates";
 import { stateSchema, type State } from "@/domain/schema";
+import { apiBase, isNativeApp } from "./runtime";
+import { storage } from "./storage";
+
+/** Токен сессии приложения (в браузере сессия живёт в httpOnly-cookie и сюда не попадает). */
+export const TOKEN_KEY = "fp:token";
 
 export class ApiError extends Error {
   constructor(
@@ -37,11 +42,15 @@ async function request<T>(
   let response: Response;
   let text: string;
   try {
-    response = await fetch(path, {
+    const native = isNativeApp();
+    const token = native ? storage.get(TOKEN_KEY) : null;
+    response = await fetch(apiBase() + path, {
       method: init.method ?? "GET",
-      credentials: "same-origin",
+      credentials: native ? "omit" : "same-origin",
       headers: {
         ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(native ? { "X-Client": "native" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         // Какой аккаунт ожидает вкладка: если в соседней вошли в другой, сервер ответит 409.
         ...(init.account ? { "X-Account": encodeURIComponent(init.account) } : {}),
       },
@@ -83,6 +92,8 @@ const meSchema = z.object({
 export type MeResponse = z.infer<typeof meSchema>;
 
 const userResponseSchema = z.object({ user: userSchema });
+/** Ответ на вход: приложению сервер возвращает ещё и токен. */
+const signInResponseSchema = z.object({ user: userSchema, token: z.string().min(20).max(200).optional() });
 const okSchema = z.object({ ok: z.literal(true) });
 const stateResponseSchema = z.object({ version: z.number().int().min(0), state: stateSchema });
 const opsResponseSchema = z.object({ version: z.number().int().min(0), stale: z.boolean() });
@@ -119,9 +130,9 @@ export interface AiChatResponse {
 export const api = {
   me: () => request("/api/me", meSchema),
   login: (login: string, password: string) =>
-    request("/api/auth/login", userResponseSchema, { method: "POST", body: { login, password } }),
+    request("/api/auth/login", signInResponseSchema, { method: "POST", body: { login, password } }),
   register: (login: string, password: string, name: string) =>
-    request("/api/auth/register", userResponseSchema, { method: "POST", body: { login, password, name } }),
+    request("/api/auth/register", signInResponseSchema, { method: "POST", body: { login, password, name } }),
   logout: () => request("/api/auth/logout", okSchema, { method: "POST" }),
   getState: (account?: string): Promise<{ version: number; state: State }> =>
     request("/api/state", stateResponseSchema, { timeoutMs: 30_000, account }),
