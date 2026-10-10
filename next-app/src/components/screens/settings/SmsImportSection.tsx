@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Share } from "@capacitor/share";
 import { ApiError, api, type SmsKeyStatus } from "@/client/api";
 import { useSnapshot } from "@/client/react";
+import { nativeOpenShortcuts } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
 import { Card, Notice } from "../../ui/controls";
@@ -80,8 +81,9 @@ function AppActionSetup() {
           поправить.
         </p>
         <p className="text-[15px] text-muted">
-          Нужна автоматизация в «Командах» с действием «Добавить операцию из СМС» этого приложения. Скопируйте задание
-          и вставьте его в Siri — она соберёт автоматизацию сама. Без интернета СМС подождёт и отправится позже.
+          Нужна автоматизация в «Командах» с действием «Добавить операцию из СМС» этого приложения. Создать её iOS
+          разрешает только вам: «Siri и Команды» откроет действия приложения и покажет шаги, а задание можно вставить в
+          Siri — она соберёт автоматизацию сама. Без интернета СМС подождёт и отправится позже.
         </p>
         <textarea
           readOnly
@@ -91,7 +93,21 @@ function AppActionSetup() {
           onFocus={(e) => e.currentTarget.select()}
           className={`${controlClass} h-auto py-3 text-sm`}
         />
-        <Button onClick={() => void copy()}>Скопировать задание для Siri</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            icon="sparkles"
+            onClick={() =>
+              void nativeOpenShortcuts().then((ok) => {
+                if (!ok) toast("Обновите приложение, чтобы открыть «Siri и Команды».", { kind: "error" });
+              })
+            }
+          >
+            Siri и Команды
+          </Button>
+          <Button variant="secondary" onClick={() => void copy()}>
+            Скопировать задание для Siri
+          </Button>
+        </div>
         <Disclosure label="Настроить вручную" open={manual} onToggle={() => setManual((v) => !v)}>
           <ol className="list-decimal space-y-2 pl-5 text-sm">
             <li>В «Контактах» создайте контакт «900» с номером 900 — чтобы выбрать его отправителем.</li>

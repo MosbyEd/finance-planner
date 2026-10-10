@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { getSessionUser, type User } from "@/server/auth";
 import { bearerToken, clientIp, jsonOk, readText } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
+import { parseSberSms } from "@/domain/sms";
 import { findUserBySmsKey, importSms, receivedTime, smsKeyFromHeader } from "@/server/smsImport";
 import { StoredStateError } from "@/server/stateStore";
 
@@ -24,6 +25,22 @@ interface SmsBody {
   receivedAt?: unknown;
 }
 
+/**
+ * Текст СМС, если «Команды» положили его не в поле text (другое имя, вложенный словарь, тип «не текст»):
+ * среди всех строк запроса — та, что разбирается как СМС банка, иначе самая длинная.
+ */
+function findSmsText(value: unknown): string {
+  const strings: string[] = [];
+  const walk = (v: unknown, depth: number) => {
+    if (typeof v === "string") strings.push(v);
+    else if (depth < 4 && Array.isArray(v)) v.forEach((x) => walk(x, depth + 1));
+    else if (depth < 4 && v && typeof v === "object") Object.values(v).forEach((x) => walk(x, depth + 1));
+  };
+  walk(value, 0);
+  const candidates = strings.filter((x) => x.trim() && !/^\d{4}-\d{2}-\d{2}T/.test(x));
+  return candidates.find((x) => parseSberSms(x) !== null) ?? candidates.sort((a, b) => b.length - a.length)[0] ?? "";
+}
+
 async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
   const type = req.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
@@ -32,7 +49,8 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
       if (typeof data === "string") return { text: data };
       if (data && typeof data === "object") {
         const { text, receivedAt } = data as { text?: unknown; receivedAt?: unknown };
-        if (typeof text === "string") return { text, receivedAt };
+        if (typeof text === "string" && text.trim()) return { text, receivedAt };
+        return { text: findSmsText(data), receivedAt };
       }
     } catch {
       // не JSON — ниже вернём пустой текст
@@ -41,14 +59,19 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
   }
   if (type.includes("application/x-www-form-urlencoded")) {
     const form = new URLSearchParams(body);
-    return { text: form.get("text") ?? "", receivedAt: form.get("receivedAt") ?? undefined };
+    const text = form.get("text")?.trim() ? (form.get("text") as string) : findSmsText([...form.values()]);
+    return { text, receivedAt: form.get("receivedAt") ?? undefined };
   }
   if (type.includes("multipart/form-data")) {
     try {
       const form = await new Response(body, { headers: { "content-type": type } }).formData();
       const text = form.get("text");
       const receivedAt = form.get("receivedAt");
-      return { text: typeof text === "string" ? text : "", receivedAt: typeof receivedAt === "string" ? receivedAt : undefined };
+      const values = [...form.values()].filter((v): v is string => typeof v === "string");
+      return {
+        text: typeof text === "string" && text.trim() ? text : findSmsText(values),
+        receivedAt: typeof receivedAt === "string" ? receivedAt : undefined,
+      };
     } catch {
       return { text: "" };
     }
@@ -84,7 +107,12 @@ export async function POST(req: NextRequest) {
   if (!raw.ok) return reply(413, { status: "failed", message: "Слишком длинное сообщение." });
   const body = await smsBody(req, raw.text);
   const text = body.text.slice(0, MAX_SMS_CHARS);
-  if (!text.trim()) return reply(400, { status: "failed", message: "Пустой текст СМС: проверьте поле text в команде." });
+  if (!text.trim()) {
+    return reply(400, {
+      status: "failed",
+      message: "Пустой текст СМС. Проще всего заменить запрос на действие «Добавить операцию из СМС» приложения «Бюджет».",
+    });
+  }
 
   try {
     const now = new Date();

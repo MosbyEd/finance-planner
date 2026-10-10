@@ -206,11 +206,37 @@ describe("сопоставление с запланированными пла�
     expect(state.transactions.filter((t) => t.type === "expense")).toHaveLength(1);
   });
 
-  it("в следующем месяце узнаёт тот же магазин, даже если сумма сильно другая", () => {
+  it("в следующем месяце узнаёт тот же магазин (после проверки), даже если сумма заметно другая", () => {
     let s = stateWith({ templates: [phone] });
     s = importSms(s, "СЧЁТ5804 18:00 Оплата 950р Билайн Баланс: 1000р", "2026-10-20").state;
-    const next = importSms(s, "СЧЁТ5804 18:00 Оплата 1800р Билайн Баланс: 1000р", "2026-11-19", "sms-y");
-    expect(next.plan.actions[0]).toMatchObject({ type: "occurrence.confirm", templateId: "phone", month: "2026-11", amount: 180_000 });
+    const sms = "СЧЁТ5804 18:00 Оплата 1700р Билайн Баланс: 1000р";
+    // Пока первое сопоставление не проверено, на нём не учимся: сумма почти вдвое больше плана — отдельная операция.
+    expect(importSms(s, sms, "2026-11-19", "sms-y").plan.actions[0]).toMatchObject({ type: "tx.add" });
+    s = applyActions(s, [{ type: "tx.reviewed", ids: ["phone.2026-10"] }]);
+    const next = importSms(s, sms, "2026-11-19", "sms-y");
+    expect(next.plan.actions[0]).toMatchObject({ type: "occurrence.confirm", templateId: "phone", month: "2026-11", amount: 170_000 });
+  });
+
+  it("не перезаписывает уже подтверждённое или исправленное начисление", () => {
+    let s = applyActions(stateWith({ templates: [phone] }), [{ type: "recurring.sync", today: "2026-10-20" }]);
+    s = applyActions(s, [{ type: "tx.update", id: "phone.2026-10", patch: { amount: 95_000 } }]);
+    expect(importSms(s, "СЧЁТ5804 18:00 Оплата 900р МТС Баланс: 1000р", "2026-10-22").plan.actions[0]).toMatchObject({ type: "tx.add" });
+  });
+
+  it("точная сумма не делает покупку в магазине регулярным платежом", () => {
+    const internet = template({ id: "inet", kind: "expense", title: "Интернет", category: "Связь и интернет", amount: 100_000, dayOfMonth: 12, startDate: "2026-10-01" });
+    const s = stateWith({ templates: [internet] });
+    expect(importSms(s, "Счёт карты MIR-7759 10:00 Покупка 1000р Перекрёсток Баланс: 1р", "2026-10-10").plan.actions[0]).toMatchObject({
+      type: "tx.add",
+    });
+  });
+
+  it("из двух шаблонов зарплаты выбирает ближайший по сроку, прошлый месяц не трогает", () => {
+    const advance = template({ id: "adv", kind: "income", title: "Аванс", category: "Зарплата", amount: 4_000_000, dayOfMonth: 10, startDate: "2026-09-01" });
+    const pay = template({ id: "pay", kind: "income", title: "Зарплата", category: "Зарплата", amount: 5_000_000, dayOfMonth: 25, startDate: "2026-09-01" });
+    const s = applyActions(stateWith({ templates: [advance, pay] }), [{ type: "recurring.sync", today: "2026-10-02" }]);
+    const plan = importSms(s, "СЧЁТ5804 12:00 Зачисление зарплаты 45 000р Баланс: 1р", "2026-10-03").plan;
+    expect(plan.actions[0]).toMatchObject({ type: "occurrence.confirm", templateId: "adv", month: "2026-10" });
   });
 
   it("перевод на ту же сумму в день аренды — оплата аренды; покупка без плана — отдельная операция", () => {
@@ -242,5 +268,23 @@ describe("сопоставление с запланированными пла�
     expect(edited.transactions.find((t) => t.id === "sms-x")?.review).toBeUndefined();
     const confirmed = applyActions(state, [{ type: "tx.reviewed", ids: ["sms-x"] }]);
     expect(confirmed.transactions.find((t) => t.id === "sms-x")).not.toHaveProperty("review");
+  });
+});
+
+describe("отвязка от регулярного платежа", () => {
+  it("операция становится обычной, а начисление возвращается в план", () => {
+    const salary = template({ id: "salary", kind: "income", title: "Зарплата", category: "Зарплата", amount: 9_000_000, dayOfMonth: 25, startDate: "2026-10-01" });
+    let s = stateWith({ templates: [salary] });
+    const sms = "СЧЁТ5804 16:14 Зачисление зарплаты 61 848.91р Баланс: 1р";
+    s = applyActions(s, planSmsImport(s, parseSberSms(sms)!, { idBase: "sms-x", date: "2026-10-24", sms }).actions);
+    s = applyActions(s, [{ type: "occurrence.detach", id: "salary.2026-10", newId: "plain1" }]);
+    expect(s.transactions.find((t) => t.id === "plain1")).toMatchObject({ amount: 6_184_891, date: "2026-10-24" });
+    expect(s.transactions.find((t) => t.id === "plain1")).not.toHaveProperty("templateId");
+    expect(s.transactions.some((t) => t.templateId === "salary")).toBe(false);
+    // В срок синхронизация создаёт плановое начисление заново.
+    s = applyActions(s, [{ type: "recurring.sync", today: "2026-10-25" }]);
+    expect(s.transactions.find((t) => t.id === "salary.2026-10")).toMatchObject({ amount: 9_000_000 });
+    // Автоотчисление — у обычной операции, у плановой — своё.
+    expect(s.transactions.filter((t) => t.type === "saving").map((t) => t.linkedTo).sort()).toEqual(["plain1", "salary.2026-10"]);
   });
 });

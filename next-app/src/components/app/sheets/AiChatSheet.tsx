@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { z } from "zod";
 import { proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
@@ -216,12 +217,13 @@ class ChatSession {
     this.update({ mode });
   }
 
-  send(text: string, today: IsoDate, state: State): void {
+  /** mode — режим, который сейчас показан в окне (может отличаться от сохранённого, если тот недоступен). */
+  send(text: string, today: IsoDate, state: State, mode: ChatMode): void {
     const content = text.trim().slice(0, MAX_CONTENT);
     if (!content || this.snapshot.pendingSince !== null) return;
     const messages = this.snapshot.messages.filter((m) => m.role !== "error");
     this.update({ messages: [...messages, { id: newId(), role: "user", content }] });
-    void this.request(today, state);
+    void this.request(today, state, mode);
   }
 
   canRetry(): boolean {
@@ -229,10 +231,10 @@ class ChatSession {
     return this.snapshot.pendingSince === null && messages.at(-1)?.role === "user";
   }
 
-  retry(today: IsoDate, state: State): void {
+  retry(today: IsoDate, state: State, mode: ChatMode): void {
     if (!this.canRetry()) return;
     this.update({ messages: this.snapshot.messages.filter((m) => m.role !== "error") });
-    void this.request(today, state);
+    void this.request(today, state, mode);
   }
 
   setStatus(id: string, status: ProposalStatus): void {
@@ -247,12 +249,11 @@ class ChatSession {
   }
 
   /** state — данные бюджета на устройстве: модель Apple отвечает по ним, без сервера. */
-  private async request(today: IsoDate, state: State): Promise<void> {
+  private async request(today: IsoDate, state: State, mode: ChatMode): Promise<void> {
     const epoch = this.epoch;
     this.update({ pendingSince: Date.now() });
     let reply: ChatMessage;
     try {
-      const mode = this.snapshot.mode;
       const history = buildHistory(this.snapshot.messages);
       const response =
         mode === "apple"
@@ -330,19 +331,19 @@ function useOnline(): boolean {
 
 const OFFLINE_TEXT = "Нет связи — помощник ответит, когда интернет вернётся";
 
-/** Какая модель Apple доступна в этом приложении (null — нет; в браузере всегда null). */
-function useAppleModel(): AppleModel | null {
-  const [model, setModel] = useState<AppleModel | null>(null);
+/** Какая модель Apple доступна в этом приложении (null — нет; в браузере всегда null) и выяснено ли это уже. */
+function useAppleModel(): { model: AppleModel | null; loading: boolean } {
+  const [state, setState] = useState<{ model: AppleModel | null; loading: boolean }>({ model: null, loading: true });
   useEffect(() => {
     let cancelled = false;
     void pickAppleModel().then((picked) => {
-      if (!cancelled) setModel(picked?.model ?? null);
+      if (!cancelled) setState({ model: picked?.model ?? null, loading: false });
     });
     return () => {
       cancelled = true;
     };
   }, []);
-  return model;
+  return state;
 }
 
 // ---------- окно ----------
@@ -350,11 +351,12 @@ function useAppleModel(): AppleModel | null {
 export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
   const snapshot = useSnapshot();
   const online = useOnline();
-  const appleModel = useAppleModel();
+  const apple = useAppleModel();
+  const appleModel = apple.model;
   const { close, open } = useUi();
 
   // Без сети сервер мог не сообщить, включён ли AI, поэтому «недоступен» показываем только при связи.
-  if (!snapshot.aiEnabled && online && !appleModel) {
+  if (!snapshot.aiEnabled && online && !appleModel && !apple.loading) {
     return (
       <Sheet open onClose={close} title="AI-помощник">
         <EmptyState title="AI-помощник сейчас недоступен" text="Остальные функции работают как обычно." />
@@ -392,6 +394,7 @@ export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
       initialPrompt={initialPrompt}
       online={online}
       appleModel={appleModel}
+      appleLoading={apple.loading}
       deepseek={snapshot.aiEnabled}
     />
   );
@@ -402,12 +405,15 @@ function Chat({
   initialPrompt,
   online,
   appleModel,
+  appleLoading,
   deepseek,
 }: {
   login: string;
   initialPrompt?: string;
   online: boolean;
   appleModel: AppleModel | null;
+  /** Ещё выясняем, есть ли модель Apple: до этого сохранённый режим «apple» не подменяем DeepSeek. */
+  appleLoading: boolean;
   /** Включён ли на сервере DeepSeek. */
   deepseek: boolean;
 }) {
@@ -415,7 +421,7 @@ function Chat({
   const snapshotChat = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   // Выбранный режим недоступен (модель Apple выключили или DeepSeek отключён на сервере) — берём доступный.
   const fallbackMode: ChatMode = deepseek ? "fast" : "apple";
-  const modeAvailable = snapshotChat.mode === "apple" ? appleModel !== null : deepseek;
+  const modeAvailable = snapshotChat.mode === "apple" ? appleModel !== null || appleLoading : deepseek;
   const chat = modeAvailable ? snapshotChat : { ...snapshotChat, mode: fallbackMode };
   const { state, sync, sessionExpired } = useSnapshot();
   const { close, open } = useUi();
@@ -424,11 +430,13 @@ function Chat({
   const toast = useToast();
   const confirm = useConfirm();
   const [input, setInput] = useState(initialPrompt ?? "");
+  // Ответы, пришедшие при открытом окне, проявляются с анимацией; история при открытии — сразу.
+  const [initialIds] = useState(() => new Set(snapshotChat.messages.map((m) => m.id)));
   const endRef = useRef<HTMLDivElement>(null);
   const scrolledOnce = useRef(false);
   const pending = chat.pendingSince !== null;
   // Модель на телефоне отвечает и без интернета.
-  const canAsk = online || (chat.mode === "apple" && appleModel === "device");
+  const canAsk = !(chat.mode === "apple" && appleLoading) && (online || (chat.mode === "apple" && appleModel === "device"));
 
   // Прокрутка к последнему сообщению: при открытии сразу, дальше — плавно.
   useEffect(() => {
@@ -439,8 +447,7 @@ function Chat({
 
   const send = (text: string) => {
     if (pending || !canAsk || !text.trim()) return;
-    if (chat.mode !== snapshotChat.mode) session.setMode(chat.mode);
-    session.send(text, today, state);
+    session.send(text, today, state, chat.mode);
     setInput("");
   };
 
@@ -485,7 +492,7 @@ function Chat({
       }
     >
       <div className="flex min-h-full flex-col gap-4">
-        {!canAsk ? (
+        {!canAsk && !(chat.mode === "apple" && appleLoading) ? (
           <Notice tone="warning">
             <span role="status">{OFFLINE_TEXT}</span>
           </Notice>
@@ -529,6 +536,7 @@ function Chat({
                 {m.role === "user" && <UserBubble message={m} />}
                 {m.role === "assistant" && (
                   <AssistantBubble
+                    fresh={!initialIds.has(m.id)}
                     message={m}
                     today={today}
                     onApply={() => apply(m)}
@@ -538,7 +546,7 @@ function Chat({
                 {m.role === "error" && (
                   <ErrorBubble
                     message={m}
-                    onRetry={m.id === lastId && canAsk && session.canRetry() ? () => session.retry(today, state) : undefined}
+                    onRetry={m.id === lastId && canAsk && session.canRetry() ? () => session.retry(today, state, chat.mode) : undefined}
                   />
                 )}
               </li>
@@ -548,6 +556,7 @@ function Chat({
 
         {chat.pendingSince !== null && <TypingIndicator key={chat.pendingSince} since={chat.pendingSince} />}
         <div ref={endRef} />
+        <SiriGlow active={pending} />
       </div>
     </Sheet>
   );
@@ -594,22 +603,57 @@ function UserBubble({ message }: { message: UserMessage }) {
   );
 }
 
+/** Шаг между словами: волна идёт не дольше ~1,4 с, сколько бы слов ни было. */
+function wordStep(count: number): number {
+  return Math.min(28, 1400 / Math.max(count, 1));
+}
+
+/** Текст ответа, который проявляется по словам из размытия, как у Siri. Пробелы и переносы остаются текстом. */
+function RevealText({ text }: { text: string }) {
+  const parts = text.split(/(\s+)/);
+  const step = wordStep(parts.filter((x) => x && !/^\s+$/.test(x)).length);
+  let index = 0;
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!part || /^\s+$/.test(part)) return part;
+        const delay = Math.round(index++ * step);
+        return (
+          <span key={i} className="siri-word" style={{ ["--siri-delay" as string]: `${delay}ms` }}>
+            {part}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 function AssistantBubble({
   message,
+  fresh,
   today,
   onApply,
   onDismiss,
 }: {
   message: AssistantMessage;
+  /** Ответ только что пришёл — проявить с анимацией. */
+  fresh: boolean;
   today: IsoDate;
   onApply: () => void;
   onDismiss: () => void;
 }) {
+  const words = message.content.split(/\s+/).filter(Boolean).length;
+  // Карточка с предложением выезжает, когда текст почти проявился.
+  const riseAfter = Math.round(words * wordStep(words)) + 250;
   return (
     <div className="flex max-w-[92%] flex-col gap-2 self-start">
-      <div className="whitespace-pre-wrap break-words rounded-2xl rounded-bl-md bg-surface-2 px-4 py-2.5 text-[15px]">
+      <div
+        className={`whitespace-pre-wrap break-words rounded-2xl rounded-bl-md bg-surface-2 px-4 py-2.5 text-[15px] ${
+          fresh ? "siri-outline" : ""
+        }`}
+      >
         <span className="sr-only">Помощник: </span>
-        {message.content}
+        {fresh ? <RevealText text={message.content} /> : message.content}
       </div>
       {message.reasoning && (
         <details className="group px-1 text-sm">
@@ -624,6 +668,7 @@ function AssistantBubble({
       )}
       {message.proposal && (
         <ProposalCard
+          rise={fresh ? riseAfter : null}
           proposal={message.proposal}
           status={message.status}
           today={today}
@@ -661,6 +706,29 @@ function ErrorBubble({ message, onRetry }: { message: ErrorMessage; onRetry?: ()
   );
 }
 
+/**
+ * Свечение по краям экрана, пока помощник думает (как у Siri). Рисуется в body: внутри окна фиксированный
+ * слой привязался бы к окну, а не к экрану. После ответа плавно гаснет и убирается.
+ */
+function SiriGlow({ active }: { active: boolean }) {
+  const [mounted, setMounted] = useState(active);
+  const [visible, setVisible] = useState(false);
+  // Включили — сразу в разметку (видимость — со следующего кадра, чтобы сработал переход прозрачности).
+  if (active && !mounted) setMounted(true);
+  useEffect(() => {
+    if (!mounted) return;
+    const frame = requestAnimationFrame(() => setVisible(active));
+    if (active) return () => cancelAnimationFrame(frame);
+    const timer = setTimeout(() => setMounted(false), 750);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [active, mounted]);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(<div className="siri-glow" data-active={visible} aria-hidden="true" />, document.body);
+}
+
 function TypingIndicator({ since }: { since: number }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -677,12 +745,8 @@ function TypingIndicator({ since }: { since: number }) {
       role="status"
       className="flex items-center gap-2 self-start rounded-2xl rounded-bl-md bg-surface-2 px-4 py-3 text-sm text-muted"
     >
-      <span className="flex gap-1" aria-hidden="true">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:200ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:400ms]" />
-      </span>
-      <span>Думаю…</span>
+      <span className="siri-orb" aria-hidden="true" />
+      <span className="siri-shimmer font-medium">Думаю…</span>
       <span className="tabular-nums" aria-hidden="true">
         {seconds} с
       </span>
@@ -705,12 +769,15 @@ function recurringTitle(proposal: AiProposal): string {
 }
 
 function ProposalCard({
+  rise,
   proposal,
   status,
   today,
   onApply,
   onDismiss,
 }: {
+  /** Задержка (мс), после которой карточка выезжает; null — показать сразу. */
+  rise: number | null;
   proposal: AiProposal;
   status: ProposalStatus;
   today: IsoDate;
@@ -718,7 +785,11 @@ function ProposalCard({
   onDismiss: () => void;
 }) {
   return (
-    <section className="rounded-2xl border border-border bg-surface p-4" aria-label="Предложенные изменения">
+    <section
+      className={`rounded-2xl border border-border bg-surface p-4 ${rise !== null ? "siri-rise" : ""}`}
+      style={rise !== null ? { ["--siri-delay" as string]: `${rise}ms` } : undefined}
+      aria-label="Предложенные изменения"
+    >
       <p className="text-sm font-semibold">Помощник предлагает изменения:</p>
 
       {proposal.operations.length > 0 && (

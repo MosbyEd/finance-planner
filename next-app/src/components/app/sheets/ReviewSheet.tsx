@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { formatRelativeDay } from "@/domain/dates";
 import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
-import { useSnapshot, useToday } from "@/client/react";
+import { newId, useSnapshot, useToday } from "@/client/react";
 import { Button, IconButton } from "../../ui/Button";
 import { EmptyState, Money } from "../../ui/controls";
 import { useConfirm } from "../../ui/feedback";
@@ -31,13 +31,24 @@ export function ReviewSheet() {
   const dispatch = useDispatch();
   const confirm = useConfirm();
   const today = useToday();
-  const [ids] = useState(() => reviewQueue(state).map((t) => t.id));
+  const [ids, setIds] = useState(() => reviewQueue(state).map((t) => t.id));
   const rows = ids.map((id) => state.transactions.find((t) => t.id === id)).filter((t): t is Transaction => Boolean(t));
   const pending = rows.filter((t) => t.review);
 
   const confirmAll = () => {
-    if (pending.length) dispatch({ type: "tx.reviewed", ids: pending.map((t) => t.id) });
+    // Действие принимает до 500 id — длинный список отправляем частями, но одним изменением.
+    const all = pending.map((t) => t.id);
+    const chunks = Array.from({ length: Math.ceil(all.length / 500) }, (_, i) => all.slice(i * 500, i * 500 + 500));
+    if (chunks.length) dispatch(chunks.map((chunk) => ({ type: "tx.reviewed" as const, ids: chunk })));
     close();
+  };
+
+  /** Операция ошибочно засчитана как регулярный платёж: сделать обычной, а плановое начисление вернуть. */
+  const detach = (tx: Transaction) => {
+    const id = newId();
+    if (dispatch({ type: "occurrence.detach", id: tx.id, newId: id })) {
+      setIds((list) => list.map((x) => (x === tx.id ? id : x)));
+    }
   };
 
   const remove = async (tx: Transaction) => {
@@ -84,6 +95,7 @@ export function ReviewSheet() {
                 open({ kind: "tx", txId: tx.id });
               }}
               onDelete={() => void remove(tx)}
+              onDetach={tx.templateId ? () => detach(tx) : undefined}
             />
           ))}
         </ul>
@@ -112,6 +124,7 @@ function ReviewRow({
   onCategory,
   onEdit,
   onDelete,
+  onDetach,
 }: {
   tx: Transaction;
   state: State;
@@ -119,6 +132,8 @@ function ReviewRow({
   onCategory: (category: string) => void;
   onEdit: () => void;
   onDelete: () => void;
+  /** Только у начислений регулярного платежа. */
+  onDetach?: () => void;
 }) {
   const selectId = useId();
   const signed = tx.type === "income" ? tx.amount : -Math.abs(tx.amount);
@@ -169,6 +184,11 @@ function ReviewRow({
         )}
         <IconButton icon="trash" label="Удалить операцию" onClick={onDelete} />
       </div>
+      {onDetach && (
+        <button type="button" onClick={onDetach} className="self-start text-sm font-medium text-accent">
+          Это не регулярный платёж
+        </button>
+      )}
     </li>
   );
 }

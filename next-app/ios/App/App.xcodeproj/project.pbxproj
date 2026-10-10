@@ -20,6 +20,8 @@
 		B0D6E0042FF0000100A1B2C3 /* BudgetNativePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */; };
 		B0D6E0062FF0000100A1B2C3 /* BudgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */; };
 		B0D6E0082FF0000100A1B2C3 /* BudgetViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */; };
+		B0D6E00A2FF0000100A1B2C3 /* GlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */; };
+		B0D6E00C2FF0000100A1B2C3 /* ShortcutsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,8 @@
 		B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetNativePlugin.swift; sourceTree = "<group>"; };
 		B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetIntents.swift; sourceTree = "<group>"; };
 		B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetViewController.swift; sourceTree = "<group>"; };
+		B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTabBar.swift; sourceTree = "<group>"; };
+		B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +81,8 @@
 				B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */,
 				B0D6E0052FF0000100A1B2C3 /* BudgetIntents.swift */,
 				B0D6E0072FF0000100A1B2C3 /* BudgetViewController.swift */,
+				B0D6E0092FF0000100A1B2C3 /* GlassTabBar.swift */,
+				B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -177,6 +183,8 @@
 				B0D6E0042FF0000100A1B2C3 /* BudgetNativePlugin.swift in Sources */,
 				B0D6E0062FF0000100A1B2C3 /* BudgetIntents.swift in Sources */,
 				B0D6E0082FF0000100A1B2C3 /* BudgetViewController.swift in Sources */,
+				B0D6E00A2FF0000100A1B2C3 /* GlassTabBar.swift in Sources */,
+				B0D6E00C2FF0000100A1B2C3 /* ShortcutsSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

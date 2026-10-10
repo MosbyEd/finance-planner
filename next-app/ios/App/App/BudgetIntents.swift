@@ -51,6 +51,8 @@ struct AddOperationIntent: AppIntent {
         "Добавляет расход или доход в бюджет. Категорию можно не указывать — её подберёт приложение по названию."
     )
     static let openAppWhenRun = false
+    /// Добавлять операции с заблокированного телефона нельзя.
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Тип", default: .expense)
     var kind: OperationKind
@@ -73,7 +75,8 @@ struct AddOperationIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let kopecks = Int((amount * 100).rounded())
-        var body: [String: Any] = ["type": kind.rawValue, "amount": kopecks]
+        // Один id на запуск: если ответ потерялся, повтор не создаст вторую операцию.
+        var body: [String: Any] = ["type": kind.rawValue, "amount": kopecks, "requestId": UUID().uuidString.lowercased()]
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { body["title"] = name }
         if let category, !category.trimmingCharacters(in: .whitespaces).isEmpty { body["category"] = category }
         let message: String
@@ -81,7 +84,7 @@ struct AddOperationIntent: AppIntent {
             message = try await BudgetAPI.post("/api/shortcuts/add", json: body).message ?? "Добавлено."
         } catch BudgetAPI.Failure.notSignedIn {
             message = "Сначала войдите в приложение «Бюджет»."
-        } catch BudgetAPI.Failure.offline {
+        } catch BudgetAPI.Failure.offline, BudgetAPI.Failure.retryLater, BudgetAPI.Failure.serverError {
             message = "Нет связи с сервером — откройте приложение и добавьте операцию там: без сети она сохранится на телефоне."
         } catch BudgetAPI.Failure.rejected(let text) {
             message = text
@@ -94,6 +97,8 @@ struct TodayBudgetIntent: AppIntent {
     static let title: LocalizedStringResource = "Сколько можно потратить сегодня"
     static let description = IntentDescription("Лимит на сегодня — сколько можно потратить, чтобы хватило на обязательные платежи.")
     static let openAppWhenRun = false
+    /// Данные о деньгах не озвучиваются на заблокированном телефоне.
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let message: String

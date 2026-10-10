@@ -132,6 +132,11 @@ export const actionSchema = z.discriminatedUnion("type", [
     note: noteSchema,
     review: z.boolean().optional(),
   }),
+  /**
+   * Операция ошибочно засчитана как регулярный платёж (например, по СМС): сделать её обычной операцией
+   * с id newId, а начисление шаблона вернуть в план (синхронизация создаст его заново, когда наступит срок).
+   */
+  z.object({ type: z.literal("occurrence.detach"), id: idSchema, newId: idSchema }),
   /** Пользователь проверил автоматически добавленные операции — снять отметку review. */
   z.object({ type: z.literal("tx.reviewed"), ids: z.array(idSchema).min(1).max(500) }),
   z.object({ type: z.literal("recurring.sync"), today: isoDateSchema }),
@@ -452,6 +457,20 @@ export function applyAction(state: State, action: Action): State {
         updated.category !== current.category ||
         Boolean(updated.autoSaving) !== Boolean(current.autoSaving);
       return savingInputsChanged ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
+    }
+
+    case "occurrence.detach": {
+      const tx = findTx(state, action.id);
+      if (!tx.templateId || !tx.occurrenceMonth) throw new DomainError("Это не регулярный платёж.");
+      assertNewId(state, action.newId);
+      const savingId = linkedSavingId(tx.id);
+      const plain: Transaction = { ...tx, id: action.newId };
+      delete plain.templateId;
+      delete plain.occurrenceMonth;
+      // Пользователь сам разобрался с операцией — она проверена.
+      delete plain.review;
+      const rest = state.transactions.filter((t) => t.id !== tx.id && !(t.id === savingId && t.linkedTo === tx.id));
+      return syncLinkedSaving({ ...state, transactions: [...rest, plain] }, plain);
     }
 
     case "tx.reviewed": {

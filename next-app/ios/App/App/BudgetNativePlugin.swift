@@ -12,7 +12,12 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setSummary", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "aiStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "aiRespond", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "tabBarShow", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "tabBarUpdate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openShortcuts", returnType: CAPPluginReturnPromise),
     ]
+
+    private var tabBar: GlassTabBar?
 
     // MARK: - Сессия и сводка для команд
 
@@ -21,6 +26,7 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         BudgetStore.apiBase = call.getString("apiBase")
         let token = call.getString("token")
         BudgetStore.token = token
+        if token != nil { BudgetStore.account = call.getString("account") }
         if token == nil { BudgetStore.summary = nil }
         call.resolve()
         if token != nil { Task { await SmsQueue.shared.flush() } }
@@ -38,6 +44,70 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
             incomeCategories: call.getArray("incomeCategories", String.self) ?? []
         )
         call.resolve()
+    }
+
+    // MARK: - Нижняя панель Liquid Glass
+
+    /// Показывает нативную панель вкладок: items — [{id, title, symbol, selectedSymbol}], selected, action (кнопка «+»).
+    /// Нажатия приходят событиями tabBarSelect {id} и tabBarAction.
+    @objc func tabBarShow(_ call: CAPPluginCall) {
+        let items = (call.getArray("items", JSObject.self) ?? []).compactMap { raw -> GlassTabBar.Item? in
+            guard let id = raw["id"] as? String, let title = raw["title"] as? String, let symbol = raw["symbol"] as? String else {
+                return nil
+            }
+            return GlassTabBar.Item(id: id, title: title, symbol: symbol, selectedSymbol: raw["selectedSymbol"] as? String ?? symbol)
+        }
+        let selected = call.getString("selected")
+        let action = call.getBool("action") ?? false
+        DispatchQueue.main.async {
+            guard let view = self.bridge?.viewController?.view else {
+                call.reject("Нет экрана приложения")
+                return
+            }
+            let bar = self.tabBar ?? self.makeTabBar(in: view)
+            bar.setItems(items)
+            bar.select(selected, animated: false)
+            bar.setActionVisible(action, animated: false)
+            bar.setHiddenByApp(false, animated: false)
+            call.resolve()
+        }
+    }
+
+    /// Меняет выбранную вкладку, кнопку «+» и видимость панели (hidden — пока открыто окно интерфейса).
+    @objc func tabBarUpdate(_ call: CAPPluginCall) {
+        let selected = call.getString("selected")
+        let action = call.getBool("action")
+        let hidden = call.getBool("hidden")
+        DispatchQueue.main.async {
+            guard let bar = self.tabBar else {
+                call.reject("Панель не показана")
+                return
+            }
+            if let selected { bar.select(selected, animated: true) }
+            if let action { bar.setActionVisible(action, animated: true) }
+            if let hidden { bar.setHiddenByApp(hidden, animated: true) }
+            call.resolve()
+        }
+    }
+
+    private func makeTabBar(in view: UIView) -> GlassTabBar {
+        let bar = GlassTabBar()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bar)
+        // Как у системной панели: над индикатором «Домой», не ниже 12 pt от края на экранах без него.
+        let toSafeArea = bar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: 8)
+        toSafeArea.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            bar.heightAnchor.constraint(equalToConstant: 64),
+            bar.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -12),
+            toSafeArea,
+        ])
+        bar.onSelect = { [weak self] id in self?.notifyListeners("tabBarSelect", data: ["id": id]) }
+        bar.onAction = { [weak self] in self?.notifyListeners("tabBarAction", data: [:]) }
+        tabBar = bar
+        return bar
     }
 
     // MARK: - Apple Intelligence

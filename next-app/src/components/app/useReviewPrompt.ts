@@ -16,7 +16,8 @@ export function useReviewPrompt(): void {
   const shown = useRef(new Set<string>());
 
   useEffect(() => {
-    if (phase !== "ready" || mode !== "account" || overlay) return;
+    // Не поверх другого окна или подтверждения (подтверждения — не overlay, но тоже aria-modal).
+    if (phase !== "ready" || mode !== "account" || overlay || document.querySelector('[aria-modal="true"]')) return;
     const queue = reviewQueue(state);
     if (reviewReturn.pending) {
       reviewReturn.pending = false;

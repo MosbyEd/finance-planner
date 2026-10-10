@@ -23,6 +23,7 @@ import { OverlayHost } from "./OverlayHost";
 import { forgetAiChat } from "./sheets/AiChatSheet";
 import { UiProvider, useUi, type Tab } from "./overlays";
 import { useNativeBridge } from "./useNativeBridge";
+import { useNativeTabBar } from "./useNativeTabBar";
 import { useReviewPrompt } from "./useReviewPrompt";
 
 const TABS: { id: Exclude<Tab, "settings">; label: string; icon: IconName }[] = [
@@ -98,6 +99,15 @@ function Shell() {
   useNativeBridge();
   useReviewPrompt();
   const appleAi = useAppleAiAvailable();
+  // В iOS-приложении панель вкладок и «+» — нативные, из системного стекла Liquid Glass.
+  const nativeBar = useNativeTabBar({
+    enabled: snapshot.phase === "ready",
+    tabs: TABS,
+    tab,
+    showAdd: tab === "home" || tab === "history",
+    onSelect: setTab,
+    onAdd: () => open({ kind: "tx" }),
+  });
 
   // Офлайн-оболочка (только в production: в разработке кэш мешал бы горячей перезагрузке).
   useEffect(() => registerServiceWorker(), []);
@@ -175,7 +185,7 @@ function Shell() {
       </main>
 
       {/* Кнопка «+» — отдельный круг из акцентного стекла над нижней панелью (на широком экране — в углу). */}
-      {showAdd && (
+      {showAdd && !nativeBar && (
         <button
           type="button"
           aria-label="Добавить операцию"
@@ -186,39 +196,41 @@ function Shell() {
         </button>
       )}
 
-      {/* Нижняя панель — плавающая стеклянная капсула с отступом от краёв экрана. */}
-      <nav
-        aria-label="Разделы"
-        className="pointer-events-none fixed inset-x-0 bottom-(--dock-offset) z-30 px-3 sm:hidden"
-      >
-        <div className="glass pointer-events-auto relative isolate mx-auto flex h-(--dock-height) max-w-md rounded-full p-1">
-          {/* «Линза» под выбранной вкладкой перетекает между пунктами. */}
-          <span
-            aria-hidden
-            className={`glass-lens pointer-events-none absolute inset-y-1 left-1 -z-10 rounded-full transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none ${
-              activeTabIndex < 0 ? "opacity-0" : ""
-            }`}
-            style={{
-              width: `calc((100% - 0.5rem) / ${TABS.length})`,
-              transform: `translateX(${Math.max(0, activeTabIndex) * 100}%)`,
-            }}
-          />
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              aria-current={tab === t.id ? "page" : undefined}
-              onClick={() => setTab(t.id)}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10.5px] font-semibold tracking-tight transition-colors ${
-                tab === t.id ? "text-accent" : "text-text"
+      {/* Нижняя панель — плавающая стеклянная капсула с отступом от краёв экрана (в приложении — нативная). */}
+      {!nativeBar && (
+        <nav
+          aria-label="Разделы"
+          className="pointer-events-none fixed inset-x-0 bottom-(--dock-offset) z-30 px-3 sm:hidden"
+        >
+          <div className="glass pointer-events-auto relative isolate mx-auto flex h-(--dock-height) max-w-md rounded-full p-1">
+            {/* «Линза» под выбранной вкладкой перетекает между пунктами. */}
+            <span
+              aria-hidden
+              className={`glass-lens pointer-events-none absolute inset-y-1 left-1 -z-10 rounded-full transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none ${
+                activeTabIndex < 0 ? "opacity-0" : ""
               }`}
-            >
-              <Icon name={t.icon} size={22} />
-              <span className="max-w-full truncate">{t.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
+              style={{
+                width: `calc((100% - 0.5rem) / ${TABS.length})`,
+                transform: `translateX(${Math.max(0, activeTabIndex) * 100}%)`,
+              }}
+            />
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                aria-current={tab === t.id ? "page" : undefined}
+                onClick={() => setTab(t.id)}
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[10.5px] font-semibold tracking-tight transition-colors ${
+                  tab === t.id ? "text-accent" : "text-text"
+                }`}
+              >
+                <Icon name={t.icon} size={22} />
+                <span className="max-w-full truncate">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
 
       <OverlayHost />
     </div>

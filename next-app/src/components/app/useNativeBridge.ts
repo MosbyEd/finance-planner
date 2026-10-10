@@ -19,7 +19,7 @@ export function useNativeBridge(): void {
 
   useEffect(() => {
     if (!isNativeApp() || phase !== "ready") return;
-    void nativeSetSession(apiBase(), signedIn ? storage.get(TOKEN_KEY) : null);
+    void nativeSetSession(apiBase(), signedIn ? storage.get(TOKEN_KEY) : null, signedIn ? (user?.login ?? null) : null);
     // user — новый объект при каждом входе: после повторного входа передаём новый токен.
   }, [phase, signedIn, user]);
 

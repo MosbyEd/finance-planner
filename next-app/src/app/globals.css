@@ -360,3 +360,181 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Помощник в стиле Siri: переливающееся свечение по краям экрана, пока он думает, «шар» вместо точек
+ * и ответ, который проявляется по словам. При «Уменьшить движение» анимации останавливает правило выше.
+ */
+@property --siri-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:root {
+  --siri-gradient: conic-gradient(
+    from var(--siri-angle),
+    #ff8a5c,
+    #ff5fa2,
+    #bf6bff,
+    #6b8cff,
+    #5ad3ff,
+    #ffd36b,
+    #ff8a5c
+  );
+}
+
+@keyframes siri-spin {
+  to {
+    --siri-angle: 360deg;
+  }
+}
+
+@keyframes siri-breathe {
+  50% {
+    transform: scale(0.8);
+  }
+}
+
+@keyframes siri-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes siri-word {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(0.25em);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+@keyframes siri-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes siri-outline-fade {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Свечение по краям экрана: тонкая яркая кромка и размытый ореол под ней. */
+.siri-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease;
+  --siri-radius: 0px;
+}
+.siri-glow[data-active="true"] {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .siri-glow {
+    /* Скругление экрана iPhone. */
+    --siri-radius: 52px;
+  }
+}
+.siri-glow::before,
+.siri-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--siri-radius);
+  background: var(--siri-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: siri-spin 3.2s linear infinite;
+}
+.siri-glow::before {
+  padding: 3px;
+}
+.siri-glow::after {
+  padding: 16px;
+  filter: blur(18px);
+  opacity: 0.8;
+}
+
+/* «Шар» Siri: вращающийся градиент, который «дышит». */
+.siri-orb {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--siri-gradient);
+  box-shadow: 0 0 14px rgb(191 107 255 / 0.55);
+  animation:
+    siri-spin 2.4s linear infinite,
+    siri-breathe 1.8s ease-in-out infinite;
+}
+
+/* Переливающийся текст «Думаю…». */
+.siri-shimmer {
+  background: linear-gradient(90deg, var(--muted) 30%, #bf6bff 45%, #ff5fa2 55%, var(--muted) 70%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: siri-shimmer 2.2s linear infinite;
+}
+
+/* Слово ответа: проявляется из размытия; задержка — по номеру слова (--siri-delay). */
+.siri-word {
+  display: inline-block;
+  animation: siri-word 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--siri-delay, 0ms);
+}
+
+/* Карточка после ответа (предложение помощника) выезжает, когда текст уже проявился. */
+.siri-rise {
+  animation: siri-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--siri-delay, 0ms);
+}
+
+/* Радужный контур нового ответа — на мгновение, затем гаснет. */
+.siri-outline {
+  position: relative;
+}
+.siri-outline::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--siri-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation:
+    siri-spin 2.4s linear infinite,
+    siri-outline-fade 1.8s ease-out forwards;
+}

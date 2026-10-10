@@ -147,3 +147,15 @@ describe("операции из СМС", () => {
     expect(await res.json()).toMatchObject({ status: "failed", message: expect.stringMatching(/^Не добавлено: Нельзя снять больше/) });
   });
 });
+
+describe("текст СМС не в поле text", () => {
+  it("находит СМС во вложенном словаре или в поле с другим именем", async () => {
+    const key = await newKey(await signUp());
+    const nested = await sendSms(key, JSON.stringify({ message: { content: PURCHASE, sender: "900" } }));
+    expect((await nested.json()).status).toBe("added");
+    const other = await sendSms(key, new URLSearchParams({ body: "Счёт карты MIR-7759 11:00 Покупка 50р Перекрёсток Баланс: 1р" }).toString(), "application/x-www-form-urlencoded");
+    expect((await other.json()).status).toBe("added");
+    const empty = await sendSms(key, JSON.stringify({ text: "" }));
+    expect(empty.status).toBe(400);
+  });
+});

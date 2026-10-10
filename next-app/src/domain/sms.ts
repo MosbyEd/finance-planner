@@ -328,8 +328,9 @@ function titleOf(op: Extract<SmsOperation, { kind: "income" | "expense" }>): str
 
 // ---------- сопоставление с планом ----------
 
-/** На сколько дней раньше или позже плана может прийти доход или пройти платёж. */
-const MATCH_WINDOW_DAYS = { income: 10, expense: 7 } as const;
+/** На сколько дней раньше плана может прийти доход или пройти платёж — и на сколько позже. */
+const MATCH_EARLY_DAYS = { income: 10, expense: 7 } as const;
+const MATCH_LATE_DAYS = { income: 5, expense: 7 } as const;
 
 export interface PlannedMatch {
   templateId: string;
@@ -342,14 +343,16 @@ export interface PlannedMatch {
 /**
  * Регулярный доход или платёж, которому соответствует операция из СМС. Суммы могут отличаться от плана,
  * поэтому сопоставляем прежде всего по смыслу и дате:
- *  - этот шаблон уже подтверждали СМС с тем же магазином или отправителем;
- *  - зарплата, аванс или премия — шаблон с той же категорией;
+ *  - этот шаблон уже подтверждали СМС с тем же магазином или отправителем, и пользователь это проверил
+ *    (сумма — не больше чем вдвое от плана);
+ *  - зарплата, аванс или премия — шаблон с той же категорией (сумма — в пределах ±60 %);
  *  - название шаблона совпадает с магазином (сумма — в пределах ±60 %);
  *  - та же категория (сумма — в пределах ±40 %);
- *  - сумма совпадает до копейки и дата — в пределах 3 дней;
+ *  - сумма совпадает до копейки и дата — в пределах 3 дней, если магазина в СМС нет;
  *  - перевод без получателя на ту же сумму (±10 %) в пределах 3 дней.
- * Из подходящих выбирается самый уверенный, затем ближайший по сумме и дате. Уже подтверждённые СМС
- * и пропущенные месяцы не рассматриваются.
+ * Из подходящих выбирается самый уверенный, затем ближайший по дате и сумме. Не рассматриваются пропущенные
+ * месяцы и начисления, которые уже не плановые: подтверждённые СМС или Siri, исправленные вручную —
+ * их не перезаписываем, такая СМС станет отдельной операцией.
  */
 export function matchPlanned(
   state: State,
@@ -365,7 +368,8 @@ export function matchPlanned(
   for (const t of state.transactions) {
     if (!t.templateId || !t.occurrenceMonth) continue;
     occurrences.set(`${t.templateId}|${t.occurrenceMonth}`, t);
-    if (t.note.startsWith(SMS_NOTE_PREFIX)) {
+    // Учимся только на сопоставлениях, которые пользователь проверил: ошибочное не должно закрепляться.
+    if (t.note.startsWith(SMS_NOTE_PREFIX) && !t.review) {
       const list = confirmedNotes.get(t.templateId) ?? [];
       list.push(normalizeName(t.note));
       confirmedNotes.set(t.templateId, list);
@@ -386,27 +390,36 @@ export function matchPlanned(
     for (const month of months) {
       const planned = occurrenceDate(template, month);
       if (planned < template.startDate) continue;
-      const distance = Math.abs(diffDays(planned, date));
-      if (distance > MATCH_WINDOW_DAYS[op.kind] || isSkipped(state, template.id, month)) continue;
+      const shift = diffDays(planned, date); // > 0 — СМС позже плана
+      if (shift > MATCH_LATE_DAYS[op.kind] || -shift > MATCH_EARLY_DAYS[op.kind]) continue;
+      if (isSkipped(state, template.id, month)) continue;
       const existing = occurrences.get(`${template.id}|${month}`);
-      if (existing?.note.startsWith(SMS_NOTE_PREFIX)) continue;
+      // Начисление уже не плановое (подтверждено или исправлено) — не трогаем его.
+      if (existing && !isPristineOccurrence(existing, template, planned)) continue;
+      const distance = Math.abs(shift);
 
       let strength = 0;
-      if (learned && diff <= 2) strength = 5;
-      else if (payroll && categoryMatch) strength = 4;
+      if (learned && diff <= 1) strength = 5;
+      else if (payroll && categoryMatch && diff <= 0.6) strength = 4;
       else if (titleMatch && diff <= 0.6) strength = 3;
       else if (categoryMatch && diff <= 0.4) strength = 2;
-      else if (diff === 0 && distance <= 3) strength = 2;
+      else if (diff === 0 && distance <= 3 && !counterparty) strength = 2;
       else if (op.via === "transfer" && !counterparty && diff <= 0.1 && distance <= 3) strength = 1;
       if (!strength) continue;
 
-      const score = strength * 1000 - diff * 100 - distance;
+      // Дата важнее суммы: из двух шаблонов одной категории выбираем ближайший по сроку.
+      const score = strength * 1000 - distance * 20 - diff * 50;
       if (!best || score > best.score) {
         best = { match: { templateId: template.id, month, title: template.title, planned: template.amount }, score };
       }
     }
   }
   return best?.match ?? null;
+}
+
+/** Начисление в том виде, как его создала синхронизация шаблонов: ещё никто не подтверждал и не правил. */
+function isPristineOccurrence(tx: Transaction, template: State["templates"][number], planned: IsoDate): boolean {
+  return tx.amount === template.amount && tx.date === planned && tx.note === template.note;
 }
 
 export interface SmsPlan {

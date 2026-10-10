@@ -1,6 +1,6 @@
 "use client";
 
-import { registerPlugin } from "@capacitor/core";
+import { registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import { isNativeApp } from "./runtime";
 
 /**
@@ -30,8 +30,21 @@ export type AppleModel = "device" | "cloud";
 /** Ответ модели или код ошибки: context — данных слишком много, refused — модель отказалась отвечать… */
 export type AppleAiReply = { text: string } | { error: string; message?: string };
 
+export interface TabBarItem {
+  id: string;
+  title: string;
+  /** SF Symbol вкладки и выбранной вкладки. */
+  symbol: string;
+  selectedSymbol: string;
+}
+
 interface BudgetNativePlugin {
-  setSession(options: { apiBase: string; token: string | null }): Promise<void>;
+  tabBarShow(options: { items: TabBarItem[]; selected: string; action: boolean }): Promise<void>;
+  tabBarUpdate(options: { selected?: string; action?: boolean; hidden?: boolean }): Promise<void>;
+  addListener(event: "tabBarSelect", listener: (data: { id: string }) => void): Promise<PluginListenerHandle>;
+  addListener(event: "tabBarAction", listener: () => void): Promise<PluginListenerHandle>;
+  openShortcuts(): Promise<void>;
+  setSession(options: { apiBase: string; token: string | null; account: string | null }): Promise<void>;
   setSummary(options: { date: string; text: string; expenseCategories: string[]; incomeCategories: string[] }): Promise<void>;
   aiStatus(): Promise<AppleAiStatus>;
   aiRespond(options: { model: AppleModel; instructions: string; prompt: string }): Promise<AppleAiReply>;
@@ -41,10 +54,10 @@ const plugin = registerPlugin<BudgetNativePlugin>("BudgetNative");
 
 const UNAVAILABLE: AppleAiStatus = { device: { available: false }, cloud: { available: false } };
 
-export async function nativeSetSession(apiBase: string, token: string | null): Promise<void> {
+export async function nativeSetSession(apiBase: string, token: string | null, account: string | null): Promise<void> {
   if (!isNativeApp()) return;
   try {
-    await plugin.setSession({ apiBase, token });
+    await plugin.setSession({ apiBase, token, account });
   } catch {
     // Старая сборка приложения без плагина — команды Siri просто не узнают о входе.
   }
@@ -73,5 +86,38 @@ export async function appleAiRespond(model: AppleModel, instructions: string, pr
     return await plugin.aiRespond({ model, instructions, prompt });
   } catch (error) {
     return { error: "failed", message: error instanceof Error ? error.message : undefined };
+  }
+}
+
+/** Нативная нижняя панель Liquid Glass. false — плагина нет (браузер, старая сборка): остаётся панель интерфейса. */
+export async function nativeTabBarShow(options: Parameters<BudgetNativePlugin["tabBarShow"]>[0]): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.tabBarShow(options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function nativeTabBarUpdate(options: Parameters<BudgetNativePlugin["tabBarUpdate"]>[0]): void {
+  plugin.tabBarUpdate(options).catch(() => {});
+}
+
+export function onNativeTabBar(onSelect: (id: string) => void, onAction: () => void): () => void {
+  const handles = [plugin.addListener("tabBarSelect", ({ id }) => onSelect(id)), plugin.addListener("tabBarAction", () => onAction())];
+  return () => {
+    for (const handle of handles) void handle.then((h) => h.remove()).catch(() => {});
+  };
+}
+
+/** Экран «Siri и Команды» (системная кнопка «Команды» и подсказки Siri). false — в этой сборке его нет. */
+export async function nativeOpenShortcuts(): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.openShortcuts();
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -46,7 +46,11 @@ export function planQuickAdd(state: State, input: QuickAddInput, ctx: { id: stri
     return { actions: [action], summary: `${word} ${money} · ${planned.title} — регулярный, отмечен` };
   }
 
-  const mandatory = input.category ? input.type === "expense" && state.categories.mandatory.includes(category) : suggested.mandatory;
+  const same = (list: string[]) => list.some((c) => c.toLocaleLowerCase("ru") === category.toLocaleLowerCase("ru"));
+  // Названную голосом категорию сравниваем без учёта регистра: «аренда» — та же «Аренда».
+  const mandatory = input.category
+    ? input.type === "expense" && same(state.categories.mandatory) && !same(state.categories.flexible)
+    : suggested.mandatory;
   const action: Action = {
     type: "tx.add",
     tx: {

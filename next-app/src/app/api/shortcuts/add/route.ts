@@ -14,6 +14,8 @@ const bodySchema = z.object({
   amount: positiveKopecksSchema,
   title: z.string().max(200).optional(),
   category: z.string().max(100).optional(),
+  /** Id запуска команды: повтор того же запроса (ответ потерялся) не добавит операцию второй раз. */
+  requestId: z.string().regex(/^[a-z0-9-]{8,36}$/).optional(),
 });
 
 export const OPTIONS = corsPreflight;
@@ -29,7 +31,7 @@ export const POST = withUser(async (req, { user }) => {
     const plan = planQuickAdd(state, { ...body.data, title: body.data.title ?? "" }, { id: newId(), date: today });
     applyUserOps(
       user.id,
-      plan.actions.map((action) => ({ opId: `qa-${newId()}`, action })),
+      plan.actions.map((action, i) => ({ opId: `qa-${body.data.requestId ?? newId()}${i ? `-${i}` : ""}`.slice(0, 40), action })),
       today,
     );
     return jsonOk({ status: "added", message: plan.summary });
