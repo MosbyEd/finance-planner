@@ -133,9 +133,17 @@ export function parseSberSms(raw: string): SmsOperation | null {
   m = on(String.raw`(?:Возврат покупки|Отмена покупки|Возврат)\s+${AMOUNT}${TAIL}`);
   if (m) return income("refund", m, m[3]);
 
-  // Прочие зачисления: «Зачисление 1500р …».
-  m = on(String.raw`Зачисление\s+\+?${AMOUNT}${TAIL}`);
+  // Прочие зачисления: «Зачисление 1500р …», «Пополнение 1000р», «Поступление 500р».
+  m = on(String.raw`(?:Зачисление|Пополнение|Поступление)(?:\s+(?:перевода|средств))?\s+\+?${AMOUNT}${TAIL}`);
   if (m) return income("deposit", m, m[3]);
+
+  // «Вам перевели 1000р от …», «Получен перевод 1000р от …», «Зачислен перевод 1000р …».
+  m = on(String.raw`(?:Вам перевели|Получен перевод|Зачислен перевод|Входящий перевод)\s+\+?${AMOUNT}(?:\s+от)?${TAIL}`);
+  if (m) return income("transfer", m, m[3]);
+
+  // Перевод с «+» перед суммой — входящий: «Перевод с карты *1234 +1000р», «Перевод +1000р».
+  m = on(String.raw`Перевод(?:\s+(?:с|из)\s+.+?)?\s+\+${AMOUNT}(?:\s+от)?${TAIL}`);
+  if (m) return income("transfer", m, m[3]);
 
   m = on(String.raw`Покупка\s+${AMOUNT}${TAIL}`);
   if (m) return expense("purchase", m, m[3]);

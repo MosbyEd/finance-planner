@@ -61,6 +61,18 @@ describe("разбор СМС Сбербанка", () => {
       { kind: "income", via: "transfer", amount: 500_000, counterparty: "ИВАН И." },
     ],
     [
+      "Счёт карты MIR-7759 15:20 Пополнение 1000р Баланс: 2000р",
+      { kind: "income", via: "deposit", amount: 100_000, time: "15:20", counterparty: "" },
+    ],
+    [
+      "СЧЁТ5804 15:20 Вам перевели 2500р от ЭДУАРД К. Баланс: 3000р",
+      { kind: "income", via: "transfer", amount: 250_000, counterparty: "ЭДУАРД К." },
+    ],
+    [
+      "MIR-7759 15:20 Перевод с карты *1234 +1000р Баланс: 2000р",
+      { kind: "income", via: "transfer", amount: 100_000 },
+    ],
+    [
       "MIR-1234 10:00 Выдача 5000р ATM 123456 Баланс: 1000р",
       { kind: "expense", via: "cash", amount: 500_000, counterparty: "" },
     ],
