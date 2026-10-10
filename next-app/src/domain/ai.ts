@@ -17,7 +17,8 @@ import { isReservedKey } from "./records";
 import { nextOccurrence } from "./recurring";
 import { autoSavingByDefault } from "./savings";
 import { suggestCategory } from "./sms";
-import { LIMITS, type State } from "./schema";
+import { LIMITS, type Account, type State } from "./schema";
+import { accountBalance, activeAccounts, creditStatus, findAccount, isSpendingAccount, MAIN_ACCOUNT_ID } from "./accounts";
 
 // ---------- снимок данных для модели ----------
 
@@ -108,6 +109,17 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
       kind: e.type,
       balanceAfter: rub(e.balanceAfter),
     })),
+    accounts: activeAccounts(state).map((a) => {
+      const credit = a.kind === "credit" ? creditStatus(state, a, today) : null;
+      return {
+        name: a.name,
+        kind: a.kind,
+        ...(credit
+          ? { debt: rub(credit.debt), creditLimit: a.creditLimit ? rub(a.creditLimit) : null, interestFreeUntil: credit.graceEnd }
+          : { balance: rub(accountBalance(state, a.id, today)) }),
+        countsInSafeToSpend: isSpendingAccount(a),
+      };
+    }),
     templates: (d.templates ? state.templates : []).map((t) => ({
       kind: t.kind,
       title: t.title,
@@ -116,6 +128,8 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
       dayOfMonth: t.dayOfMonth,
       active: t.active,
       next: nextOccurrence(state, t, today)?.date ?? null,
+      account: findAccount(state, t.accountId ?? MAIN_ACCOUNT_ID)?.name ?? null,
+      to: t.toAccountId ? (findAccount(state, t.toAccountId)?.name ?? null) : t.loanId ? (state.loans.find((l) => l.id === t.loanId)?.name ?? null) : null,
     })),
     goals: state.goals.map((g) => ({
       name: g.name,
@@ -161,13 +175,20 @@ export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDeta
     "- Долги: kind borrow или credit — это мой долг; kind lend — мне должны (актив, а не обязательство).",
     "- Профиль пользователя (profile) учитывай в советах, если он заполнен.",
     "",
-    "Если пользователь просит добавить операции, регулярные платежи или лимиты, в самом конце ответа добавь",
-    "одну строку (пользователь подтвердит её перед применением):",
-    'AI_CMDS: {"operations":[...],"templates":[...],"categoryLimits":{...}}',
-    '- operations: {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"date":"YYYY-MM-DD","mandatory":true|false}',
-    '- templates (ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31}',
+    "- accounts — счета пользователя: balance — остаток, у кредитки debt — долг и interestFreeUntil — до какого дня без процентов.",
+    "",
+    "Если пользователь просит что-то добавить или изменить, в самом конце ответа добавь одну строку",
+    "(пользователь подтвердит её перед применением):",
+    'AI_CMDS: {"operations":[...],"templates":[...],"categoryLimits":{...},"transfers":[...],"templateUpdates":[...],"balances":[...],"goals":[...],"loanPayments":[...]}',
+    '- operations: {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"date":"YYYY-MM-DD","mandatory":true|false,"account":"название счёта"}',
+    '- templates (новые ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31,"account":"с какого счёта","to":"куда: свой счёт или кредит из loans"}',
     '- categoryLimits: {"Категория": лимит в рублях на месяц}',
-    `Используй существующие категории. Дата по умолчанию — сегодня (${today}).`,
+    '- transfers (между своими счетами, погашение кредитки, пополнение накопительного): {"from":"счёт","to":"счёт","amount":число,"date":"YYYY-MM-DD"}',
+    '- templateUpdates (изменить существующий регулярный): {"title":"название из templates","amount":число,"dayOfMonth":1-31,"active":true|false,"account":"счёт","to":"счёт, кредит или null"} — только меняемые поля',
+    '- balances (сверить остаток): {"account":"счёт","amount":число} — сколько сейчас на счёте, у кредитки — долг',
+    '- goals (пополнить цель, минус — снять): {"goal":"название цели","amount":число}',
+    '- loanPayments (платёж по долгу или кредиту): {"loan":"название из loans","amount":число,"date":"YYYY-MM-DD"}',
+    `Используй существующие категории и точные названия счетов, регулярных платежей, целей и долгов из данных. Дата по умолчанию — сегодня (${today}). Поле account необязательно.`,
     "В AI_CMDS — только то, о чём просил пользователь: просил операцию — только operations, без лимитов и регулярных платежей.",
     "Только когда пишешь AI_CMDS: одной фразой скажи, что предлагаешь добавить; поля и JSON в тексте не повторяй.",
     "Если ничего добавлять не нужно — не пиши AI_CMDS. Не пиши AI_CMDS, если пользователь об этом не просил.",
@@ -186,6 +207,8 @@ export interface AiOperation {
   title: string;
   date: IsoDate;
   mandatory: boolean;
+  /** Счёт (найден по названию из ответа модели); нет — как в окне операции, основной. */
+  accountId?: string;
 }
 
 export interface AiTemplate {
@@ -194,12 +217,89 @@ export interface AiTemplate {
   category: string;
   title: string;
   dayOfMonth: number;
+  accountId?: string;
+  toAccountId?: string;
+  loanId?: string;
+}
+
+/** Перевод между своими счетами (на накопительный — пополнение сбережений, с него — снятие). */
+export interface AiTransfer {
+  from: string;
+  to: string;
+  amount: Kopecks;
+  date: IsoDate;
+}
+
+/** Правка существующего регулярного платежа: только меняемые поля; null у to — сделать обычным платежом. */
+export interface AiTemplateUpdate {
+  templateId: string;
+  amount?: Kopecks;
+  dayOfMonth?: number;
+  active?: boolean;
+  accountId?: string;
+  toAccountId?: string | null;
+  loanId?: string | null;
 }
 
 export interface AiProposal {
   operations: AiOperation[];
   templates: AiTemplate[];
   limits: { category: string; amount: Kopecks }[];
+  transfers: AiTransfer[];
+  templateUpdates: AiTemplateUpdate[];
+  /** Сверка остатка: actual — остаток счёта (у кредитки — минус долг). */
+  balances: { accountId: string; actual: Kopecks }[];
+  /** Пополнение цели (минус — снять). */
+  goals: { goalId: string; amount: Kopecks }[];
+  loanPayments: { loanId: string; amount: Kopecks; date: IsoDate }[];
+}
+
+/** Пустое предложение — заготовка для разбора и для предложений, сохранённых до новых видов действий. */
+export function emptyProposal(): AiProposal {
+  return { operations: [], templates: [], limits: [], transfers: [], templateUpdates: [], balances: [], goals: [], loanPayments: [] };
+}
+
+export function proposalSize(p: AiProposal): number {
+  return (
+    p.operations.length +
+    p.templates.length +
+    p.limits.length +
+    p.transfers.length +
+    p.templateUpdates.length +
+    p.balances.length +
+    p.goals.length +
+    p.loanPayments.length
+  );
+}
+
+/** Для сравнения названий из ответа модели: регистр, «ё», пунктуация и кавычки не важны. */
+function nameKey(text: string): string {
+  return text.toLocaleLowerCase("ru").replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/g, " ").trim();
+}
+
+/** Запись по названию: точное совпадение, иначе единственная, чьё название содержит искомое (или наоборот). */
+function byName<T>(items: readonly T[], name: unknown, nameOf: (item: T) => string): T | undefined {
+  if (typeof name !== "string" || !name.trim()) return undefined;
+  const key = nameKey(name);
+  if (!key) return undefined;
+  const exact = items.find((item) => nameKey(nameOf(item)) === key);
+  if (exact) return exact;
+  const partial = items.filter((item) => {
+    const k = nameKey(nameOf(item));
+    return k.includes(key) || key.includes(k);
+  });
+  return partial.length === 1 ? partial[0] : undefined;
+}
+
+function accountByName(state: State, name: unknown): Account | undefined {
+  return byName(activeAccounts(state), name, (a) => a.name);
+}
+
+/** Дата из ответа модели: пусто — сегодня; не дата или слишком далеко — null. */
+function aiDate(value: unknown, today: IsoDate): IsoDate | null {
+  if (value === undefined || value === null || value === "") return today;
+  if (!isValidIsoDate(value)) return null;
+  return value > addDays(today, 366) || value < addDays(today, -366 * 3) ? null : value;
 }
 
 const rawAmount = z.union([z.number(), z.string()]).transform((v, ctx) => {
@@ -233,6 +333,7 @@ const rawOperation = z.object({
   title: rawText(LIMITS.title),
   date: z.unknown().optional(),
   mandatory: z.boolean().optional(),
+  account: z.unknown().optional(),
 });
 const rawTemplate = z.object({
   type: rawType,
@@ -240,7 +341,53 @@ const rawTemplate = z.object({
   category: rawCategory,
   title: rawText(LIMITS.title),
   dayOfMonth: z.coerce.number().int().min(1).max(31),
+  account: z.unknown().optional(),
+  to: z.unknown().optional(),
 });
+const rawTransfer = z.object({ from: z.unknown(), to: z.unknown(), amount: rawAmount, date: z.unknown().optional() });
+const rawTemplateUpdate = z.object({
+  title: z.unknown(),
+  amount: rawAmount.optional(),
+  dayOfMonth: z.coerce.number().int().min(1).max(31).optional(),
+  active: z.boolean().optional(),
+  account: z.unknown().optional(),
+  to: z.unknown().optional(),
+});
+const rawBalance = z.object({
+  account: z.unknown(),
+  amount: z.union([z.number(), z.string()]).transform((v, ctx) => {
+    const n = typeof v === "number" ? v : Number(v.replace(/\s/g, "").replace(",", "."));
+    const k = rublesToKopecks(n);
+    if (!Number.isFinite(n) || Math.abs(k) > MAX_KOPECKS) {
+      ctx.addIssue({ code: "custom", message: "bad amount" });
+      return z.NEVER;
+    }
+    return k;
+  }),
+});
+const rawGoalMove = z.object({
+  goal: z.unknown(),
+  amount: z.union([z.number(), z.string()]).transform((v, ctx) => {
+    const n = typeof v === "number" ? v : Number(v.replace(/\s/g, "").replace(",", "."));
+    const k = rublesToKopecks(n);
+    if (!Number.isFinite(n) || k === 0 || Math.abs(k) > MAX_KOPECKS) {
+      ctx.addIssue({ code: "custom", message: "bad amount" });
+      return z.NEVER;
+    }
+    return k;
+  }),
+});
+const rawLoanPayment = z.object({ loan: z.unknown(), amount: rawAmount, date: z.unknown().optional() });
+
+/** «to» регулярного платежа: свой счёт или кредит (мой долг) по названию; null/"" — обычный платёж. */
+function templateTarget(state: State, value: unknown): { toAccountId?: string; loanId?: string } | null | "none" {
+  if (value === null || value === "" || (typeof value === "string" && /^(null|нет|обычный)/i.test(value.trim()))) return "none";
+  if (value === undefined) return null;
+  const account = accountByName(state, value);
+  if (account) return { toAccountId: account.id };
+  const loan = byName(state.loans.filter((l) => l.kind !== "lend"), value, (l) => l.name);
+  return loan ? { loanId: loan.id } : null;
+}
 
 const CMD_MARKER = /AI_CMDS\s*:\s*/;
 
@@ -296,7 +443,7 @@ export function parseAiReply(
   if (typeof data !== "object" || data === null) return { text, proposal: null, skipped: 1 };
   const obj = data as Record<string, unknown>;
 
-  const proposal: AiProposal = { operations: [], templates: [], limits: [] };
+  const proposal: AiProposal = emptyProposal();
   let skipped = 0;
   const maxDate = addDays(today, 366);
   const minDate = addDays(today, -366 * 3);
@@ -319,7 +466,12 @@ export function parseAiReply(
     const mandatory =
       type === "expense" &&
       (op.mandatory ?? (op.type === "fixedexpense" || op.type === "recurringexpense" || state.categories.mandatory.includes(category)));
-    proposal.operations.push({ type, amount: op.amount, category, title: op.title, date, mandatory });
+    const account = op.account === undefined ? undefined : accountByName(state, op.account);
+    if (op.account !== undefined && op.account !== null && op.account !== "" && !account) {
+      skipped++;
+      continue;
+    }
+    proposal.operations.push({ type, amount: op.amount, category, title: op.title, date, mandatory, ...(account ? { accountId: account.id } : {}) });
   }
 
   const templates = Array.isArray(obj.templates) ? obj.templates : Array.isArray(obj.presets) ? obj.presets : [];
@@ -332,7 +484,21 @@ export function parseAiReply(
     const t = parsed.data;
     const type = t.type === "income" ? "income" : "expense";
     const category = t.category || (type === "income" ? "Доход" : "Обязательные");
-    proposal.templates.push({ type, amount: t.amount, category, title: t.title || category, dayOfMonth: t.dayOfMonth });
+    const account = t.account === undefined || t.account === null || t.account === "" ? undefined : accountByName(state, t.account);
+    const target = type === "expense" ? templateTarget(state, t.to) : null;
+    if ((t.account && !account) || (t.to !== undefined && t.to !== null && t.to !== "" && target === null)) {
+      skipped++;
+      continue;
+    }
+    proposal.templates.push({
+      type,
+      amount: t.amount,
+      category,
+      title: t.title || category,
+      dayOfMonth: t.dayOfMonth,
+      ...(account ? { accountId: account.id } : {}),
+      ...(target && target !== "none" ? target : {}),
+    });
   }
 
   if (typeof obj.categoryLimits === "object" && obj.categoryLimits !== null && !Array.isArray(obj.categoryLimits)) {
@@ -347,8 +513,78 @@ export function parseAiReply(
     }
   }
 
-  const empty = !proposal.operations.length && !proposal.templates.length && !proposal.limits.length;
-  return { text, proposal: empty ? null : proposal, skipped };
+  for (const item of Array.isArray(obj.transfers) ? obj.transfers.slice(0, 20) : []) {
+    const parsed = rawTransfer.safeParse(item);
+    const from = parsed.success ? accountByName(state, parsed.data.from) : undefined;
+    const to = parsed.success ? accountByName(state, parsed.data.to) : undefined;
+    const date = parsed.success ? aiDate(parsed.data.date, today) : null;
+    if (!parsed.success || !from || !to || from.id === to.id || !date) {
+      skipped++;
+      continue;
+    }
+    proposal.transfers.push({ from: from.id, to: to.id, amount: parsed.data.amount, date });
+  }
+
+  for (const item of Array.isArray(obj.templateUpdates) ? obj.templateUpdates.slice(0, 20) : []) {
+    const parsed = rawTemplateUpdate.safeParse(item);
+    const template = parsed.success ? byName(state.templates, parsed.data.title, (t) => t.title) : undefined;
+    if (!parsed.success || !template) {
+      skipped++;
+      continue;
+    }
+    const u = parsed.data;
+    const account = u.account === undefined ? undefined : accountByName(state, u.account);
+    const target = template.kind === "expense" ? templateTarget(state, u.to) : null;
+    if ((u.account !== undefined && !account) || (u.to !== undefined && target === null)) {
+      skipped++;
+      continue;
+    }
+    const update: AiTemplateUpdate = {
+      templateId: template.id,
+      ...(u.amount !== undefined ? { amount: u.amount } : {}),
+      ...(u.dayOfMonth !== undefined ? { dayOfMonth: u.dayOfMonth } : {}),
+      ...(u.active !== undefined ? { active: u.active } : {}),
+      ...(account ? { accountId: account.id } : {}),
+      ...(target === "none" ? { toAccountId: null, loanId: null } : target ? { toAccountId: target.toAccountId ?? null, loanId: target.loanId ?? null } : {}),
+    };
+    if (Object.keys(update).length > 1) proposal.templateUpdates.push(update);
+    else skipped++;
+  }
+
+  for (const item of Array.isArray(obj.balances) ? obj.balances.slice(0, 20) : []) {
+    const parsed = rawBalance.safeParse(item);
+    const account = parsed.success ? accountByName(state, parsed.data.account) : undefined;
+    if (!parsed.success || !account) {
+      skipped++;
+      continue;
+    }
+    // У кредитки модель называет долг — остаток счёта со знаком минус.
+    const actual = account.kind === "credit" ? -Math.abs(parsed.data.amount) : parsed.data.amount;
+    proposal.balances.push({ accountId: account.id, actual });
+  }
+
+  for (const item of Array.isArray(obj.goals) ? obj.goals.slice(0, 20) : []) {
+    const parsed = rawGoalMove.safeParse(item);
+    const goal = parsed.success ? byName(state.goals, parsed.data.goal, (g) => g.name) : undefined;
+    if (!parsed.success || !goal) {
+      skipped++;
+      continue;
+    }
+    proposal.goals.push({ goalId: goal.id, amount: parsed.data.amount });
+  }
+
+  for (const item of Array.isArray(obj.loanPayments) ? obj.loanPayments.slice(0, 20) : []) {
+    const parsed = rawLoanPayment.safeParse(item);
+    const loan = parsed.success ? byName(state.loans, parsed.data.loan, (l) => l.name) : undefined;
+    const date = parsed.success ? aiDate(parsed.data.date, today) : null;
+    if (!parsed.success || !loan || !date) {
+      skipped++;
+      continue;
+    }
+    proposal.loanPayments.push({ loanId: loan.id, amount: parsed.data.amount, date });
+  }
+
+  return { text, proposal: proposalSize(proposal) ? proposal : null, skipped };
 }
 
 /** Превращает подтверждённое предложение в действия. ids — генератор идентификаторов. */
@@ -368,6 +604,7 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
         note: "Добавлено AI-помощником",
         mandatory: op.mandatory,
         autoSaving: autoSavingByDefault(tx, state.settings),
+        ...(op.accountId ? { accountId: op.accountId } : {}),
       },
     });
   }
@@ -387,11 +624,52 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
         active: true,
         startDate,
         note: "",
+        ...(t.accountId && t.accountId !== MAIN_ACCOUNT_ID ? { accountId: t.accountId } : {}),
+        ...(t.toAccountId ? { toAccountId: t.toAccountId } : {}),
+        ...(t.loanId ? { loanId: t.loanId } : {}),
       },
     });
   }
   for (const limit of proposal.limits) {
     actions.push({ type: "category.setLimit", name: limit.category, amount: limit.amount });
+  }
+  for (const t of proposal.transfers) {
+    // Как в окне перевода: на накопительный — пополнение сбережений, с него — снятие, иначе — перевод.
+    const from = findAccount(state, t.from);
+    const to = findAccount(state, t.to);
+    if (!from || !to) continue;
+    const note = "Добавлено AI-помощником";
+    if (to.kind === "savings" && from.kind !== "savings") {
+      actions.push({ type: "savings.move", id: newId(), date: t.date, amount: t.amount, note, accountId: from.id, toAccountId: to.id });
+    } else if (from.kind === "savings" && to.kind !== "savings") {
+      actions.push({ type: "savings.move", id: newId(), date: t.date, amount: -t.amount, note, accountId: to.id, toAccountId: from.id });
+    } else {
+      actions.push({ type: "transfer.add", id: newId(), date: t.date, from: from.id, to: to.id, amount: t.amount, note });
+    }
+  }
+  for (const u of proposal.templateUpdates) {
+    const template = state.templates.find((t) => t.id === u.templateId);
+    if (!template) continue;
+    if (u.active !== undefined && u.active !== template.active) {
+      actions.push({ type: "template.setActive", id: template.id, active: u.active, today });
+    }
+    const patch = {
+      ...(u.amount !== undefined ? { amount: u.amount } : {}),
+      ...(u.dayOfMonth !== undefined ? { dayOfMonth: u.dayOfMonth } : {}),
+      ...(u.accountId !== undefined ? { accountId: u.accountId === MAIN_ACCOUNT_ID ? null : u.accountId } : {}),
+      ...(u.toAccountId !== undefined ? { toAccountId: u.toAccountId } : {}),
+      ...(u.loanId !== undefined ? { loanId: u.loanId } : {}),
+    };
+    if (Object.keys(patch).length) actions.push({ type: "template.update", id: template.id, patch });
+  }
+  for (const b of proposal.balances) {
+    actions.push({ type: "balance.set", id: newId(), date: today, actual: b.actual, accountId: b.accountId });
+  }
+  for (const g of proposal.goals) {
+    actions.push({ type: "savings.move", id: newId(), date: today, amount: g.amount, note: "Добавлено AI-помощником", goalId: g.goalId });
+  }
+  for (const p of proposal.loanPayments) {
+    actions.push({ type: "loan.payment", id: newId(), loanId: p.loanId, amount: p.amount, date: p.date, note: "Добавлено AI-помощником" });
   }
   return actions;
 }
@@ -400,7 +678,7 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
 
 /** Просьба что-то добавить или изменить: только тогда принимаем предложения модели на телефоне. */
 const CHANGE_REQUEST =
-  /(добав|запиш|запис|внес|внеси|занес|потратил|купил|заплатил|оплатил|получил|пришл|перевел|перевёл|отлож|лимит|регулярн|каждый месяц|ежемесячн|постав)/i;
+  /(добав|запиш|запис|внес|внеси|занес|потратил|купил|заплатил|оплатил|получил|пришл|перевел|перевёл|перевед|перевод|отлож|лимит|регулярн|каждый месяц|ежемесячн|постав|измени|поменя|пауз|приостанов|возобнов|сверь|остаток|на счет|на счёт|погас|пополн|сним|цел|долг|кредит)/i;
 
 /**
  * Страховка для небольшой модели Apple на телефоне: она бывает непоследовательна — придумывает операции

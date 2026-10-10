@@ -103,3 +103,75 @@ describe("страховка для модели на телефоне", () => {
     ]);
   });
 });
+
+describe("новые действия помощника: счета, переводы, правки регулярных, цели, долги", () => {
+  const today = "2026-10-11";
+  function state() {
+    return applyActions(stateWith(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 5_000_000 },
+      { type: "account.add", account: { id: "cc", name: "Альфа кредитка", kind: "credit", spending: false } },
+      { type: "account.add", account: { id: "dep", name: "Накопительный", kind: "savings", spending: false } },
+      {
+        type: "template.add",
+        template: { id: "net", kind: "expense", title: "Netflix", category: "Подписки", amount: 60_000, dayOfMonth: 6, active: true, startDate: "2026-10-01", note: "" },
+      },
+      { type: "goal.add", goal: { id: "car", name: "Машина", targetAmount: 100_000_000, initialAmount: 0, dueDate: null, note: "", createdAt: "2026-01-01" } },
+      {
+        type: "loan.add",
+        loan: { id: "tb", kind: "credit", name: "Тбанк", amount: 6_000_000, initialPaid: 0, dueDate: null, note: "", createdAt: "2026-01-01" },
+      },
+    ]);
+  }
+
+  it("разбирает по названиям из данных; неизвестные пропускает; применяется без ошибок", () => {
+    const s = state();
+    const reply = [
+      "Предлагаю изменения.",
+      "AI_CMDS: " +
+        JSON.stringify({
+          operations: [{ type: "expense", amount: 500, category: "Продукты", title: "Лента", account: "альфа кредитка" }],
+          transfers: [
+            { from: "Основной счёт", to: "Альфа", amount: 3000 },
+            { from: "Основной счёт", to: "Накопительный", amount: 1000 },
+            { from: "Нет такого", to: "Альфа", amount: 1 },
+          ],
+          templateUpdates: [
+            { title: "netflix", amount: 699, active: false },
+            { title: "Spotify", amount: 1 },
+          ],
+          balances: [{ account: "Основной", amount: 49000 }, { account: "Альфа кредитка", amount: 2500 }],
+          goals: [{ goal: "Машина", amount: 2000 }],
+          loanPayments: [{ loan: "Тбанк", amount: 5000 }],
+        }),
+    ].join("\n");
+    const { proposal, skipped } = parseAiReply(reply, s, today);
+    expect(skipped).toBe(2);
+    expect(proposal?.operations[0]).toMatchObject({ accountId: "cc", amount: 50_000 });
+    expect(proposal?.transfers).toEqual([
+      { from: "main", to: "cc", amount: 300_000, date: today },
+      { from: "main", to: "dep", amount: 100_000, date: today },
+    ]);
+    expect(proposal?.templateUpdates).toEqual([{ templateId: "net", amount: 69_900, active: false }]);
+    expect(proposal?.balances).toEqual([
+      { accountId: "main", actual: 4_900_000 },
+      { accountId: "cc", actual: -250_000 },
+    ]);
+
+    let ids = 0;
+    const actions = proposalToActions(proposal!, s, today, () => `ai-${++ids}`);
+    for (const a of actions) expect(actionSchema.safeParse(a).success).toBe(true);
+    expect(actions.map((a) => a.type)).toEqual([
+      "tx.add",
+      "transfer.add",
+      "savings.move",
+      "template.setActive",
+      "template.update",
+      "balance.set",
+      "balance.set",
+      "savings.move",
+      "loan.payment",
+    ]);
+    const after = applyActions(s, actions);
+    expect(after.templates[0]).toMatchObject({ amount: 69_900, active: false });
+  });
+});

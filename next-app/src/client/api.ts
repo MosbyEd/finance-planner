@@ -119,7 +119,16 @@ const aiChatSchema = z.object({
   text: z.string(),
   // Предложение уже проверено сервером; здесь — только форма.
   proposal: z
-    .object({ operations: z.array(z.any()), templates: z.array(z.any()), limits: z.array(z.any()) })
+    .object({
+      operations: z.array(z.any()),
+      templates: z.array(z.any()),
+      limits: z.array(z.any()),
+      transfers: z.array(z.any()).default([]),
+      templateUpdates: z.array(z.any()).default([]),
+      balances: z.array(z.any()).default([]),
+      goals: z.array(z.any()).default([]),
+      loanPayments: z.array(z.any()).default([]),
+    })
     .nullable(),
   skipped: z.number(),
   reasoning: z.string().nullable(),

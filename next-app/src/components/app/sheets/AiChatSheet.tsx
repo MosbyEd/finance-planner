@@ -8,11 +8,11 @@ import {
   useState,
   useSyncExternalStore,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { z } from "zod";
-import { proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
+import { findAccount } from "@/domain/accounts";
+import { proposalSize, proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney } from "@/domain/money";
 import type { State } from "@/domain/schema";
@@ -26,6 +26,7 @@ import { useConfirm, useToast } from "../../ui/feedback";
 import { controlClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
+import { templateRoute } from "../accounts";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 import { plural } from "@/domain/text";
@@ -81,6 +82,7 @@ const QUICK_PROMPTS = [
   "Составь план накоплений на цель",
 ];
 
+// Предложения, сохранённые до новых видов действий, читаются с пустыми списками.
 const proposalSchema = z.object({
   operations: z.array(
     z.object({
@@ -90,6 +92,7 @@ const proposalSchema = z.object({
       title: z.string(),
       date: z.string().refine(isValidIsoDate),
       mandatory: z.boolean(),
+      accountId: z.string().optional(),
     }),
   ),
   templates: z.array(
@@ -99,9 +102,33 @@ const proposalSchema = z.object({
       category: z.string(),
       title: z.string(),
       dayOfMonth: z.number().int().min(1).max(31),
+      accountId: z.string().optional(),
+      toAccountId: z.string().optional(),
+      loanId: z.string().optional(),
     }),
   ),
   limits: z.array(z.object({ category: z.string(), amount: z.number().int() })),
+  transfers: z
+    .array(z.object({ from: z.string(), to: z.string(), amount: z.number().int(), date: z.string().refine(isValidIsoDate) }))
+    .default([]),
+  templateUpdates: z
+    .array(
+      z.object({
+        templateId: z.string(),
+        amount: z.number().int().optional(),
+        dayOfMonth: z.number().int().min(1).max(31).optional(),
+        active: z.boolean().optional(),
+        accountId: z.string().optional(),
+        toAccountId: z.string().nullable().optional(),
+        loanId: z.string().nullable().optional(),
+      }),
+    )
+    .default([]),
+  balances: z.array(z.object({ accountId: z.string(), actual: z.number().int() })).default([]),
+  goals: z.array(z.object({ goalId: z.string(), amount: z.number().int() })).default([]),
+  loanPayments: z
+    .array(z.object({ loanId: z.string(), amount: z.number().int(), date: z.string().refine(isValidIsoDate) }))
+    .default([]),
 });
 
 const storedMessageSchema = z.discriminatedUnion("role", [
@@ -451,11 +478,13 @@ function Chat({
     setInput("");
   };
 
-  const apply = (message: AssistantMessage) => {
+  const apply = (message: AssistantMessage, picked: AiProposal) => {
     if (!message.proposal || message.status !== "pending") return;
-    if (dispatch(proposalToActions(message.proposal, state, today, newId))) {
+    const total = proposalSize(message.proposal);
+    const chosen = proposalSize(picked);
+    if (dispatch(proposalToActions(picked, state, today, newId))) {
       session.setStatus(message.id, "applied");
-      toast("Изменения применены");
+      toast(chosen < total ? `Применено ${chosen} из ${total}` : "Изменения применены");
     }
   };
 
@@ -539,7 +568,7 @@ function Chat({
                     fresh={!initialIds.has(m.id)}
                     message={m}
                     today={today}
-                    onApply={() => apply(m)}
+                    onApply={(picked) => apply(m, picked)}
                     onDismiss={() => session.setStatus(m.id, "dismissed")}
                   />
                 )}
@@ -639,7 +668,7 @@ function AssistantBubble({
   /** Ответ только что пришёл — проявить с анимацией. */
   fresh: boolean;
   today: IsoDate;
-  onApply: () => void;
+  onApply: (picked: AiProposal) => void;
   onDismiss: () => void;
 }) {
   const words = message.content.split(/\s+/).filter(Boolean).length;
@@ -783,6 +812,135 @@ function recurringTitle(proposal: AiProposal): string {
   return "Регулярные доходы и платежи";
 }
 
+type ProposalKey = keyof AiProposal;
+
+interface ProposalItem {
+  /** «группа:номер» — по нему отбираются выбранные пункты. */
+  id: string;
+  group: ProposalKey;
+  index: number;
+  title: string;
+  subtitle: string;
+  /** Сумма со знаком (null — без суммы, например пауза платежа). */
+  amount: number | null;
+  /** Подпись справа вместо суммы. */
+  right?: string;
+}
+
+const GROUP_TITLES: Partial<Record<ProposalKey, string>> = {
+  operations: "Операции",
+  limits: "Лимиты по категориям",
+  transfers: "Переводы между счетами",
+  templateUpdates: "Изменения регулярных",
+  balances: "Остатки счетов",
+  goals: "Цели",
+  loanPayments: "Платежи по долгам",
+};
+
+/** Пункты предложения для карточки: по ним пользователь отмечает, что применить. */
+function proposalItems(proposal: AiProposal, state: State, today: IsoDate): ProposalItem[] {
+  const accountName = (id: string | undefined) => (id ? (findAccount(state, id)?.name ?? "счёт") : null);
+  const items: ProposalItem[] = [];
+  proposal.operations.forEach((op, index) =>
+    items.push({
+      id: `operations:${index}`,
+      group: "operations",
+      index,
+      title: op.title || op.category,
+      subtitle: [formatDay(op.date, today), operationLabel(op), op.title ? op.category : null, accountName(op.accountId)]
+        .filter(Boolean)
+        .join(" · "),
+      amount: op.type === "income" ? op.amount : -op.amount,
+    }),
+  );
+  proposal.templates.forEach((t, index) =>
+    items.push({
+      id: `templates:${index}`,
+      group: "templates",
+      index,
+      title: t.title || t.category,
+      subtitle: [`${t.type === "income" ? "доход" : "платёж"} каждое ${t.dayOfMonth}-е число`, t.category, templateRoute(state, t)]
+        .filter(Boolean)
+        .join(" · "),
+      amount: t.type === "income" ? t.amount : -t.amount,
+    }),
+  );
+  proposal.limits.forEach((l, index) =>
+    items.push({ id: `limits:${index}`, group: "limits", index, title: l.category, subtitle: "лимит на месяц", amount: null, right: `${formatMoney(l.amount)}/мес` }),
+  );
+  proposal.transfers.forEach((t, index) =>
+    items.push({
+      id: `transfers:${index}`,
+      group: "transfers",
+      index,
+      title: `${accountName(t.from)} → ${accountName(t.to)}`,
+      subtitle: formatDay(t.date, today),
+      amount: null,
+      right: formatMoney(t.amount),
+    }),
+  );
+  proposal.templateUpdates.forEach((u, index) => {
+    const template = state.templates.find((t) => t.id === u.templateId);
+    const changes: string[] = [];
+    if (u.amount !== undefined) changes.push(`сумма ${formatMoney(u.amount)}`);
+    if (u.dayOfMonth !== undefined) changes.push(`${u.dayOfMonth}-го числа`);
+    if (u.active !== undefined) changes.push(u.active ? "возобновить" : "приостановить");
+    if (u.accountId !== undefined) changes.push(`со счёта «${accountName(u.accountId)}»`);
+    if (u.toAccountId) changes.push(`на «${accountName(u.toAccountId)}»`);
+    else if (u.loanId) changes.push(`в счёт «${state.loans.find((l) => l.id === u.loanId)?.name ?? "долга"}»`);
+    else if (u.toAccountId === null && u.loanId === null) changes.push("обычный платёж");
+    items.push({ id: `templateUpdates:${index}`, group: "templateUpdates", index, title: template?.title ?? "Регулярный платёж", subtitle: changes.join(" · "), amount: null });
+  });
+  proposal.balances.forEach((b, index) => {
+    const account = findAccount(state, b.accountId);
+    items.push({
+      id: `balances:${index}`,
+      group: "balances",
+      index,
+      title: account?.name ?? "Счёт",
+      subtitle: account?.kind === "credit" ? "долг по карте сейчас" : "остаток сейчас",
+      amount: null,
+      right: formatMoney(Math.abs(b.actual)),
+    });
+  });
+  proposal.goals.forEach((g, index) =>
+    items.push({
+      id: `goals:${index}`,
+      group: "goals",
+      index,
+      title: state.goals.find((goal) => goal.id === g.goalId)?.name ?? "Цель",
+      subtitle: g.amount > 0 ? "пополнить" : "снять",
+      amount: g.amount,
+    }),
+  );
+  proposal.loanPayments.forEach((p, index) =>
+    items.push({
+      id: `loanPayments:${index}`,
+      group: "loanPayments",
+      index,
+      title: state.loans.find((l) => l.id === p.loanId)?.name ?? "Долг",
+      subtitle: formatDay(p.date, today),
+      amount: -p.amount,
+    }),
+  );
+  return items;
+}
+
+/** Предложение только из отмеченных пунктов. */
+export function pickProposal(proposal: AiProposal, selected: ReadonlySet<string>): AiProposal {
+  const keep = <T,>(group: ProposalKey, list: T[]) => list.filter((_, i) => selected.has(`${group}:${i}`));
+  return {
+    operations: keep("operations", proposal.operations),
+    templates: keep("templates", proposal.templates),
+    limits: keep("limits", proposal.limits),
+    transfers: keep("transfers", proposal.transfers),
+    templateUpdates: keep("templateUpdates", proposal.templateUpdates),
+    balances: keep("balances", proposal.balances),
+    goals: keep("goals", proposal.goals),
+    loanPayments: keep("loanPayments", proposal.loanPayments),
+  };
+}
+
 function ProposalCard({
   rise,
   proposal,
@@ -796,88 +954,84 @@ function ProposalCard({
   proposal: AiProposal;
   status: ProposalStatus;
   today: IsoDate;
-  onApply: () => void;
+  /** Применить только отмеченные пункты. */
+  onApply: (picked: AiProposal) => void;
   onDismiss: () => void;
 }) {
+  const { state } = useSnapshot();
+  const items = proposalItems(proposal, state, today);
+  // По умолчанию отмечено всё; снятые пункты не применятся.
+  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(() => new Set());
+  const selected = new Set(items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
+  const toggle = (id: string) =>
+    setUnchecked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const groups = [...new Set(items.map((item) => item.group))];
+  const pending = status === "pending";
+
   return (
     <section
       className={`rounded-2xl border border-border bg-surface p-4 ${rise !== null ? "siri-rise" : ""}`}
       style={rise !== null ? { ["--siri-delay" as string]: `${rise}ms` } : undefined}
       aria-label="Предложенные изменения"
     >
-      <p className="text-sm font-semibold">Помощник предлагает изменения:</p>
+      <p className="text-sm font-semibold">
+        Помощник предлагает изменения{pending && items.length > 1 ? " — отметьте, что применить:" : ":"}
+      </p>
 
-      {proposal.operations.length > 0 && (
-        <ProposalGroup title="Операции">
-          {proposal.operations.map((op, i) => (
-            <ProposalRow
-              key={i}
-              title={op.title || op.category}
-              subtitle={`${formatDay(op.date, today)} · ${operationLabel(op)}${op.title ? ` · ${op.category}` : ""}`}
-              amount={op.type === "income" ? op.amount : -op.amount}
-            />
-          ))}
-        </ProposalGroup>
-      )}
+      {groups.map((group) => (
+        <div key={group} className="mt-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">
+            {group === "templates" ? recurringTitle(proposal) : GROUP_TITLES[group]}
+          </p>
+          <ul className="mt-1 divide-y divide-border">
+            {items
+              .filter((item) => item.group === group)
+              .map((item) => (
+                <li key={item.id}>
+                  <label className={`flex items-center gap-3 py-1.5 ${pending ? "cursor-pointer" : ""}`}>
+                    {pending && items.length > 1 && (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(item.id)}
+                        onChange={() => toggle(item.id)}
+                        className="h-5 w-5 shrink-0 accent-[var(--accent-fill)]"
+                        aria-label={`Применить: ${item.title}`}
+                      />
+                    )}
+                    <span className={`min-w-0 flex-1 ${pending && !selected.has(item.id) ? "opacity-50" : ""}`}>
+                      <span className="block truncate text-[15px]">{item.title}</span>
+                      {item.subtitle && <span className="block text-xs text-muted">{item.subtitle}</span>}
+                    </span>
+                    {item.amount !== null ? (
+                      <Money value={item.amount} sign tone={item.amount > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
+                    ) : (
+                      item.right && <span className="shrink-0 font-semibold tabular-nums">{item.right}</span>
+                    )}
+                  </label>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ))}
 
-      {proposal.templates.length > 0 && (
-        <ProposalGroup title={recurringTitle(proposal)}>
-          {proposal.templates.map((t, i) => (
-            <ProposalRow
-              key={i}
-              title={t.title || t.category}
-              subtitle={`${t.type === "income" ? "доход" : "платёж"} каждое ${t.dayOfMonth}-е число · ${t.category}`}
-              amount={t.type === "income" ? t.amount : -t.amount}
-            />
-          ))}
-        </ProposalGroup>
-      )}
-
-      {proposal.limits.length > 0 && (
-        <ProposalGroup title="Лимиты по категориям">
-          {proposal.limits.map((l, i) => (
-            <li key={i} className="flex items-center justify-between gap-3 py-1.5 text-[15px]">
-              <span className="min-w-0 truncate">{l.category}</span>
-              <span className="shrink-0 font-semibold tabular-nums">{formatMoney(l.amount)}/мес</span>
-            </li>
-          ))}
-        </ProposalGroup>
-      )}
-
-      {status === "pending" && (
+      {pending && (
         <div className="mt-3 flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={onDismiss}>
             Отклонить
           </Button>
-          <Button icon="check" className="flex-1" onClick={onApply}>
-            Применить
+          <Button icon="check" className="flex-1" disabled={selected.size === 0} onClick={() => onApply(pickProposal(proposal, selected))}>
+            {items.length > 1 && selected.size < items.length ? `Применить ${selected.size} из ${items.length}` : "Применить"}
           </Button>
         </div>
       )}
       {status === "applied" && <p className="mt-3 text-sm font-medium text-positive">Применено ✓</p>}
       {status === "dismissed" && <p className="mt-3 text-sm text-muted">Отклонено</p>}
     </section>
-  );
-}
-
-function ProposalGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="mt-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">{title}</p>
-      <ul className="mt-1 divide-y divide-border">{children}</ul>
-    </div>
-  );
-}
-
-function ProposalRow({ title, subtitle, amount }: { title: string; subtitle: string; amount: number }) {
-  return (
-    <li className="flex items-center justify-between gap-3 py-1.5">
-      <span className="min-w-0">
-        <span className="block truncate text-[15px]">{title}</span>
-        <span className="block text-xs text-muted">{subtitle}</span>
-      </span>
-      <Money value={amount} sign tone={amount > 0 ? "positive" : "default"} className="shrink-0 font-semibold" />
-    </li>
   );
 }
 
