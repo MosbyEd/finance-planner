@@ -113,7 +113,17 @@ export function spendingEffect(
 
 /** Сбережения в накопительных счетах, которые не учитываются в тратах (иначе одни деньги посчитались бы дважды). */
 export function savingsAccountIds(state: Pick<State, "accounts">): Set<string> {
-  return new Set(accountsOf(state).filter((a) => a.kind === "savings" && !isSpendingAccount(a)).map((a) => a.id));
+  return new Set(
+    accountsOf(state)
+      .filter((a) => a.kind === "savings" && !isSpendingAccount(a) && a.inSavings !== false)
+      .map((a) => a.id),
+  );
+}
+
+/** Накопительный счёт, куда можно откладывать: существует, открыт и накопительный; иначе — «Сбережения». */
+export function savingsTarget(state: Pick<State, "accounts">, id: string | undefined): string {
+  const account = id ? findAccount(state, id) : undefined;
+  return account && account.kind === "savings" && !account.archived ? account.id : SAVINGS_ACCOUNT_ID;
 }
 
 // ---------- кредитная карта ----------

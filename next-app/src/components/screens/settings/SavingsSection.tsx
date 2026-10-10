@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 import { monthKeyOf } from "@/domain/dates";
 import { monthMetrics } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
+import { activeAccounts, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
 import { purchaseSavingAmount } from "@/domain/savings";
 import type { Settings } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
 import { useLeaveGuard } from "../../app/overlays";
+import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { Switch } from "../../ui/controls";
@@ -40,6 +42,10 @@ interface Form {
   cap: Kopecks | null;
   roundTo: number;
   excluded: string[];
+  /** На какие накопительные счета откладывать: с доходов, с покупок и остаток месяца. */
+  salaryTarget: string;
+  purchaseTarget: string;
+  rolloverTarget: string;
 }
 
 type ErrorKey = "rate" | "salaryPercent" | "salaryCategories" | "purchasePercent" | "cap" | "excluded";
@@ -56,10 +62,16 @@ const ERRORS_BY_FIELD: Record<keyof Form, ErrorKey[]> = {
   cap: ["cap"],
   roundTo: [],
   excluded: ["excluded"],
+  salaryTarget: [],
+  purchaseTarget: [],
+  rolloverTarget: [],
 };
 
-function toForm(s: Settings): Form {
+function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
   return {
+    salaryTarget: savingsTarget(state, s.salarySaving.toAccountId),
+    purchaseTarget: savingsTarget(state, s.purchaseSaving.toAccountId),
+    rolloverTarget: savingsTarget(state, s.rolloverAccountId),
     rate: String(s.savingsRatePercent),
     salaryEnabled: s.salarySaving.enabled,
     salaryPercent: String(s.salarySaving.percent),
@@ -84,6 +96,7 @@ function previewSettings(form: Form, base: Settings): Settings {
       enabled: form.salaryEnabled,
       percent: parseIntInRange(form.salaryPercent, 1, 90) ?? base.salarySaving.percent,
       categories: form.salaryCategories,
+      ...(form.salaryTarget !== SAVINGS_ACCOUNT_ID ? { toAccountId: form.salaryTarget } : {}),
     },
     purchaseSaving: {
       enabled: form.purchaseEnabled,
@@ -91,7 +104,9 @@ function previewSettings(form: Form, base: Settings): Settings {
       cap: form.cap ?? base.purchaseSaving.cap,
       roundTo: form.roundTo,
       excludedCategories: form.excluded,
+      ...(form.purchaseTarget !== SAVINGS_ACCOUNT_ID ? { toAccountId: form.purchaseTarget } : {}),
     },
+    ...(form.rolloverTarget !== SAVINGS_ACCOUNT_ID ? { rolloverAccountId: form.rolloverTarget } : {}),
   };
 }
 
@@ -131,16 +146,19 @@ export function SavingsSection() {
   const saved = state.settings;
 
   const [base, setBase] = useState(saved);
-  const [form, setForm] = useState(() => toForm(saved));
+  const [form, setForm] = useState(() => toForm(saved, state));
+  // Куда откладывать — выбор, когда накопительных счетов больше одного.
+  const savingsAccounts = activeAccounts(state).filter((a) => a.kind === "savings");
+  const chooseTarget = savingsAccounts.length > 1;
   const [errors, setErrors] = useState<Errors>({});
 
   // Настройки изменились снаружи (другое устройство, импорт). Если черновик не трогали — подхватываем.
   if (saved !== base) {
     setBase(saved);
-    if (sameForm(form, toForm(base))) setForm(toForm(saved));
+    if (sameForm(form, toForm(base, state))) setForm(toForm(saved, state));
   }
 
-  const dirty = !sameForm(form, toForm(saved));
+  const dirty = !sameForm(form, toForm(saved, state));
   useLeaveGuard(dirty);
   useRowSummary(dirty ? UNSAVED_SUMMARY : null);
   const preview = previewSettings(form, saved);
@@ -170,13 +188,13 @@ export function SavingsSection() {
     if (Object.keys(nextErrors).length) return;
     const settings = previewSettings(form, saved);
     if (dispatch({ type: "settings.update", settings })) {
-      setForm(toForm(settings));
+      setForm(toForm(settings, state));
       toast("Настройки сбережений сохранены");
     }
   };
 
   const reset = () => {
-    setForm(toForm(saved));
+    setForm(toForm(saved, state));
     setErrors({});
   };
 
@@ -245,6 +263,14 @@ export function SavingsSection() {
                   onChange={(e) => patch({ salaryPercent: e.target.value })}
                 />
               </div>
+              {chooseTarget && (
+                <AccountPicker
+                  label="Куда откладывать с доходов"
+                  accounts={savingsAccounts}
+                  value={form.salaryTarget}
+                  onChange={(id) => patch({ salaryTarget: id })}
+                />
+              )}
               <ChipGroup label="С каких доходов откладывать" error={errors.salaryCategories}>
                 {incomeOptions.map((c) => (
                   <ToggleChip
@@ -291,6 +317,14 @@ export function SavingsSection() {
                   hint="Потолок для процента с одной покупки"
                 />
               </div>
+              {chooseTarget && (
+                <AccountPicker
+                  label="Куда откладывать с покупок"
+                  accounts={savingsAccounts}
+                  value={form.purchaseTarget}
+                  onChange={(id) => patch({ purchaseTarget: id })}
+                />
+              )}
               <ChoiceChips
                 label="Округлять покупку вверх до"
                 value={String(form.roundTo)}
@@ -319,6 +353,20 @@ export function SavingsSection() {
             </>
           )}
         </div>
+
+        {chooseTarget && (
+          <div className="space-y-2 border-t border-border pt-5">
+            <AccountPicker
+              label="Куда откладывать остаток месяца"
+              accounts={savingsAccounts}
+              value={form.rolloverTarget}
+              onChange={(id) => patch({ rolloverTarget: id })}
+            />
+            <p className="text-sm text-muted">
+              Когда месяц закончился с остатком гибкого бюджета, приложение предлагает отложить его — сюда.
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
           <Button type="submit" disabled={!dirty}>

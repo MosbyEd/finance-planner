@@ -59,6 +59,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   const [kind, setKind] = useState<AccountKind>(existing?.kind ?? preset?.kind ?? "debit");
   const [spending, setSpending] = useState(existing?.spending ?? (preset?.kind !== "savings" && preset?.kind !== "credit"));
   const [spendingTouched, setSpendingTouched] = useState(Boolean(existing));
+  const [inSavings, setInSavings] = useState(existing?.inSavings !== false);
   const [number, setNumber] = useState(existing?.number ?? "");
   // Карты прежнего формата (цифры одним списком) показываются как карты без названия.
   const [cards, setCards] = useState<CardDraft[]>(() =>
@@ -106,6 +107,8 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
       kind,
       spending: kind === "credit" ? false : spending,
       cards: filled.map((c) => ({ digits: c.digits, name: c.name.trim() })),
+      // «Учитывать в сбережениях» — только у накопительного; по умолчанию да (поле не пишем).
+      ...(kind === "savings" && !inSavings ? { inSavings: false } : { inSavings: true }),
     };
     const ok = existing
       ? dispatch({
@@ -248,6 +251,15 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             }}
             label="Учитывать в «Сколько можно потратить»"
             description="Деньги этого счёта входят в лимит на день и в «На счетах»."
+          />
+        )}
+
+        {kind === "savings" && !spending && (
+          <Switch
+            checked={inSavings}
+            onChange={setInSavings}
+            label="Учитывать в сбережениях"
+            description="Деньги счёта входят в «Сбережения» на Главной и в цели. Выключите для вклада под отдельную цель или чужих денег."
           />
         )}
 

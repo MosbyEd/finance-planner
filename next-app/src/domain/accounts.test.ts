@@ -249,3 +249,44 @@ describe("счета регулярных платежей", () => {
     expect(linked.templates[0].loanId).toBeUndefined();
   });
 });
+
+describe("куда копятся сбережения", () => {
+  const goalDeposit: Account = { id: "goal", name: "На машину", kind: "savings", spending: false, inSavings: false };
+  const deposit: Account = { id: "dep", name: "Накопительный", kind: "savings", spending: false };
+
+  it("«Учитывать в сбережениях» выключено — счёт не входит в сбережения", () => {
+    const s = run(
+      base(),
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 1_000_000 },
+      { type: "account.add", account: goalDeposit },
+      { type: "savings.move", id: "m", date: "2026-10-02", amount: 300_000, note: "", toAccountId: "goal" },
+    );
+    expect(accountBalance(s, "goal")).toBe(300_000);
+    expect(savingsTotal(s)).toBe(0);
+  });
+
+  it("с доходов и с покупок — на счета из настроек, остаток месяца — тоже", () => {
+    let s = run(base(), { type: "account.add", account: deposit }, { type: "account.add", account: goalDeposit });
+    s = run(s, {
+      type: "settings.update",
+      settings: {
+        ...s.settings,
+        salarySaving: { enabled: true, percent: 10, categories: ["Зарплата"], toAccountId: "dep" },
+        purchaseSaving: { enabled: true, percent: 10, cap: 100_000, roundTo: 0, excludedCategories: [], toAccountId: "goal" },
+        rolloverAccountId: "dep",
+      },
+    });
+    s = run(
+      s,
+      addTx({ id: "pay", type: "income", amount: 1_000_000, date: "2026-09-05", category: "Зарплата", autoSaving: true }),
+      addTx({ id: "buy", type: "expense", amount: 100_000, date: "2026-09-06", autoSaving: true }),
+    );
+    expect(s.transactions.find((t) => t.linkedTo === "pay")).toMatchObject({ amount: 100_000, toAccountId: "dep" });
+    expect(s.transactions.find((t) => t.linkedTo === "buy")).toMatchObject({ amount: 10_000, toAccountId: "goal" });
+    const rolled = run(s, { type: "rollover.resolve", month: "2026-09", decision: "saved", id: "roll", date: "2026-10-01" });
+    expect(rolled.transactions.find((t) => t.id === "roll")).toMatchObject({ type: "saving", toAccountId: "dep" });
+    expect(() =>
+      applyActions(s, [{ type: "settings.update", settings: { ...s.settings, rolloverAccountId: "main" } }]),
+    ).toThrow(/накопительном/);
+  });
+});

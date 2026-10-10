@@ -14,6 +14,7 @@ import {
   accountBalance,
   accountKeys,
   accountsOf,
+  savingsTarget,
   findAccount,
   sourceAccountId,
 } from "./accounts";
@@ -392,6 +393,12 @@ function assertUniqueSmsKeys(accounts: Account[]): void {
   }
 }
 
+/** Куда автоотчисление: с дохода — на счёт из настроек «Откладывать с доходов», с покупки — «с покупок». */
+function linkedSavingTarget(state: State, tx: Transaction): string {
+  const id = tx.type === "income" ? state.settings.salarySaving.toAccountId : state.settings.purchaseSaving.toAccountId;
+  return savingsTarget(state, id);
+}
+
 /** Откуда автоотчисление: со счёта операции, если это обычный счёт или наличные; иначе (кредитка) — с основного. */
 function linkedSavingSource(state: State, tx: Transaction): string {
   const account = findAccount(state, sourceAccountId(tx));
@@ -434,7 +441,10 @@ function syncLinkedSaving(state: State, source: Transaction): State {
   }
   if (existing === null) throw new DomainError("Не удалось создать автоотчисление: такой id уже занят.");
   const others = existing ? state.transactions.filter((t) => t !== existing) : state.transactions;
-  return { ...state, transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source))] };
+  return {
+    ...state,
+    transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source), linkedSavingTarget(state, source))],
+  };
 }
 
 /**
@@ -549,7 +559,7 @@ function materialize(state: State, today: IsoDate): State {
     const savingId = linkedSavingId(id);
     if (saving > 0 && !existing.has(savingId)) {
       existing.add(savingId);
-      created.push(buildLinkedSaving(tx, saving, linkedSavingSource(state, tx)));
+      created.push(buildLinkedSaving(tx, saving, linkedSavingSource(state, tx), linkedSavingTarget(state, tx)));
     }
   }
   // Все начисления упёрлись в занятые id — состояние не меняется (повторная синхронизация — тот же объект).
@@ -1179,6 +1189,15 @@ export function applyAction(state: State, action: Action): State {
 
     case "settings.update": {
       const previous = state.settings;
+      for (const id of [
+        action.settings.salarySaving.toAccountId,
+        action.settings.purchaseSaving.toAccountId,
+        action.settings.rolloverAccountId,
+      ]) {
+        if (id && id !== previous.salarySaving.toAccountId && id !== previous.purchaseSaving.toAccountId && id !== previous.rolloverAccountId) {
+          assertSavingsAccount(state, id);
+        }
+      }
       const next: Settings = { ...action.settings };
       // Историю нормы ведёт только редьюсер — присланная клиентом игнорируется.
       delete next.savingsRateHistory;
@@ -1208,6 +1227,7 @@ export function applyAction(state: State, action: Action): State {
         if (amount > 0) {
           assertNewId(state, action.id);
           assertTxCapacity(state, 1);
+          const target = savingsTarget(state, state.settings.rolloverAccountId);
           const tx: Transaction = {
             id: action.id,
             type: "saving",
@@ -1216,6 +1236,7 @@ export function applyAction(state: State, action: Action): State {
             category: SAVINGS_CATEGORY,
             title: "Остаток бюджета прошлого месяца",
             note: "",
+            ...(target !== SAVINGS_ACCOUNT_ID ? { toAccountId: target } : {}),
             // Не сбережения текущего месяца: иначе перенос урезал бы его гибкий бюджет (см. monthMetrics).
             rolloverOf: action.month,
           };
