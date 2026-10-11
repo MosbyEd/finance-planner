@@ -23,6 +23,6 @@ xcrun devicectl device install app --device "$DEVICE" "$DERIVED/Build/Products/D
 
 if [ -n "$NOTICE" ] && [ "${IOS_NOTIFY:-1}" = 1 ]; then
   echo "→ Пуш «Бюджет обновлён»"
-  xcrun devicectl device process launch --no-activate --device "$DEVICE" ru.ekinosian.budget -BudgetUpdateNotice "$NOTICE" >/dev/null
+  xcrun devicectl device process launch --no-activate --device "$DEVICE" ru.ekinosian.budget -- -BudgetUpdateNotice "$NOTICE" >/dev/null
 fi
 echo "✓ Готово"
