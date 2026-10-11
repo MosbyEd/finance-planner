@@ -12,7 +12,7 @@ import { storage } from "@/client/storage";
 import { runToastAction, setToastSink, useToast } from "../../ui/feedback";
 import { useUi } from "../overlays";
 import { quickPicks } from "../quickPicks";
-import { bankResolveActions } from "../accounts";
+import { bankResolveActions, transferAction, transferMessage } from "../accounts";
 import { BALANCE_CONFIRMED_KEY } from "../sheets/MoneySheets";
 import { commandSchema, type CommandResult, type NativeCommand } from "./commands";
 import { SKIP_MANDATORY_KEY, buildHomeModel, quickKey } from "./homeModel";
@@ -186,6 +186,15 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           });
           if (!result.ok) return result;
           return { ok: true, txId: id, message: kind === "income" ? "Доход добавлен" : "Расход добавлен" };
+        }
+        case "transfer": {
+          const { amount, from, to, title, date } = command.draft;
+          const id = newId();
+          const action = transferAction(state, { id, date, from, to, amount, title });
+          if (!action) return { ok: false, error: "Выберите два разных счёта." };
+          const result = store.dispatch(action);
+          if (!result.ok) return result;
+          return { ok: true, txId: id, message: transferMessage(state, from, to, amount) };
         }
         case "undo": {
           const result = store.dispatch({ type: "tx.delete", id: command.txId });

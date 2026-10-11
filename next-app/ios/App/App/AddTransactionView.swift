@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Окно «Новый расход / доход»: сумма → категория → «Добавить» (дизайн-код: запись траты за три касания).
-/// Частые траты заполняют форму одним касанием. Перевод, повтор и прочие параметры — в полной форме интерфейса:
-/// туда уходит всё введённое здесь (сумма, категория, описание, дата, счёт), ничего не теряется.
+/// Окно «Новый расход / доход / перевод»: сумма → счёт → категория → «Добавить» (дизайн-код: запись траты за три
+/// касания). У всех трёх видов один и тот же верх — переключение не двигает сумму и выбор счёта. Частые траты
+/// заполняют форму одним касанием. Повтор и прочие параметры — в полной форме интерфейса: туда уходит всё введённое.
 struct AddTransactionView: View {
     enum Kind: String { case expense, income, transfer }
 
@@ -18,7 +18,10 @@ struct AddTransactionView: View {
     @State private var category: String
     @State private var title = ""
     @State private var date = Date()
+    /// Счёт операции; у перевода — «откуда».
     @State private var accountId: String
+    /// Перевод: «куда».
+    @State private var toAccountId: String
     @State private var card: String?
     @State private var busy = false
     @State private var error: String?
@@ -32,15 +35,28 @@ struct AddTransactionView: View {
         _category = State(initialValue: Self.defaultCategory(add, initialKind))
         let account = Self.defaultAccount(add, initialKind)
         _accountId = State(initialValue: account)
+        _toAccountId = State(initialValue: Self.firstOther(add.transferAccounts ?? [], except: account))
         _card = State(initialValue: add.accounts?.first { $0.id == account }?.lastCard)
     }
 
+    private var payable: [HomeModel.AccountChoice] { add.accounts ?? [] }
+    private var transferAccounts: [HomeModel.AccountChoice] { add.transferAccounts ?? [] }
+    /// Счета, из которых выбирается «откуда» (у перевода) или счёт операции.
+    private var sourceAccounts: [HomeModel.AccountChoice] { kind == .transfer ? transferAccounts : payable }
+    private var fromAccount: HomeModel.AccountChoice? { sourceAccounts.first { $0.id == accountId } }
+    private var toAccount: HomeModel.AccountChoice? { transferAccounts.first { $0.id == toAccountId } }
+
     private var accountCards: [HomeModel.CardChoice] {
-        add.accounts?.first { $0.id == accountId }?.cards ?? []
+        kind == .transfer ? [] : payable.first { $0.id == accountId }?.cards ?? []
     }
 
     private static func defaultAccount(_ add: HomeModel.Add, _ kind: Kind) -> String {
         (kind == .income ? add.lastIncomeAccount : add.lastExpenseAccount) ?? add.accounts?.first?.id ?? "main"
+    }
+
+    /// Второй счёт для перевода: сначала накопительный, иначе любой другой.
+    private static func firstOther(_ accounts: [HomeModel.AccountChoice], except id: String) -> String {
+        accounts.first { $0.id != id && $0.savings == true }?.id ?? accounts.first { $0.id != id }?.id ?? ""
     }
 
     private static func defaultCategory(_ add: HomeModel.Add, _ kind: Kind) -> String {
@@ -60,7 +76,8 @@ struct AddTransactionView: View {
         return list
     }
     /// Перевод — только когда своих счетов несколько.
-    private var canTransfer: Bool { (add.accounts?.count ?? 0) > 1 }
+    private var canTransfer: Bool { transferAccounts.count > 1 }
+    private var repays: Bool { kind == .transfer && toAccount?.credit == true }
     /// Сумма крупными цифрами, но длинная — мельче, чтобы не вылезать за край.
     private var amountFontSize: CGFloat { amountText.count > 11 ? 30 : amountText.count > 8 ? 36 : 44 }
 
@@ -80,9 +97,21 @@ struct AddTransactionView: View {
         return result > 0 ? result : nil
     }
 
-    /// Обязательное заполнено: сумма и категория. До этого кнопки «Добавить» нет совсем.
-    private var ready: Bool { amount != nil && !category.isEmpty }
+    /// Обязательное заполнено: сумма и категория (у перевода — два разных счёта). До этого кнопки нет совсем.
+    private var ready: Bool {
+        guard amount != nil else { return false }
+        if kind == .transfer { return fromAccount != nil && toAccount != nil && accountId != toAccountId }
+        return !category.isEmpty
+    }
     private var canSave: Bool { ready && !busy }
+    private var actionTitle: String { kind == .transfer ? (repays ? "Погасить" : "Перевести") : "Добавить" }
+    private var screenTitle: String {
+        switch kind {
+        case .expense: "Новый расход"
+        case .income: "Новый доход"
+        case .transfer: repays ? "Погасить кредитку" : "Перевод"
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -97,82 +126,61 @@ struct AddTransactionView: View {
 
                     amountField
 
-                    if let accounts = add.accounts, accounts.count > 4 {
-                        section(kind == .income ? "На какой счёт" : "С какого счёта", trailing: { BalancesEye(hidden: balancesHidden) }) {
-                            accountMenu(accounts)
-                        }
-                    } else if let accounts = add.accounts, accounts.count > 1 {
-                        section(kind == .income ? "На какой счёт" : "С какого счёта", trailing: { BalancesEye(hidden: balancesHidden) }) {
-                            FlowLayout(spacing: 8) {
-                                ForEach(accounts) { account in
-                                    let selected = account.id == accountId
-                                    Button {
-                                        accountId = account.id
-                                        card = account.lastCard
-                                        UISelectionFeedbackGenerator().selectionChanged()
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Label(account.name, systemImage: account.symbol).lineLimit(1)
-                                            // Сколько на счёте (если суммы не спрятаны глазком).
-                                            if let funds = account.funds(short: true) {
-                                                Text(funds.text)
-                                                    .monospacedDigit()
-                                                    .lineLimit(1)
-                                                    .foregroundStyle(selected ? .white.opacity(0.8) : Theme.muted)
-                                            }
-                                        }
-                                            .font(.subheadline.weight(selected ? .semibold : .regular))
-                                            .padding(.horizontal, 14)
-                                            .frame(minHeight: 40)
-                                            .foregroundStyle(selected ? .white : Theme.text)
-                                            .background(selected ? Theme.action : Theme.fill, in: .capsule)
-                                    }
-                                    .buttonStyle(PressableStyle())
-                                    .accessibilityAddTraits(selected ? .isSelected : [])
-                                }
+                    // Счёт — одной строкой у всех видов: строка не меняет высоту при переключении.
+                    if kind == .transfer {
+                        accountField("Откуда", accounts: transferAccounts, selection: Binding(
+                            get: { accountId },
+                            set: { id in
+                                accountId = id
+                                if id == toAccountId { toAccountId = Self.firstOther(transferAccounts, except: id) }
                             }
-                        }
-                    }
-
-                    if let account = add.accounts?.first(where: { $0.id == accountId }),
-                       let before = account.funds(), (add.accounts?.count ?? 0) > 1 {
-                        // «Сбербанк: 50 000 ₽ → 48 500 ₽» — сколько станет после операции.
-                        let after = account.funds(delta: kind == .income ? (amount ?? 0) : -(amount ?? 0))
-                        let changes = amount != nil && after?.text != before.text
-                        (Text("\(account.name): ").foregroundStyle(Theme.text)
-                            + Text(before.text)
-                            + Text(changes ? " → \(after?.text ?? "")" : "")
-                            + Text(changes && after?.negative == true ? (account.credit == true ? " — больше лимита" : " — не хватает") : ""))
-                            .font(.footnote)
-                            .monospacedDigit()
-                            .foregroundStyle(changes && after?.negative == true ? Theme.negative : Theme.muted)
-                            .padding(.top, -16)
+                        ), delta: -(amount ?? 0), eye: true)
+                        accountField("Куда", accounts: transferAccounts.filter { $0.id != accountId }, selection: $toAccountId, delta: amount ?? 0, eye: false)
+                    } else if payable.count > 1 {
+                        accountField(kind == .income ? "На какой счёт" : "С какого счёта", accounts: payable, selection: Binding(
+                            get: { accountId },
+                            set: { id in
+                                accountId = id
+                                card = payable.first { $0.id == id }?.lastCard
+                            }
+                        ), delta: kind == .income ? (amount ?? 0) : -(amount ?? 0), eye: true)
                     }
 
                     if !accountCards.isEmpty {
                         section("Карта") {
                             FlowLayout(spacing: 8) {
                                 ForEach([nil] + accountCards.map { Optional($0) }, id: \.?.digits) { choice in
-                                    let selected = card == choice?.digits
-                                    Button {
+                                    chip(choice?.label ?? "Без карты", selected: card == choice?.digits) {
                                         card = choice?.digits
-                                        UISelectionFeedbackGenerator().selectionChanged()
-                                    } label: {
-                                        Text(choice?.label ?? "Без карты")
-                                            .lineLimit(1)
-                                            .font(.subheadline.weight(selected ? .semibold : .regular))
-                                            .padding(.horizontal, 14)
-                                            .frame(minHeight: 40)
-                                            .foregroundStyle(selected ? .white : Theme.text)
-                                            .background(selected ? Theme.action : Theme.fill, in: .capsule)
                                     }
-                                    .buttonStyle(PressableStyle())
-                                    .accessibilityAddTraits(selected ? .isSelected : [])
                                 }
                             }
                         }
                     }
 
+                    if kind == .transfer {
+                        Text(transferHint)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.muted)
+                            .padding(.top, -12)
+                    } else {
+                        section("Категория") {
+                            FlowLayout(spacing: 8) {
+                                ForEach(shownCategories, id: \.self) { item in
+                                    chip(item, selected: item == category) { category = item }
+                                }
+                                if shownCategories.count < categories.count {
+                                    Button("Все категории (\(categories.count))") { allCategories = true }
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.accent)
+                                        .padding(.horizontal, 10)
+                                        .frame(minHeight: 40)
+                                }
+                            }
+                        }
+                    }
+
+                    // Частые траты — после категорий: верх окна одинаков у расхода и дохода.
                     if kind == .expense, !add.picks.isEmpty {
                         section("Частые") {
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -203,37 +211,8 @@ struct AddTransactionView: View {
                         }
                     }
 
-                    section("Категория") {
-                        FlowLayout(spacing: 8) {
-                            ForEach(shownCategories, id: \.self) { item in
-                                let selected = item == category
-                                Button {
-                                    category = item
-                                    UISelectionFeedbackGenerator().selectionChanged()
-                                } label: {
-                                    Text(item)
-                                        .lineLimit(1)
-                                        .font(.subheadline.weight(selected ? .semibold : .regular))
-                                        .padding(.horizontal, 14)
-                                        .frame(minHeight: 40)
-                                        .foregroundStyle(selected ? .white : Theme.text)
-                                        .background(selected ? Theme.action : Theme.fill, in: .capsule)
-                                }
-                                .buttonStyle(PressableStyle())
-                                .accessibilityAddTraits(selected ? .isSelected : [])
-                            }
-                            if shownCategories.count < categories.count {
-                                Button("Все категории (\(categories.count))") { allCategories = true }
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Theme.accent)
-                                    .padding(.horizontal, 10)
-                                    .frame(minHeight: 40)
-                            }
-                        }
-                    }
-
                     section("Описание") {
-                        TextField(kind == .expense ? "Например, кофе" : "Например, аванс", text: $title)
+                        TextField(kind == .expense ? "Например, кофе" : kind == .income ? "Например, аванс" : "Необязательно", text: $title)
                             .focused($focus, equals: .title)
                             .submitLabel(.done)
                             .textInputAutocapitalization(.sentences)
@@ -246,14 +225,16 @@ struct AddTransactionView: View {
                         .font(.subheadline)
                         .environment(\.locale, Locale(identifier: "ru_RU"))
 
-                    Button {
-                        openFullForm(kind)
-                    } label: {
-                        Label("Повтор и другие параметры", systemImage: "slider.horizontal.3")
-                            .font(.subheadline.weight(.medium))
+                    if kind != .transfer {
+                        Button {
+                            openFullForm(kind)
+                        } label: {
+                            Label("Повтор и другие параметры", systemImage: "slider.horizontal.3")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .foregroundStyle(Theme.accent)
+                        .frame(minHeight: 44)
                     }
-                    .foregroundStyle(Theme.accent)
-                    .frame(minHeight: 44)
 
                     if let error {
                         Text(error)
@@ -263,6 +244,8 @@ struct AddTransactionView: View {
                     }
                 }
                 .padding(20)
+                // Переключение вида — плавно: поля ниже появляются и исчезают, а не прыгают.
+                .animation(.snappy(duration: 0.25), value: kind)
                 // Нажатие на свободное место (не на поле и не на кнопку) убирает клавиатуру.
                 .background {
                     Color.clear
@@ -271,8 +254,9 @@ struct AddTransactionView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.bg)
-            .navigationTitle(kind == .expense ? "Новый расход" : "Новый доход")
+            // Фон — и под клавиатурой, иначе над ней видна белая полоса.
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(screenTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -283,7 +267,7 @@ struct AddTransactionView: View {
                     Button("Готово") { focus = nil }
                     Spacer()
                     if ready {
-                        Button("Добавить", action: save)
+                        Button(actionTitle, action: save)
                             .fontWeight(.semibold)
                             .disabled(busy)
                     }
@@ -291,33 +275,27 @@ struct AddTransactionView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if focus == nil && (ready || busy) {
-                Button(action: save) {
-                    Group {
-                        if busy {
-                            ProgressView()
-                        } else {
-                            Text("Добавить").font(.body.weight(.semibold))
+                    Button(action: save) {
+                        Group {
+                            if busy {
+                                ProgressView()
+                            } else {
+                                Text(actionTitle).font(.body.weight(.semibold))
+                            }
                         }
+                        .frame(maxWidth: .infinity, minHeight: 50)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.action)
-                .disabled(!canSave)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
-                .transition(.opacity)
+                    .buttonStyle(.glassProminent)
+                    .tint(Theme.action)
+                    .disabled(!canSave)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
                 }
             }
             .animation(.easeOut(duration: 0.2), value: focus == nil && ready)
             .onChange(of: kind) { previous, next in
-                // Перевод — в полной форме, с уже введённой суммой, датой и счётом.
-                if next == .transfer {
-                    openFullForm(.transfer, previous: previous)
-                    return
-                }
-                // Сумма, описание, дата и выбранный счёт остаются; категория — если её нет у нового вида.
-                if !categories.contains(category) { category = Self.defaultCategory(add, next) }
+                switchKind(from: previous, to: next)
             }
             .onAppear { focus = .amount }
             .sheet(isPresented: $allCategories) {
@@ -328,6 +306,33 @@ struct AddTransactionView: View {
                 .presentationDetents([.medium, .large])
             }
         }
+        .presentationBackground(Theme.bg)
+    }
+
+    /// Смена вида: сумма, описание и дата остаются; счёт — по смыслу (расход ушёл с него, доход пришёл на него).
+    private func switchKind(from previous: Kind, to next: Kind) {
+        if next == .transfer {
+            if previous == .income {
+                toAccountId = accountId
+                accountId = Self.firstOther(transferAccounts, except: accountId)
+            } else if accountId == toAccountId || toAccount == nil {
+                toAccountId = Self.firstOther(transferAccounts, except: accountId)
+            }
+            return
+        }
+        if previous == .transfer {
+            let own = next == .income ? toAccountId : accountId
+            accountId = payable.contains { $0.id == own } ? own : Self.defaultAccount(add, next)
+            card = payable.first { $0.id == accountId }?.lastCard
+        }
+        if !categories.contains(category) { category = Self.defaultCategory(add, next) }
+    }
+
+    private var transferHint: String {
+        if toAccount?.savings == true && fromAccount?.savings != true { return "Пополнение сбережений — считается отложенным в этом месяце." }
+        if fromAccount?.savings == true && toAccount?.savings != true { return "Снятие из сбережений на счёт." }
+        if repays { return "Погашение кредитки — перевод: покупки по ней уже учтены, когда вы их делали." }
+        return "Перевод между своими счетами — не доход и не расход."
     }
 
     private var amountField: some View {
@@ -347,6 +352,23 @@ struct AddTransactionView: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+    }
+
+    private func chip(_ text: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Text(text)
+                .lineLimit(1)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, 14)
+                .frame(minHeight: 40)
+                .foregroundStyle(selected ? .white : Theme.text)
+                .background(selected ? Theme.action : Theme.fill, in: .capsule)
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -369,54 +391,70 @@ struct AddTransactionView: View {
         }
     }
 
-    /// Счетов много — строка с выбранным счётом (и сколько на нём), выбор — меню со всеми счетами.
-    private func accountMenu(_ accounts: [HomeModel.AccountChoice]) -> some View {
-        let selected = accounts.first { $0.id == accountId } ?? accounts[0]
-        return Menu {
-            Picker("Счёт", selection: Binding(
-                get: { accountId },
-                set: { id in
-                    accountId = id
-                    card = accounts.first { $0.id == id }?.lastCard
-                    UISelectionFeedbackGenerator().selectionChanged()
+    /// Счёт — строкой: выбранный счёт и сколько на нём, по нажатию — меню со всеми счетами. Под строкой —
+    /// «было → станет» с учётом суммы (если суммы не спрятаны глазком).
+    private func accountField(
+        _ title: String,
+        accounts: [HomeModel.AccountChoice],
+        selection: Binding<String>,
+        delta: Int,
+        eye: Bool
+    ) -> some View {
+        let selected = accounts.first { $0.id == selection.wrappedValue } ?? accounts.first
+        return section(title, trailing: { if eye { BalancesEye(hidden: balancesHidden) } }) {
+            VStack(alignment: .leading, spacing: 6) {
+                Menu {
+                    Picker(title, selection: Binding(
+                        get: { selection.wrappedValue },
+                        set: { id in
+                            selection.wrappedValue = id
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+                    )) {
+                        ForEach(accounts) { account in
+                            Label(account.funds(short: true).map { "\(account.name) · \($0.text)" } ?? account.name, systemImage: account.symbol)
+                                .tag(account.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selected?.symbol ?? "creditcard").foregroundStyle(Theme.accent)
+                        Text(selected?.name ?? "Выберите счёт").lineLimit(1).foregroundStyle(Theme.text)
+                        Spacer(minLength: 8)
+                        if let funds = selected?.funds(short: true) {
+                            Text(funds.text).monospacedDigit().lineLimit(1).foregroundStyle(Theme.muted)
+                        }
+                        Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    .font(.subheadline)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 48)
+                    .background(Theme.fill, in: .rect(cornerRadius: 16, style: .continuous))
                 }
-            )) {
-                ForEach(accounts) { account in
-                    Label(account.funds(short: true).map { "\(account.name) · \($0.text)" } ?? account.name, systemImage: account.symbol)
-                        .tag(account.id)
+                if let selected, let before = selected.funds() {
+                    // «Сбербанк: 50 000 ₽ → 48 500 ₽» — сколько станет после операции.
+                    let after = selected.funds(delta: delta)
+                    let changes = delta != 0 && after?.text != before.text
+                    (Text(before.text)
+                        + Text(changes ? " → \(after?.text ?? "")" : "")
+                        + Text(changes && after?.negative == true ? (selected.credit == true ? " — больше лимита" : " — не хватает") : ""))
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(changes && after?.negative == true ? Theme.negative : Theme.muted)
                 }
             }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: selected.symbol).foregroundStyle(Theme.accent)
-                Text(selected.name).lineLimit(1).foregroundStyle(Theme.text)
-                Spacer(minLength: 8)
-                if let funds = selected.funds(short: true) {
-                    Text(funds.text).monospacedDigit().lineLimit(1).foregroundStyle(Theme.muted)
-                }
-                Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(Theme.muted)
-            }
-            .font(.subheadline)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 48)
-            .background(Theme.fill, in: .rect(cornerRadius: 16, style: .continuous))
         }
     }
 
-    /// Полная форма интерфейса (перевод, повтор, обязательность) — со всем, что уже введено здесь.
-    private func openFullForm(_ type: Kind, previous: Kind? = nil) {
+    /// Полная форма интерфейса (повтор, обязательность) — со всем, что уже введено здесь.
+    private func openFullForm(_ type: Kind) {
         var preset: [String: JSONValue] = ["type": .string(type.rawValue), "date": .string(WidgetSnapshot.today(date))]
         if let amount { preset["amount"] = .number(Double(amount)) }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanTitle.isEmpty { preset["title"] = .string(cleanTitle) }
-        if type == .transfer {
-            // Расход — деньги ушли с этого счёта, доход — пришли на него.
-            preset[previous == .income ? "to" : "from"] = .string(accountId)
-        } else {
-            if !category.isEmpty { preset["category"] = .string(category) }
-            preset["accountId"] = .string(accountId)
-            if let card { preset["card"] = .string(card) }
-        }
+        if !category.isEmpty { preset["category"] = .string(category) }
+        preset["accountId"] = .string(accountId)
+        if let card { preset["card"] = .string(card) }
         dismiss()
         AppShell.shared.open(["kind": .string("tx"), "preset": .object(preset)])
     }
@@ -426,20 +464,33 @@ struct AddTransactionView: View {
     }
 
     private func save() {
-        guard let amount, !category.isEmpty, !busy else { return }
+        guard let amount, ready, !busy else { return }
         busy = true
         error = nil
-        let draft: [String: JSONValue] = [
-            "kind": .string(kind.rawValue),
-            "amount": .number(Double(amount)),
-            "category": .string(category),
-            "title": .string(title.trimmingCharacters(in: .whitespacesAndNewlines)),
-            "date": .string(WidgetSnapshot.today(date)),
-        ]
-        .merging((add.accounts?.count ?? 0) > 1 ? ["accountId": .string(accountId)] : [:]) { current, _ in current }
-        .merging(card.map { ["card": .string($0)] } ?? [:]) { current, _ in current }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command: JSONValue
+        if kind == .transfer {
+            command = .command("transfer", ["draft": .object([
+                "amount": .number(Double(amount)),
+                "from": .string(accountId),
+                "to": .string(toAccountId),
+                "title": .string(cleanTitle),
+                "date": .string(WidgetSnapshot.today(date)),
+            ])])
+        } else {
+            let draft: [String: JSONValue] = [
+                "kind": .string(kind.rawValue),
+                "amount": .number(Double(amount)),
+                "category": .string(category),
+                "title": .string(cleanTitle),
+                "date": .string(WidgetSnapshot.today(date)),
+            ]
+            .merging(payable.count > 1 ? ["accountId": .string(accountId)] : [:]) { current, _ in current }
+            .merging(card.map { ["card": .string($0)] } ?? [:]) { current, _ in current }
+            command = .command("add", ["draft": .object(draft)])
+        }
         Task {
-            let result = await AppShell.shared.send(.command("add", ["draft": .object(draft)]))
+            let result = await AppShell.shared.send(command)
             busy = false
             guard result.ok else {
                 error = result.error

@@ -31,6 +31,45 @@ export function hasOwnAccounts(state: State): boolean {
   return activeAccounts(state).length > 2 || activeAccounts(state).some((a) => a.kind === "credit" || a.kind === "cash");
 }
 
+/**
+ * Перевод между своими счетами одним действием: в накопительный и из него — движение сбережений (засчитывается
+ * как «отложено» / «снято»), остальное — перевод. null — счета не найдены или совпадают.
+ */
+export function transferAction(
+  state: State,
+  t: { id: string; date: IsoDate; from: string; to: string; amount: Kopecks; title?: string; note?: string },
+): Action | null {
+  const fromAccount = findAccount(state, t.from);
+  const toAccount = findAccount(state, t.to);
+  if (!fromAccount || !toAccount || t.from === t.to) return null;
+  const note = t.note ?? "";
+  const title = t.title?.trim();
+  if (toAccount.kind === "savings" && fromAccount.kind !== "savings") {
+    return { type: "savings.move", id: t.id, date: t.date, amount: t.amount, note, accountId: t.from, toAccountId: t.to };
+  }
+  if (fromAccount.kind === "savings" && toAccount.kind !== "savings") {
+    return { type: "savings.move", id: t.id, date: t.date, amount: -t.amount, note, accountId: t.to, toAccountId: t.from };
+  }
+  return { type: "transfer.add", id: t.id, date: t.date, from: t.from, to: t.to, amount: t.amount, note, ...(title ? { title } : {}) };
+}
+
+/** «Переведено 5 000 ₽: Сбербанк → Накопительный»; на кредитку — «Погашено». */
+export function transferMessage(state: State, from: string, to: string, amount: Kopecks): string {
+  const fromAccount = findAccount(state, from);
+  const toAccount = findAccount(state, to);
+  return `${toAccount?.kind === "credit" ? "Погашено" : "Переведено"} ${formatMoney(amount)}: ${fromAccount?.name ?? ""} → ${toAccount?.name ?? ""}`;
+}
+
+/** Пояснение под переводом: что это значит для бюджета. */
+export function transferHint(state: State, from: string, to: string): string {
+  const fromAccount = findAccount(state, from);
+  const toAccount = findAccount(state, to);
+  if (toAccount?.kind === "savings" && fromAccount?.kind !== "savings") return "Пополнение сбережений — считается отложенным в этом месяце.";
+  if (fromAccount?.kind === "savings" && toAccount?.kind !== "savings") return "Снятие из сбережений на счёт.";
+  if (toAccount?.kind === "credit") return "Погашение кредитки — перевод: покупки по ней уже учтены, когда вы их делали.";
+  return "Перевод между своими счетами — не доход и не расход.";
+}
+
 /** Счета, с которых можно платить и на которые приходят деньги: всё, кроме накопительных. */
 export function payableAccounts(state: State): Account[] {
   return activeAccounts(state).filter((a) => a.kind !== "savings");

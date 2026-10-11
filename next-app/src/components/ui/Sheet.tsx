@@ -31,6 +31,7 @@ export function Sheet({
   size = "md",
   dirty = false,
   description,
+  tall = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +45,8 @@ export function Sheet({
   size?: "md" | "lg" | "full";
   /** В форме есть несохранённые изменения: закрытие по фону или Esc сначала спросит подтверждение. */
   dirty?: boolean;
+  /** Высота постоянная, как у «full», при обычной ширине: форма меняется внутри (вкладки), а окно — нет. */
+  tall?: boolean;
 }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -128,13 +131,39 @@ export function Sheet({
     };
   }, [open]);
 
+  // Пока окно открыто, оно не становится ниже: переключение вкладок и раскрытие частей внутри не дёргает его край.
+  // Окно приложения поменяло размер — запоминаем заново.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel) return;
+    let tallest = 0;
+    const observer = new ResizeObserver(() => {
+      const height = panel.offsetHeight;
+      if (height > tallest) {
+        tallest = height;
+        panel.style.minHeight = `${height}px`;
+      }
+    });
+    const reset = () => {
+      tallest = 0;
+      panel.style.minHeight = "";
+    };
+    observer.observe(panel);
+    window.addEventListener("resize", reset);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", reset);
+    };
+  }, [open]);
+
   if (!open || typeof document === "undefined") return null;
 
   const width = size === "lg" ? "sm:max-w-2xl" : size === "full" ? "sm:max-w-3xl" : "sm:max-w-lg";
-  const height = size === "full" ? "h-[92dvh] sm:h-[85dvh]" : "max-h-[92dvh] sm:max-h-[85dvh]";
+  const height = size === "full" || tall ? "h-[92dvh] sm:h-[85dvh]" : "max-h-[92dvh] sm:max-h-[85dvh]";
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+    // На широком экране окно прикреплено сверху: если оно вырастет, сдвинется только нижний край.
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-start sm:p-4 sm:pt-[6dvh]">
       <div className="absolute inset-0 bg-overlay animate-fade" onClick={() => void requestClose()} aria-hidden />
       <div
         ref={panelRef}

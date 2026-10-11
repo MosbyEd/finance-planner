@@ -37,6 +37,9 @@ import {
   lastAccountId,
   lastCardOf,
   payableAccounts,
+  transferAction,
+  transferHint,
+  transferMessage,
 } from "./accounts";
 import { useBalancesPrivacy } from "@/client/privacy";
 import { BalancesEye } from "./BalancesEye";
@@ -274,14 +277,10 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
     if (existing) {
       return dispatch({ type: "tx.move", id: existing.id, date, from, to, amount: value, ...(cleanTitle ? { title: cleanTitle } : {}) });
     }
-    const ok =
-      toAccount.kind === "savings" && fromAccount.kind !== "savings"
-        ? dispatch({ type: "savings.move", id: newId(), date, amount: value, note, accountId: from, toAccountId: to })
-        : fromAccount.kind === "savings" && toAccount.kind !== "savings"
-          ? dispatch({ type: "savings.move", id: newId(), date, amount: -value, note, accountId: to, toAccountId: from })
-          : dispatch({ type: "transfer.add", id: newId(), date, from, to, amount: value, note, ...(cleanTitle ? { title: cleanTitle } : {}) });
+    const action = transferAction(state, { id: newId(), date, from, to, amount: value, title: cleanTitle, note });
+    const ok = action ? dispatch(action) : false;
     if (ok && preset?.resolveBank) dispatch(bankResolveActions(state, preset.resolveBank, false, today, newId()));
-    if (ok) toast(`${toAccount.kind === "credit" ? "Погашено" : "Переведено"} ${formatMoney(value)}: ${fromAccount.name} → ${toAccount.name}`);
+    if (ok) toast(transferMessage(state, from, to, value));
     return ok;
   };
 
@@ -356,6 +355,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
       open
       onClose={close}
       dirty={dirty}
+      tall
       title={
         editing
           ? "Операция"
@@ -451,15 +451,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
                 <FundsLine funds={fundsOf(balances, toAccount)} delta={value} />
               </div>
             )}
-            <p className="-mt-2 text-sm text-muted">
-              {toAccount?.kind === "savings" && fromAccount?.kind !== "savings"
-                ? "Пополнение сбережений — считается отложенным в этом месяце."
-                : fromAccount?.kind === "savings" && toAccount?.kind !== "savings"
-                  ? "Снятие из сбережений на счёт."
-                  : repays
-                    ? "Погашение кредитки — перевод: покупки по ней уже учтены, когда вы их делали."
-                    : "Перевод между своими счетами — не доход и не расход."}
-            </p>
+            <p className="-mt-2 text-sm text-muted">{transferHint(state, from, to)}</p>
           </>
         ) : (
           showAccounts && (
@@ -503,6 +495,19 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
           </fieldset>
         )}
 
+        {kind !== "transfer" && (
+          <CategoryPicker
+            label="Категория"
+            showValue
+            frequent={frequent}
+            categories={categories}
+            value={category}
+            onChange={pickCategory}
+            error={errors.category}
+          />
+        )}
+
+        {/* Частые траты — после категорий: верх окна одинаков у расхода и дохода. */}
         {picks.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-sm font-medium text-muted">Часто</p>
@@ -526,18 +531,6 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
               ))}
             </div>
           </div>
-        )}
-
-        {kind !== "transfer" && (
-          <CategoryPicker
-            label="Категория"
-            showValue
-            frequent={frequent}
-            categories={categories}
-            value={category}
-            onChange={pickCategory}
-            error={errors.category}
-          />
         )}
 
         <TextInput

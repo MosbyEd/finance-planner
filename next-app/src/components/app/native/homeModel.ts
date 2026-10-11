@@ -10,9 +10,9 @@ import {
   type SafeToSpend,
 } from "@/domain/metrics";
 import { formatMoney } from "@/domain/money";
-import type { State, Transaction } from "@/domain/schema";
+import type { Account, State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
-import { accountBalances, accountCards, cardLabel } from "@/domain/accounts";
+import { accountBalances, accountCards, activeAccounts, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
 import { frequentCategories } from "../frequent";
 import { quickPicks, type QuickPick } from "../quickPicks";
@@ -151,7 +151,10 @@ export interface AddModel {
     /** Кредитный лимит кредитки; null — не кредитка или лимит не задан. */
     limit: number | null;
     credit: boolean;
+    savings: boolean;
   }[];
+  /** Счета для перевода — все свои, с накопительными (меньше двух — перевода нет). */
+  transferAccounts: AddModel["accounts"];
   lastExpenseAccount: string;
   lastIncomeAccount: string;
   /** Частые траты: заполняют форму одним касанием (сумма в копейках). */
@@ -437,6 +440,18 @@ export function buildHomeModel(input: HomeInput): HomeModel {
   const picks = quickPicks(state, today, 6);
   const ownAccounts = hasOwnAccounts(state);
   const balances = accountBalances(state, today);
+  const choice = (a: Account): AddModel["accounts"][number] => ({
+    id: a.id,
+    name: a.name,
+    symbol: ACCOUNT_KINDS[a.kind].symbol,
+    cards: accountCards(a).map((c) => ({ digits: c.digits, label: cardLabel(a, c.digits) })),
+    lastCard: lastCardOf(state, a.id),
+    // Сколько на счёте — в окне добавления (если суммы не спрятаны глазком).
+    balance: masked ? null : (balances.get(a.id) ?? 0),
+    limit: a.kind === "credit" ? (a.creditLimit ?? null) : null,
+    credit: a.kind === "credit",
+    savings: a.kind === "savings",
+  });
   const add: AddModel = {
     expense: expenseCategories(state),
     income: state.categories.income,
@@ -447,18 +462,9 @@ export function buildHomeModel(input: HomeInput): HomeModel {
     lastIncome: lastCategory(state, "income"),
     // Счета с картами — даже при одном счёте: чтобы выбрать карту.
     accounts: ownAccounts || payableAccounts(state).some((a) => accountCards(a).length > 0)
-      ? payableAccounts(state).map((a) => ({
-          id: a.id,
-          name: a.name,
-          symbol: ACCOUNT_KINDS[a.kind].symbol,
-          cards: accountCards(a).map((c) => ({ digits: c.digits, label: cardLabel(a, c.digits) })),
-          lastCard: lastCardOf(state, a.id),
-          // Сколько на счёте — в окне добавления (если суммы не спрятаны глазком).
-          balance: masked ? null : (balances.get(a.id) ?? 0),
-          limit: a.kind === "credit" ? (a.creditLimit ?? null) : null,
-          credit: a.kind === "credit",
-        }))
+      ? payableAccounts(state).map(choice)
       : [],
+    transferAccounts: ownAccounts ? activeAccounts(state).map(choice) : [],
     lastExpenseAccount: lastAccountId(state, "expense"),
     lastIncomeAccount: lastAccountId(state, "income"),
     picks: picks.map((p) => ({ title: p.title || p.category, category: p.category, amount: p.amount, amountText: formatMoney(p.amount) })),

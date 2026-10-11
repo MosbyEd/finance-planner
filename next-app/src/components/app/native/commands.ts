@@ -15,6 +15,8 @@ export type NativeCommand =
   | { type: "skipMandatory" }
   | { type: "quick"; key: string }
   | { type: "add"; draft: AddDraft }
+  /** Перевод между своими счетами из того же окна «+». */
+  | { type: "transfer"; draft: TransferDraft }
   | { type: "undo"; txId: string }
   | { type: "refresh" }
   | { type: "toastAction"; id: number }
@@ -34,6 +36,15 @@ export interface AddDraft {
   accountId?: string;
   /** Карта, которой платили. */
   card?: string;
+}
+
+export interface TransferDraft {
+  /** Копейки. */
+  amount: number;
+  from: string;
+  to: string;
+  title: string;
+  date: IsoDate;
 }
 
 /** Ответ на команду: для добавления — id операции (для «Отменить») и текст уведомления. */
@@ -87,6 +98,16 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
       date: isoDate,
       accountId: z.string().min(1).max(120).optional(),
       card: z.string().regex(/^\d{4}$/).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal("transfer"),
+    draft: z.object({
+      amount: z.number().int().positive().max(1e13),
+      from: z.string().min(1).max(120),
+      to: z.string().min(1).max(120),
+      title: z.string().max(200),
+      date: isoDate,
     }),
   }),
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),

@@ -213,6 +213,7 @@ struct HomeModel: Codable, Equatable, Sendable {
         var balance: Int?
         var limit: Int?
         var credit: Bool?
+        var savings: Bool?
 
         /// Сколько на счёте после изменения delta: у кредитки — доступный лимит (без лимита — долг), иначе остаток.
         /// nil — суммы спрятаны. short — без подписи «доступно» (для чипа).
@@ -251,6 +252,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var picks: [Pick]
         /// Счета для выбора; пусто — выбора нет, всё на основном.
         var accounts: [AccountChoice]?
+        /// Счета для перевода — все свои, с накопительными.
+        var transferAccounts: [AccountChoice]?
         var lastExpenseAccount: String?
         var lastIncomeAccount: String?
     }

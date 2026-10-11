@@ -4,7 +4,7 @@ import { addTx, stateWith, template, tx } from "@/domain/test-utils";
 import type { Snapshot } from "@/client/store";
 import { applyActions } from "@/domain/actions";
 import { accountBalance } from "@/domain/accounts";
-import { bankResolveActions } from "../accounts";
+import { bankResolveActions, transferAction, transferMessage } from "../accounts";
 import { commandSchema } from "./commands";
 import { buildHomeModel, type HomeModel } from "./homeModel";
 
@@ -153,5 +153,26 @@ describe("глазок у сумм счетов", () => {
     expect(built.tiles).toMatchObject({ balance: "•••• ₽", savings: "•••• ₽", balanceNegative: false });
     expect(built.accounts.every((a) => a.amount === "•••• ₽" && !/₽/.test(a.detail))).toBe(true);
     expect(commandSchema.safeParse({ type: "balances", visible: true }).success).toBe(true);
+  });
+});
+
+describe("перевод из окна «+»", () => {
+  it("счета для перевода — с накопительными; в накопительный — движение сбережений, на кредитку — перевод", () => {
+    const s = applyActions(base(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 },
+      { type: "account.add", account: { id: "dep", name: "Вклад", kind: "savings", spending: false } },
+      { type: "account.add", account: { id: "cc", name: "Кредитка", kind: "credit", spending: false, graceDays: 5 } },
+    ]);
+    const add = model(s).add;
+    expect(add.transferAccounts.find((a) => a.id === "dep")).toMatchObject({ savings: true });
+    expect(add.accounts.some((a) => a.id === "dep")).toBe(false);
+
+    const draft = { amount: 10_000, from: "main", to: "dep", title: "", date: today };
+    expect(commandSchema.safeParse({ type: "transfer", draft }).success).toBe(true);
+    expect(transferAction(s, { id: "t1", ...draft })).toMatchObject({ type: "savings.move", amount: 10_000, accountId: "main", toAccountId: "dep" });
+    expect(transferAction(s, { id: "t2", ...draft, from: "dep", to: "main" })).toMatchObject({ type: "savings.move", amount: -10_000, accountId: "main", toAccountId: "dep" });
+    expect(transferAction(s, { id: "t3", ...draft, to: "cc" })).toMatchObject({ type: "transfer.add", from: "main", to: "cc" });
+    expect(transferMessage(s, "main", "cc", 10_000)).toMatch(/^Погашено 100\s₽: Основной счёт → Кредитка$/);
+    expect(transferAction(s, { id: "t4", ...draft, to: "main" })).toBeNull();
   });
 });
