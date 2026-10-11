@@ -1,6 +1,7 @@
 import Capacitor
 import Foundation
 import FoundationModels
+import LocalAuthentication
 
 /// Мост между интерфейсом (JS) и iOS: сессия и сводка для команд Siri, модель Apple Intelligence для помощника.
 @objc(BudgetNativePlugin)
@@ -29,6 +30,7 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "aiInbox", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "aiAck", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "aiChatVisible", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "biometricAuth", returnType: CAPPluginReturnPromise),
     ]
 
     private var orb: SiriOrbView?
@@ -129,6 +131,16 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         Task {
             await LocalSms.shared.acknowledge(ids)
             call.resolve()
+        }
+    }
+
+    // MARK: - Face ID
+
+    /// Проверка владельца (Face ID, при неудаче — код телефона): показать спрятанные суммы на счетах.
+    @objc func biometricAuth(_ call: CAPPluginCall) {
+        let reason = call.getString("reason") ?? "Подтвердите, что это вы"
+        Task { @MainActor in
+            call.resolve(["ok": await Biometric.authenticate(reason: reason)])
         }
     }
 

@@ -20,6 +20,8 @@ import { TextInput, controlClass, controlLookClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { ACCOUNT_KINDS } from "../accounts";
+import { useBalancesPrivacy } from "@/client/privacy";
+import { BalancesEye } from "../BalancesEye";
 import { InterestNotes } from "../InterestNotes";
 import { CreditTermsFields, parseTerms, termsDraft, type TermsDraft } from "./CreditTermsFields";
 import { useDispatch } from "../hooks";
@@ -79,6 +81,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   };
 
   const balance = existing ? accountBalance(state, existing.id, today) : 0;
+  const { masked } = useBalancesPrivacy();
   const credit = existing?.kind === "credit" ? creditStatus(state, existing, today) : null;
 
   const changeKind = (next: AccountKind) => {
@@ -189,11 +192,16 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
       >
         {existing && (
           <div className="rounded-2xl bg-surface-2 px-4 py-3">
-            <p className="text-sm text-muted">{existing.kind === "credit" ? "Долг по карте" : "Остаток"}</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-muted">{existing.kind === "credit" ? "Долг по карте" : "Остаток"}</p>
+              <span className="-my-2 -mr-2">
+                <BalancesEye />
+              </span>
+            </div>
             <p className="text-2xl font-semibold tabular-nums">
-              {formatMoney(existing.kind === "credit" ? (credit?.debt ?? 0) : balance, { whole: true })}
+              {masked ? "•••• ₽" : formatMoney(existing.kind === "credit" ? (credit?.debt ?? 0) : balance, { whole: true })}
             </p>
-            {credit && <InterestNotes summary={credit} />}
+            {credit && !masked && <InterestNotes summary={credit} />}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => open({ kind: "balance", accountId: existing.id })}>
                 {existing.kind === "credit" ? "Сверить долг" : "Сверить остаток"}

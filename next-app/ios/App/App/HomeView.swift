@@ -92,7 +92,7 @@ private struct HomeContent: View {
                 Tiles(tiles: tiles)
             }
             if let accounts = model.accounts, !accounts.isEmpty {
-                AccountsCard(accounts: accounts, total: model.accountsTotal ?? accounts.count)
+                AccountsCard(accounts: accounts, total: model.accountsTotal ?? accounts.count, hidden: model.balancesHidden ?? false)
             }
             if let month = model.month {
                 MonthCard(month: month)
@@ -582,11 +582,15 @@ private struct Tile: View {
 private struct AccountsCard: View {
     let accounts: [HomeModel.Account]
     let total: Int
+    let hidden: Bool
 
     var body: some View {
         HomeCard(title: "Счета") {
-            LinkButton(title: total > accounts.count ? "Все \(total)" : "Все счета") {
-                Task { await AppShell.shared.perform(.command("tab", ["tab": .string("settings"), "section": .string("accounts")])) }
+            HStack(spacing: 4) {
+                BalancesEye(hidden: hidden)
+                LinkButton(title: total > accounts.count ? "Все \(total)" : "Все счета") {
+                    Task { await AppShell.shared.perform(.command("tab", ["tab": .string("settings"), "section": .string("accounts")])) }
+                }
             }
         } content: {
             VStack(spacing: 0) {
@@ -801,5 +805,36 @@ struct SiriOrbIcon: View {
         .drawingGroup()
         .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Глазок у сумм счетов
+
+/// Спрятать суммы счетов — сразу, показать — по Face ID (или коду телефона). Состояние хранит интерфейс:
+/// свернули приложение — суммы снова спрятаны.
+struct BalancesEye: View {
+    let hidden: Bool
+
+    var body: some View {
+        Button {
+            Task {
+                if hidden {
+                    guard await Biometric.authenticate(reason: "Показать суммы на счетах") else { return }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    await AppShell.shared.perform(.command("balances", ["visible": .bool(true)]), quiet: true)
+                } else {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    await AppShell.shared.perform(.command("balances", ["visible": .bool(false)]), quiet: true)
+                }
+            }
+        } label: {
+            Image(systemName: hidden ? "eye.slash" : "eye")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 40, height: 44)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(hidden ? "Показать суммы на счетах" : "Спрятать суммы на счетах")
     }
 }

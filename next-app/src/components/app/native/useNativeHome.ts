@@ -7,6 +7,7 @@ import type { State } from "@/domain/schema";
 import { nativeHomeModel, nativeShellInfo, nativeToast, onNativeCommand } from "@/client/native";
 import { newId, useSnapshot, useStore, useToday } from "@/client/react";
 import { isNativeApp } from "@/client/runtime";
+import { hideBalances, revealBalances, useBalancesPrivacy } from "@/client/privacy";
 import { storage } from "@/client/storage";
 import { runToastAction, setToastSink, useToast } from "../../ui/feedback";
 import { useUi } from "../overlays";
@@ -54,6 +55,8 @@ function isMandatoryCategory(state: State, category: string): boolean {
  */
 export function useNativeHome(active: boolean, assistant: boolean): void {
   const snapshot = useSnapshot();
+  // Глазок у сумм счетов: модель Главной пересобирается, когда суммы прячут или показывают.
+  const privacy = useBalancesPrivacy();
   const store = useStore();
   const today = useToday();
   const toast = useToast();
@@ -77,12 +80,13 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           balanceConfirmed: storage.get(BALANCE_CONFIRMED_KEY) === "1",
           mandatorySkipped: storage.get(SKIP_MANDATORY_KEY) === "1",
           assistant,
+          privacy,
         }),
       );
     }, 60);
     return () => clearTimeout(timer);
     // ui.overlay: «Остаток совпадает» в окне сверки меняет только флаг — пересчитываем, когда окно закрылось.
-  }, [ready, snapshot, today, assistant, flagsRevision, ui.overlay]);
+  }, [ready, snapshot, today, assistant, flagsRevision, ui.overlay, privacy]);
 
   useEffect(() => {
     if (!ready) return;
@@ -189,6 +193,12 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
         }
         case "refresh":
           return store.resume().then(() => ({ ok: true }) as const);
+        case "balances":
+          if (!command.visible) {
+            hideBalances();
+            return { ok: true };
+          }
+          return revealBalances(true).then((ok) => (ok ? { ok: true } : { ok: false, error: "Не удалось показать суммы." }));
         case "bank": {
           const actions = bankResolveActions(state, command.accountId, command.fix, day, newId());
           if (!actions.length) return { ok: true };

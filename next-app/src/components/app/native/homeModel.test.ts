@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { State } from "@/domain/schema";
-import { stateWith, template, tx } from "@/domain/test-utils";
+import { addTx, stateWith, template, tx } from "@/domain/test-utils";
 import type { Snapshot } from "@/client/store";
 import { applyActions } from "@/domain/actions";
 import { accountBalance } from "@/domain/accounts";
@@ -131,5 +131,27 @@ describe("счета на Главной", () => {
     const m = model(s);
     expect(m.accountsTotal).toBe(5); // с «Основным счётом» и «Сбережениями» по умолчанию
     expect(m.accounts.map((a) => a.id)).toEqual(["cc", "cash", "main"]);
+  });
+});
+
+describe("глазок у сумм счетов", () => {
+  it("спрятано — вместо остатков «•••• ₽», без сумм в пояснениях; команда глазка проходит проверку", () => {
+    const s = applyActions(base(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 5_000_000 },
+      { type: "account.add", account: { id: "cc", name: "Кредитка", kind: "credit", spending: false, creditLimit: 10_000_000, graceDays: 60 } },
+      addTx({ type: "expense", amount: 300_000, date: "2026-10-05", accountId: "cc" }),
+    ]);
+    const built = buildHomeModel({
+      snapshot: snapshot(s),
+      today,
+      balanceConfirmed: true,
+      mandatorySkipped: true,
+      assistant: true,
+      privacy: { masked: true, hiding: true },
+    });
+    expect(built.balancesHidden).toBe(true);
+    expect(built.tiles).toMatchObject({ balance: "•••• ₽", savings: "•••• ₽", balanceNegative: false });
+    expect(built.accounts.every((a) => a.amount === "•••• ₽" && !/₽/.test(a.detail))).toBe(true);
+    expect(commandSchema.safeParse({ type: "balances", visible: true }).success).toBe(true);
   });
 });

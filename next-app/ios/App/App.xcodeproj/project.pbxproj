@@ -28,6 +28,7 @@
 		650C3749ECD0C2440B160FA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 334B1B02A204B7E174D799AE /* Theme.swift */; };
 		70ED7CD1B5E2005D5EEF7E6A /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DA5F05393A2D44F8489DAB /* ToastCenter.swift */; };
 		7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */; };
+		93688014D33E9A58E58835A5 /* Biometric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889A3F02F7A90872E0917C71 /* Biometric.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */; };
 		AA810F8D15C92F6047E65F18 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DF6152F9F5E000FA5538617 /* Foundation.framework */; };
@@ -90,6 +91,7 @@
 		68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AddTransactionView.swift; sourceTree = "<group>"; };
 		7AF3CD19C55241895A0C692C /* RootViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RootViewController.swift; sourceTree = "<group>"; };
 		80A186C082CBE0ED31FEC74C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		889A3F02F7A90872E0917C71 /* Biometric.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Biometric.swift; sourceTree = "<group>"; };
 		89DA5F05393A2D44F8489DAB /* ToastCenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToastCenter.swift; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
@@ -180,6 +182,7 @@
 				1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */,
 				4D6BF5E939B40CB6BA6BB593 /* AiRequests.swift */,
 				9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */,
+				889A3F02F7A90872E0917C71 /* Biometric.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -352,6 +355,7 @@
 				A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */,
 				642E97826F76A77D516FED38 /* AiRequests.swift in Sources */,
 				7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */,
+				93688014D33E9A58E58835A5 /* Biometric.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

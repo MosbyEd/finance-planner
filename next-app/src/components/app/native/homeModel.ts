@@ -157,6 +157,8 @@ export interface HomeModel {
   accounts: AccountModel[];
   /** Сколько счетов всего. */
   accountsTotal: number;
+  /** Суммы счетов спрятаны глазком («•••• ₽»): показать — по Face ID. */
+  balancesHidden: boolean;
   month: MonthModel | null;
   upcoming: UpcomingModel[];
   recent: RecentModel[];
@@ -172,6 +174,8 @@ export interface HomeInput {
   mandatorySkipped: boolean;
   /** Доступен ли помощник (DeepSeek на сервере или модель Apple на телефоне). */
   assistant: boolean;
+  /** Глазок у сумм счетов: masked — суммы спрятаны, hiding — скрытие включено. Нет — показаны. */
+  privacy?: { masked: boolean; hiding: boolean };
 }
 
 const STATUS: Record<SafeToSpend["status"], { text: string; tone: Tone }> = {
@@ -394,8 +398,12 @@ function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: nu
   };
 }
 
+/** Спрятанная сумма. */
+const MASK = "•••• ₽";
+
 export function buildHomeModel(input: HomeInput): HomeModel {
   const { snapshot, today } = input;
+  const masked = input.privacy?.masked ?? false;
   const { state } = snapshot;
   const month = monthKeyOf(today);
   const hasData = state.transactions.length > 0 || state.templates.length > 0;
@@ -450,6 +458,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       tiles: null,
       accounts: [],
       accountsTotal: 0,
+      balancesHidden: masked,
       month: null,
       upcoming: [],
       recent: [],
@@ -500,20 +509,22 @@ export function buildHomeModel(input: HomeInput): HomeModel {
     quick: picks.map((p) => ({ key: quickKey(p), title: p.title || p.category, amount: formatMoney(p.amount) })),
     tiles: {
       balanceLabel: ownAccounts ? "На счетах" : "На счёте",
-      balance: formatMoney(balance, { whole: true }),
-      balanceNegative: balance < 0,
+      balance: masked ? MASK : formatMoney(balance, { whole: true }),
+      balanceNegative: !masked && balance < 0,
       balanceHint: steps.balance ? "Сверить остаток" : "Указать остаток",
-      savings: formatMoney(savingsTotal(state, today), { whole: true }),
+      savings: masked ? MASK : formatMoney(savingsTotal(state, today), { whole: true }),
     },
     accountsTotal: ownAccounts ? accountRows(state, today).length : 0,
+    balancesHidden: masked,
     accounts: ownAccounts
       ? previewAccountRows(accountRows(state, today)).map((row) => ({
           id: row.account.id,
           name: row.account.name,
           symbol: ACCOUNT_KINDS[row.account.kind].symbol,
-          amount: row.amount,
-          negative: row.negative,
-          detail: row.detail,
+          // Спрятано: ни остатка, ни сумм в пояснении (долг, лимит, проценты).
+          amount: masked ? MASK : row.amount,
+          negative: !masked && row.negative,
+          detail: masked ? ACCOUNT_KINDS[row.account.kind].label : row.detail,
           overdue: row.overdue,
           command: { type: "open", overlay: { kind: "account", accountId: row.account.id } },
         }))

@@ -2,7 +2,10 @@
 
 import { creditStatus } from "@/domain/accounts";
 import { formatMoney } from "@/domain/money";
+import { hideBalances, stopHidingBalances, useBalancesPrivacy } from "@/client/privacy";
 import { useSnapshot, useToday } from "@/client/react";
+import { Switch } from "../../ui/controls";
+import { BalancesEye } from "../../app/BalancesEye";
 import { Button } from "../../ui/Button";
 import { Icon } from "../../ui/Icon";
 import { ACCOUNT_GROUPS, ACCOUNT_KINDS, accountGroup, accountRows, type AccountRow } from "../../app/accounts";
@@ -18,9 +21,11 @@ export function AccountsSection() {
   const today = useToday();
   const { open } = useUi();
   const rows = accountRows(state, today);
+  const { masked, hiding } = useBalancesPrivacy();
+  const hide = (text: string) => (masked ? "•••• ₽" : text);
   return (
     <SectionCard title="Счета">
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button size="sm" icon="plus" onClick={() => open({ kind: "account" })}>
           Добавить счёт
         </Button>
@@ -32,6 +37,9 @@ export function AccountsSection() {
             Перевод
           </Button>
         )}
+        <span className="ml-auto">
+          <BalancesEye />
+        </span>
       </div>
       <div className="space-y-5">
         {ACCOUNT_GROUPS.map((group) => {
@@ -48,14 +56,18 @@ export function AccountsSection() {
                 <span className="text-sm text-muted tabular-nums">
                   {group.id === "credit"
                     ? total > 0
-                      ? `долг ${formatMoney(total, { whole: true })}`
+                      ? `долг ${hide(formatMoney(total, { whole: true }))}`
                       : "долга нет"
-                    : formatMoney(total, { whole: true })}
+                    : hide(formatMoney(total, { whole: true }))}
                 </span>
               </div>
               <ul className="divide-y divide-separator">
                 {items.map((row) => (
-                  <AccountItem key={row.account.id} row={row} onOpen={() => open({ kind: "account", accountId: row.account.id })} />
+                  <AccountItem
+                    key={row.account.id}
+                    row={masked ? { ...row, amount: "•••• ₽", negative: false, detail: ACCOUNT_KINDS[row.account.kind].label } : row}
+                    onOpen={() => open({ kind: "account", accountId: row.account.id })}
+                  />
                 ))}
               </ul>
             </section>
@@ -65,6 +77,14 @@ export function AccountsSection() {
       <p className="mt-4 text-sm text-muted">
         Укажите у счёта номер и карты из СМС банка — операции из СМС будут попадать на нужный счёт.
       </p>
+      <div className="mt-4">
+        <Switch
+          checked={hiding}
+          onChange={(on) => (on ? hideBalances() : void stopHidingBalances())}
+          label="Скрывать суммы на счетах"
+          description="Вместо сумм — «•••• ₽». Показать — глазком, по Face ID; свернули приложение — суммы снова спрятаны."
+        />
+      </div>
     </SectionCard>
   );
 }

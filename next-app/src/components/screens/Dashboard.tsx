@@ -31,6 +31,8 @@ import {
   hasOwnAccounts,
   previewAccountRows,
 } from "../app/accounts";
+import { useBalancesPrivacy } from "@/client/privacy";
+import { BalancesEye } from "../app/BalancesEye";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
 import { Button } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
@@ -332,6 +334,7 @@ export function Dashboard() {
   const { state } = snapshot;
   const today = useToday();
   const { open, setTab } = useUi();
+  const { masked } = useBalancesPrivacy();
 
   const data = useMemo(() => {
     const month = monthKeyOf(today);
@@ -404,8 +407,8 @@ export function Dashboard() {
               <span className="flex items-center gap-1.5 text-sm text-muted">
                 <Icon name="wallet" size={16} /> {hasOwnAccounts(state) ? "На счетах" : "На счёте"}
               </span>
-              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={formatMoney(data.balance)}>
-                <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />
+              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.balance)}>
+                {masked ? "•••• ₽" : <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />}
               </span>
               <span className="mt-1 block text-xs text-muted">
                 {progress.balance ? "Сверить остаток" : "Указать остаток"}
@@ -419,8 +422,8 @@ export function Dashboard() {
               <span className="flex items-center gap-1.5 text-sm text-muted">
                 <Icon name="piggy" size={16} /> Сбережения
               </span>
-              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={formatMoney(data.savings)}>
-                <Money value={data.savings} whole />
+              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.savings)}>
+                {masked ? "•••• ₽" : <Money value={data.savings} whole />}
               </span>
               <span className="mt-1 block text-xs text-muted">Пополнить или снять</span>
             </button>
@@ -469,13 +472,17 @@ function AccountsCard() {
   const { open, openSettings } = useUi();
   const all = accountRows(state, today);
   const rows = previewAccountRows(all);
+  const { masked } = useBalancesPrivacy();
   return (
     <Card
       title="Счета"
       action={
-        <Button variant="ghost" size="sm" onClick={() => openSettings("accounts")}>
-          {all.length > rows.length ? `Все ${all.length}` : "Все счета"}
-        </Button>
+        <span className="flex items-center gap-1">
+          <BalancesEye />
+          <Button variant="ghost" size="sm" onClick={() => openSettings("accounts")}>
+            {all.length > rows.length ? `Все ${all.length}` : "Все счета"}
+          </Button>
+        </span>
       }
     >
       <ul className="space-y-0.5">
@@ -491,9 +498,13 @@ function AccountsCard() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px]">{row.account.name}</span>
-                <span className={`block truncate text-xs ${row.overdue ? "font-medium text-negative" : "text-muted"}`}>{row.detail}</span>
+                <span className={`block truncate text-xs ${row.overdue && !masked ? "font-medium text-negative" : "text-muted"}`}>
+                  {masked ? ACCOUNT_KINDS[row.account.kind].label : row.detail}
+                </span>
               </span>
-              <span className={`shrink-0 font-semibold tabular-nums ${row.negative ? "text-negative" : ""}`}>{row.amount}</span>
+              <span className={`shrink-0 font-semibold tabular-nums ${row.negative && !masked ? "text-negative" : ""}`}>
+                {masked ? "•••• ₽" : row.amount}
+              </span>
             </button>
           </li>
         ))}

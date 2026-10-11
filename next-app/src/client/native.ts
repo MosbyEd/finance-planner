@@ -86,6 +86,7 @@ interface BudgetNativePlugin {
   aiAck(options: { ids: string[] }): Promise<void>;
   aiChatVisible(options: { visible: boolean }): Promise<void>;
   addListener(event: "aiReply", listener: (data: NativeAiReply) => void): Promise<PluginListenerHandle>;
+  biometricAuth(options: { reason: string }): Promise<{ ok: boolean }>;
   aiStatus(): Promise<AppleAiStatus>;
   aiRespond(options: { model: AppleModel; instructions: string; prompt: string }): Promise<AppleAiReply>;
 }
@@ -294,4 +295,16 @@ export function onNativeAiReply(handler: (reply: NativeAiReply) => void): () => 
   return () => {
     void handle.then((h) => h.remove()).catch(() => {});
   };
+}
+
+// ---------- Face ID ----------
+
+/** Face ID (или код телефона). В браузере проверки нет — true; в старой сборке без метода — тоже true. */
+export async function nativeBiometricAuth(reason: string): Promise<boolean> {
+  if (!isNativeApp()) return true;
+  try {
+    return (await plugin.biometricAuth({ reason })).ok;
+  } catch (error) {
+    return error instanceof Error && /not implemented|unimplemented/i.test(error.message);
+  }
 }

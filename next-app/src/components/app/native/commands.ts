@@ -19,7 +19,9 @@ export type NativeCommand =
   | { type: "refresh" }
   | { type: "toastAction"; id: number }
   /** Расхождение остатка с банком: fix — поправить корректировкой, иначе — оставить как есть. */
-  | { type: "bank"; accountId: string; fix: boolean };
+  | { type: "bank"; accountId: string; fix: boolean }
+  /** Глазок у сумм счетов: показать (Face ID уже пройден на нативном экране) или спрятать. */
+  | { type: "balances"; visible: boolean };
 
 export interface AddDraft {
   kind: "income" | "expense";
@@ -91,4 +93,5 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("toastAction"), id: z.number().int() }),
   z.object({ type: z.literal("bank"), accountId: z.string().min(1).max(120), fix: z.boolean() }),
+  z.object({ type: z.literal("balances"), visible: z.boolean() }),
 ]);

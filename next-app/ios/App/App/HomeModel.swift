@@ -242,6 +242,8 @@ struct HomeModel: Codable, Equatable, Sendable {
     var tiles: Tiles?
     var accounts: [Account]?
     var accountsTotal: Int?
+    /// Суммы счетов спрятаны глазком: показать — по Face ID.
+    var balancesHidden: Bool?
     var month: Month?
     var upcoming: [Upcoming]
     var recent: [Recent]
