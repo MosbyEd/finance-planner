@@ -10,6 +10,8 @@ import { EmptyState, Money } from "../../ui/controls";
 import { useConfirm } from "../../ui/feedback";
 import { controlClass } from "../../ui/Field";
 import { Sheet } from "../../ui/Sheet";
+import { isEditableTransaction } from "@/domain/actions";
+import { transactionAccountLabel } from "../accounts";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 
@@ -144,9 +146,11 @@ function ReviewRow({
         : "из сбережений"
       : tx.templateId
         ? "регулярный, сумма по факту"
-        : tx.type === "income"
-          ? "доход"
-          : "расход";
+        : tx.type === "transfer"
+          ? "перевод между счетами"
+          : tx.type === "income"
+            ? "доход"
+            : "расход";
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex items-start gap-3">
@@ -177,11 +181,12 @@ function ReviewRow({
                 </option>
               ))}
             </select>
-            <IconButton icon="edit" label="Изменить операцию" onClick={onEdit} />
           </>
         ) : (
-          <span className="flex-1" />
+          <span className="min-w-0 flex-1 truncate text-sm text-muted">{transactionAccountLabel(state, tx) ?? ""}</span>
         )}
+        {/* Править можно и перевод, и сбережения: сумму, дату, счета — и тип (покупка ↔ перевод). */}
+        {isEditableTransaction(tx) && <IconButton icon="edit" label="Изменить операцию" onClick={onEdit} />}
         <IconButton icon="trash" label="Удалить операцию" onClick={onDelete} />
       </div>
       {onDetach && (

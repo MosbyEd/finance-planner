@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Окно «Новый расход / доход»: сумма → категория → «Добавить» (дизайн-код: запись траты за три касания).
-/// Частые траты заполняют форму одним касанием. Повтор и прочие параметры — в полной форме интерфейса.
+/// Частые траты заполняют форму одним касанием. Перевод, повтор и прочие параметры — в полной форме интерфейса:
+/// туда уходит всё введённое здесь (сумма, категория, описание, дата, счёт), ничего не теряется.
 struct AddTransactionView: View {
-    enum Kind: String { case expense, income }
+    enum Kind: String { case expense, income, transfer }
 
     let add: HomeModel.Add
     @Environment(\.dismiss) private var dismiss
@@ -33,17 +34,21 @@ struct AddTransactionView: View {
     }
 
     private static func defaultAccount(_ add: HomeModel.Add, _ kind: Kind) -> String {
-        (kind == .expense ? add.lastExpenseAccount : add.lastIncomeAccount) ?? add.accounts?.first?.id ?? "main"
+        (kind == .income ? add.lastIncomeAccount : add.lastExpenseAccount) ?? add.accounts?.first?.id ?? "main"
     }
 
     private static func defaultCategory(_ add: HomeModel.Add, _ kind: Kind) -> String {
         switch kind {
-        case .expense: add.lastExpense.flatMap { add.expense.contains($0) ? $0 : nil } ?? add.expense.first ?? ""
         case .income: add.lastIncome.flatMap { add.income.contains($0) ? $0 : nil } ?? add.income.first ?? ""
+        default: add.lastExpense.flatMap { add.expense.contains($0) ? $0 : nil } ?? add.expense.first ?? ""
         }
     }
 
-    private var categories: [String] { kind == .expense ? add.expense : add.income }
+    private var categories: [String] { kind == .income ? add.income : add.expense }
+    /// Перевод — только когда своих счетов несколько.
+    private var canTransfer: Bool { (add.accounts?.count ?? 0) > 1 }
+    /// Сумма крупными цифрами, но длинная — мельче, чтобы не вылезать за край.
+    private var amountFontSize: CGFloat { amountText.count > 11 ? 30 : amountText.count > 8 ? 36 : 44 }
 
     /// Сумма в копейках: «1 234,5» → 123450. nil — пусто или не число.
     private var amount: Int? {
@@ -70,6 +75,7 @@ struct AddTransactionView: View {
                     Picker("Вид операции", selection: $kind) {
                         Text("Расход").tag(Kind.expense)
                         Text("Доход").tag(Kind.income)
+                        if canTransfer { Text("Перевод").tag(Kind.transfer) }
                     }
                     .pickerStyle(.segmented)
 
@@ -86,6 +92,7 @@ struct AddTransactionView: View {
                                         UISelectionFeedbackGenerator().selectionChanged()
                                     } label: {
                                         Label(account.name, systemImage: account.symbol)
+                                            .lineLimit(1)
                                             .font(.subheadline.weight(selected ? .semibold : .regular))
                                             .padding(.horizontal, 14)
                                             .frame(minHeight: 40)
@@ -109,6 +116,7 @@ struct AddTransactionView: View {
                                         UISelectionFeedbackGenerator().selectionChanged()
                                     } label: {
                                         Text(choice?.label ?? "Без карты")
+                                            .lineLimit(1)
                                             .font(.subheadline.weight(selected ? .semibold : .regular))
                                             .padding(.horizontal, 14)
                                             .frame(minHeight: 40)
@@ -161,6 +169,7 @@ struct AddTransactionView: View {
                                     UISelectionFeedbackGenerator().selectionChanged()
                                 } label: {
                                     Text(item)
+                                        .lineLimit(1)
                                         .font(.subheadline.weight(selected ? .semibold : .regular))
                                         .padding(.horizontal, 14)
                                         .frame(minHeight: 40)
@@ -186,9 +195,7 @@ struct AddTransactionView: View {
                         .environment(\.locale, Locale(identifier: "ru_RU"))
 
                     Button {
-                        let preset: [String: JSONValue] = ["type": .string(kind.rawValue)]
-                        dismiss()
-                        AppShell.shared.open(["kind": .string("tx"), "preset": .object(preset)])
+                        openFullForm(kind)
                     } label: {
                         Label("Повтор и другие параметры", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.medium))
@@ -231,9 +238,14 @@ struct AddTransactionView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
             }
-            .onChange(of: kind) { _, next in
+            .onChange(of: kind) { previous, next in
+                // Перевод — в полной форме, с уже введённой суммой, датой и счётом.
+                if next == .transfer {
+                    openFullForm(.transfer, previous: previous)
+                    return
+                }
+                // Сумма, описание, дата и выбранный счёт остаются; категория — если её нет у нового вида.
                 if !categories.contains(category) { category = Self.defaultCategory(add, next) }
-                accountId = Self.defaultAccount(add, next)
             }
             .onAppear { amountFocused = true }
         }
@@ -243,13 +255,13 @@ struct AddTransactionView: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             TextField("0", text: $amountText)
                 .keyboardType(.decimalPad)
-                .font(.system(size: 44, weight: .bold))
+                .font(.system(size: amountFontSize, weight: .bold))
                 .monospacedDigit()
                 .focused($amountFocused)
                 .fixedSize(horizontal: amountText.count > 0, vertical: false)
                 .accessibilityLabel("Сумма в рублях")
             Text("₽")
-                .font(.system(size: 44, weight: .bold))
+                .font(.system(size: amountFontSize, weight: .bold))
                 .foregroundStyle(Theme.muted)
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
@@ -262,6 +274,24 @@ struct AddTransactionView: View {
             Text(title).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
             content()
         }
+    }
+
+    /// Полная форма интерфейса (перевод, повтор, обязательность) — со всем, что уже введено здесь.
+    private func openFullForm(_ type: Kind, previous: Kind? = nil) {
+        var preset: [String: JSONValue] = ["type": .string(type.rawValue), "date": .string(WidgetSnapshot.today(date))]
+        if let amount { preset["amount"] = .number(Double(amount)) }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanTitle.isEmpty { preset["title"] = .string(cleanTitle) }
+        if type == .transfer {
+            // Расход — деньги ушли с этого счёта, доход — пришли на него.
+            preset[previous == .income ? "to" : "from"] = .string(accountId)
+        } else {
+            if !category.isEmpty { preset["category"] = .string(category) }
+            preset["accountId"] = .string(accountId)
+            if let card { preset["card"] = .string(card) }
+        }
+        dismiss()
+        AppShell.shared.open(["kind": .string("tx"), "preset": .object(preset)])
     }
 
     private func formatForInput(_ kopecks: Int) -> String {
@@ -305,11 +335,17 @@ struct AddTransactionView: View {
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
+    /// Размер чипа: свой, но не шире строки — длинное название обрезается многоточием, а не вылезает за край.
+    private func fitted(_ view: LayoutSubview, _ width: CGFloat) -> CGSize {
+        let ideal = view.sizeThatFits(.unspecified)
+        return ideal.width <= width ? ideal : view.sizeThatFits(ProposedViewSize(width: width, height: nil))
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = fitted(view, width)
             if x > 0, x + size.width > width {
                 x = 0
                 y += rowHeight + spacing
@@ -325,7 +361,7 @@ struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = fitted(view, bounds.width)
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing

@@ -69,7 +69,7 @@ export function CategoryPicker({
             type="button"
             aria-pressed={c === value}
             onClick={() => onChange(c)}
-            className={`h-10 rounded-full border px-3.5 text-sm transition ${
+            className={`h-10 max-w-full truncate rounded-full border px-3.5 text-sm transition ${
               c === value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
             }`}
           >
@@ -99,7 +99,7 @@ export function CategoryPicker({
                 cancel();
               }
             }}
-            className="h-10 w-44 rounded-full border border-accent bg-surface px-3.5 text-base outline-none"
+            className="h-10 w-44 max-w-full rounded-full border border-accent bg-surface px-3.5 text-base outline-none"
           />
         ) : (
           <button

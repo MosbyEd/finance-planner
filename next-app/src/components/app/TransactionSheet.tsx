@@ -6,9 +6,11 @@ import { loanOpening } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
 import { autoSavingAmount, autoSavingByDefault } from "@/domain/savings";
+import { suggestCategory } from "@/domain/sms";
 import type { State, Transaction } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
-import { accountCards, cardLabel, findAccount, sourceAccountId } from "@/domain/accounts";
+import { accountCards, activeAccounts, cardLabel, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, sourceAccountId } from "@/domain/accounts";
+import { isEditableTransaction } from "@/domain/actions";
 import { AccountPicker } from "../ui/AccountPicker";
 import { AmountInput } from "../ui/AmountInput";
 import { Button } from "../ui/Button";
@@ -17,12 +19,10 @@ import { Segmented, Switch } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { DateInput, TextInput } from "../ui/Field";
 import { Sheet } from "../ui/Sheet";
-import { hasOwnAccounts, lastAccountId, lastCardOf, payableAccounts } from "./accounts";
+import { bankResolveActions, hasOwnAccounts, lastAccountId, lastCardOf, payableAccounts } from "./accounts";
 import { useDeleteTransaction, useDispatch } from "./hooks";
 import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
-
-type Kind = "income" | "expense";
 
 /** Категории расходов одним списком: сначала повседневные, затем обязательные (без повторов). */
 function expenseCategories(state: State): string[] {
@@ -34,7 +34,7 @@ function isMandatoryCategory(state: State, category: string): boolean {
   return state.categories.mandatory.includes(category) && !state.categories.flexible.includes(category);
 }
 
-function lastCategory(state: State, kind: Kind, mandatory: boolean): string | null {
+function lastCategory(state: State, kind: "income" | "expense", mandatory: boolean): string | null {
   for (let i = state.transactions.length - 1; i >= 0; i--) {
     const tx = state.transactions[i];
     if (tx.type === kind && !tx.templateId && !tx.loanId && (kind === "income" || Boolean(tx.mandatory) === mandatory)) {
@@ -44,15 +44,43 @@ function lastCategory(state: State, kind: Kind, mandatory: boolean): string | nu
   return null;
 }
 
-export function TransactionSheet({
-  txId,
-  preset,
-}: {
-  txId?: string;
-  preset?: { type?: Kind; mandatory?: boolean; date?: IsoDate };
-}) {
+type Kind = "income" | "expense" | "transfer";
+
+/** Что подставить в новую операцию: из нативного окна («Повтор и другие параметры»), из счёта, из «Скоро». */
+export interface TxPreset {
+  type?: Kind;
+  mandatory?: boolean;
+  date?: IsoDate;
+  amount?: Kopecks;
+  category?: string;
+  title?: string;
+  accountId?: string;
+  card?: string;
+  /** Перевод: откуда и куда. */
+  from?: string;
+  to?: string;
+  /** Перевод объясняет расхождение остатка с банком на этом счёте — после него расхождение снимается. */
+  resolveBank?: string;
+}
+
+/** Откуда и куда шли деньги у перевода или сбережений (у снятия из сбережений — с накопительного на счёт). */
+function movementOf(tx: Transaction): { from: string; to: string } {
+  if (tx.type === "saving") {
+    const savings = tx.toAccountId ?? SAVINGS_ACCOUNT_ID;
+    const other = tx.accountId ?? MAIN_ACCOUNT_ID;
+    return tx.amount >= 0 ? { from: other, to: savings } : { from: savings, to: other };
+  }
+  return { from: tx.accountId ?? MAIN_ACCOUNT_ID, to: tx.toAccountId ?? MAIN_ACCOUNT_ID };
+}
+
+/**
+ * Окно операции: новая или правка — расход, доход или перевод между своими счетами. Тип переключается без
+ * потери введённого (сумма, дата, описание, счёт); у сохранённой операции тип тоже можно поменять — например,
+ * если СМС записала перевод на свой накопительный как покупку.
+ */
+export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxPreset }) {
   const { state } = useSnapshot();
-  const { close, open } = useUi();
+  const { close } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
   const deleteTx = useDeleteTransaction();
@@ -60,29 +88,49 @@ export function TransactionSheet({
   const existing = txId ? state.transactions.find((t) => t.id === txId) : undefined;
   const editing = Boolean(existing);
   const template = existing?.templateId ? state.templates.find((t) => t.id === existing.templateId) : undefined;
+  const accounts = activeAccounts(state);
+  const showAccounts = hasOwnAccounts(state);
 
-  const [kind, setKind] = useState<Kind>(
-    existing?.type === "income" || existing?.type === "expense" ? existing.type : (preset?.type ?? "expense"),
-  );
+  const existingKind: Kind | null = existing
+    ? existing.type === "income" || existing.type === "expense"
+      ? existing.type
+      : "transfer"
+    : null;
+  const [kind, setKind] = useState<Kind>(existingKind ?? preset?.type ?? "expense");
+  const categoryKind: "income" | "expense" = kind === "income" ? "income" : "expense";
   const presetMandatory = preset?.mandatory ?? false;
-  const initialGroup = kind === "income" ? "income" : presetMandatory ? "mandatory" : "flexible";
-  const [category, setCategory] = useState(
-    () => existing?.category ?? lastCategory(state, kind, presetMandatory) ?? state.categories[initialGroup][0] ?? "",
-  );
+  const [category, setCategory] = useState(() => {
+    if (existing && existingKind !== "transfer") return existing.category;
+    if (preset?.category) return preset.category;
+    const first = kind === "income" ? "income" : presetMandatory ? "mandatory" : "flexible";
+    return lastCategory(state, categoryKind, presetMandatory) ?? state.categories[first][0] ?? "";
+  });
   // Обязательность следует из категории (аренда, связь — обязательные), пока человек не переключил её сам.
   const [mandatory, setMandatory] = useState(() =>
-    existing ? Boolean(existing.mandatory) : presetMandatory || isMandatoryCategory(state, category),
+    existing && existingKind === "expense" ? Boolean(existing.mandatory) : presetMandatory || isMandatoryCategory(state, category),
   );
   const [mandatoryTouched, setMandatoryTouched] = useState(false);
-  const [amount, setAmount] = useState<Kopecks | null>(existing?.amount ?? null);
-  const [title, setTitle] = useState(existing?.title ?? "");
-  // Счёт: показываем выбор, только когда счетов несколько (у всех остальных — основной).
-  const showAccounts = hasOwnAccounts(state);
-  const [accountId, setAccountId] = useState(() => (existing ? sourceAccountId(existing) : lastAccountId(state, kind)));
+  const [amount, setAmount] = useState<Kopecks | null>(
+    existing ? Math.abs(existing.amount) : (preset?.amount ?? null),
+  );
+  const [title, setTitle] = useState(existing?.title ?? preset?.title ?? "");
+  // Счёт расхода или дохода. У перевода — откуда и куда.
+  const movement = existing && existingKind === "transfer" ? movementOf(existing) : null;
+  const [accountId, setAccountId] = useState(() =>
+    existing && existingKind !== "transfer"
+      ? sourceAccountId(existing)
+      : (preset?.accountId ?? movement?.from ?? lastAccountId(state, categoryKind)),
+  );
+  const firstOther = (except: string) =>
+    accounts.find((a) => a.id !== except && a.kind === "savings")?.id ?? accounts.find((a) => a.id !== except)?.id ?? "";
+  const [from, setFrom] = useState(() => movement?.from ?? preset?.from ?? (preset?.to === MAIN_ACCOUNT_ID ? firstOther(MAIN_ACCOUNT_ID) : accountId));
+  const [to, setTo] = useState(() => movement?.to ?? preset?.to ?? firstOther(movement?.from ?? preset?.from ?? accountId));
   // Карта счёта, которой платили: у счёта с картами — выбор чипами (по умолчанию — карта последней операции).
   const selectedAccount = findAccount(state, accountId);
-  const cards = selectedAccount ? accountCards(selectedAccount) : [];
-  const [card, setCard] = useState<string | null>(() => (existing ? (existing.card ?? null) : lastCardOf(state, accountId)));
+  const cards = selectedAccount && kind !== "transfer" ? accountCards(selectedAccount) : [];
+  const [card, setCard] = useState<string | null>(() =>
+    existing ? (existing.card ?? null) : (preset?.card ?? lastCardOf(state, accountId)),
+  );
   const chooseAccount = (id: string) => {
     setAccountId(id);
     setCard(lastCardOf(state, id));
@@ -94,23 +142,27 @@ export function TransactionSheet({
   const [repeat, setRepeat] = useState(false);
   /** Какой вид расхода был до включения повтора — вернём его, если повтор выключат. */
   const [mandatoryBeforeRepeat, setMandatoryBeforeRepeat] = useState(mandatory);
-  const [errors, setErrors] = useState<{ amount?: string; category?: string; date?: string }>({});
+  const [errors, setErrors] = useState<{ amount?: string; category?: string; date?: string; accounts?: string }>({});
   // Исходные значения формы — чтобы понять, есть ли несохранённые изменения.
-  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date, accountId, card }));
+  const [initial] = useState(() => ({ kind, mandatory, category, amount, title, date, accountId, card, from, to }));
   const dirty =
-    accountId !== initial.accountId ||
-    card !== initial.card ||
     kind !== initial.kind ||
-    mandatory !== initial.mandatory ||
-    category !== initial.category ||
     amount !== initial.amount ||
     title !== initial.title ||
     date !== initial.date ||
-    autoSavingTouched ||
-    repeat;
+    (kind === "transfer"
+      ? from !== initial.from || to !== initial.to
+      : accountId !== initial.accountId ||
+        card !== initial.card ||
+        mandatory !== initial.mandatory ||
+        category !== initial.category ||
+        autoSavingTouched ||
+        repeat);
   // Регулярный расход всегда обязательный (так он попадает в план месяца) — показываем это в форме сразу.
   const mandatoryLocked = repeat && kind === "expense";
   const categories = kind === "income" ? state.categories.income : expenseCategories(state);
+  const fromAccount = accounts.find((a) => a.id === from) ?? findAccount(state, from);
+  const toAccount = accounts.find((a) => a.id === to) ?? findAccount(state, to);
 
   const pickCategory = (next: string) => {
     setCategory(next);
@@ -120,21 +172,38 @@ export function TransactionSheet({
   const picks = useMemo(() => (editing || kind !== "expense" ? [] : quickPicks(state, today)), [editing, kind, state, today]);
 
   // Пока человек сам не трогал переключатель, он следует настройкам и категории.
-  const autoSaving = autoSavingTouched || editing
-    ? autoSavingChoice
-    : autoSavingByDefault({ type: kind, amount: amount ?? 0, category }, state.settings);
-  const autoSavingPreview = autoSavingAmount(
-    { type: kind, amount: amount ?? 0, category, autoSaving: true },
-    state.settings,
-  );
-  const autoSavingAvailable = autoSavingPreview > 0 || (editing && Boolean(existing?.autoSaving));
+  const autoSaving =
+    autoSavingTouched || (editing && existingKind !== "transfer")
+      ? autoSavingChoice
+      : kind === "transfer"
+        ? false
+        : autoSavingByDefault({ type: kind, amount: amount ?? 0, category }, state.settings);
+  const autoSavingPreview =
+    kind === "transfer" ? 0 : autoSavingAmount({ type: kind, amount: amount ?? 0, category, autoSaving: true }, state.settings);
+  const autoSavingAvailable = kind !== "transfer" && (autoSavingPreview > 0 || (editing && Boolean(existing?.autoSaving)));
 
+  /** Смена типа: сумма, дата, описание и счёт остаются. */
   const switchKind = (next: Kind) => {
+    if (next === kind) return;
+    if (next === "transfer") {
+      // Расход — деньги ушли со счёта, доход — пришли на него.
+      if (kind === "income") {
+        setTo(accountId);
+        setFrom(firstOther(accountId));
+      } else {
+        setFrom(accountId);
+        setTo(firstOther(accountId));
+      }
+    } else if (kind === "transfer") {
+      const own = next === "income" ? to : from;
+      if (payableAccounts(state).some((a) => a.id === own)) chooseAccount(own);
+    }
     setKind(next);
+    if (next === "transfer") return;
     const list = next === "income" ? state.categories.income : expenseCategories(state);
-    const nextCategory = list.includes(category)
-      ? category
-      : (lastCategory(state, next, false) ?? list[0] ?? "");
+    let nextCategory = list.includes(category) ? category : (lastCategory(state, next, false) ?? list[0] ?? "");
+    // Перевод стал покупкой или доходом — категорию подбираем по названию, как для операций из СМС.
+    if (kind === "transfer" && title.trim()) nextCategory = suggestCategory(state, next, title, { fallback: nextCategory }).category;
     setCategory(nextCategory);
     // Расход с повтором — сразу обязательный; иначе — по категории.
     if (next === "expense") setMandatory(repeat || (mandatoryTouched ? mandatory : isMandatoryCategory(state, nextCategory)));
@@ -159,14 +228,39 @@ export function TransactionSheet({
   const repeatSkipsPast =
     repeatDay !== null && occurrenceDate({ dayOfMonth: repeatDay }, addMonths(monthKeyOf(date), 1)) < today;
 
+  const saveTransfer = (value: Kopecks): boolean => {
+    if (!fromAccount || !toAccount || from === to) {
+      setErrors((e) => ({ ...e, accounts: "Выберите два разных счёта" }));
+      return false;
+    }
+    const note = existing?.note ?? "";
+    const cleanTitle = title.trim();
+    if (existing) {
+      return dispatch({ type: "tx.move", id: existing.id, date, from, to, amount: value, ...(cleanTitle ? { title: cleanTitle } : {}) });
+    }
+    const ok =
+      toAccount.kind === "savings" && fromAccount.kind !== "savings"
+        ? dispatch({ type: "savings.move", id: newId(), date, amount: value, note, accountId: from, toAccountId: to })
+        : fromAccount.kind === "savings" && toAccount.kind !== "savings"
+          ? dispatch({ type: "savings.move", id: newId(), date, amount: -value, note, accountId: to, toAccountId: from })
+          : dispatch({ type: "transfer.add", id: newId(), date, from, to, amount: value, note, ...(cleanTitle ? { title: cleanTitle } : {}) });
+    if (ok && preset?.resolveBank) dispatch(bankResolveActions(state, preset.resolveBank, false, today, newId()));
+    if (ok) toast(`${toAccount.kind === "credit" ? "Погашено" : "Переведено"} ${formatMoney(value)}: ${fromAccount.name} → ${toAccount.name}`);
+    return ok;
+  };
+
   const save = () => {
     const nextErrors: typeof errors = {};
     if (!amount || amount <= 0) nextErrors.amount = "Введите сумму";
-    if (!category.trim()) nextErrors.category = "Выберите категорию";
+    if (kind !== "transfer" && !category.trim()) nextErrors.category = "Выберите категорию";
     if (!isValidIsoDate(date)) nextErrors.date = "Укажите дату";
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length || !amount) return;
 
+    if (kind === "transfer") {
+      if (saveTransfer(amount)) close();
+      return;
+    }
     const ok = existing
       ? dispatch({
           type: "tx.update",
@@ -179,7 +273,8 @@ export function TransactionSheet({
             title: title.trim(),
             mandatory: kind === "expense" ? mandatory : false,
             autoSaving: autoSavingAvailable && autoSaving,
-            ...(showAccounts && accountId !== sourceAccountId(existing) ? { accountId } : {}),
+            // Перевод стал расходом или доходом — счёт указываем всегда.
+            ...(showAccounts && (existingKind === "transfer" || accountId !== sourceAccountId(existing)) ? { accountId } : {}),
             ...(cardValue !== (existing.card ?? null) ? { card: cardValue } : {}),
           },
         })
@@ -205,16 +300,32 @@ export function TransactionSheet({
     if (!existing) toast(kind === "income" ? "Доход добавлен" : "Расход добавлен");
   };
 
-  const readOnly = existing && existing.type !== "income" && existing.type !== "expense";
+  if (existing && !isEditableTransaction(existing)) return <ReadOnlyTransaction tx={existing} />;
 
-  if (readOnly && existing) return <ReadOnlyTransaction tx={existing} />;
+  const repays = kind === "transfer" && toAccount?.kind === "credit";
+  const kinds: { value: Kind; label: string }[] = [
+    { value: "expense", label: "Расход" },
+    { value: "income", label: "Доход" },
+    // Перевод между своими счетами: погашение кредитки, пополнение накопительного, снятие наличных.
+    ...(showAccounts || existingKind === "transfer" ? [{ value: "transfer" as const, label: "Перевод" }] : []),
+  ];
 
   return (
     <Sheet
       open
       onClose={close}
       dirty={dirty}
-      title={editing ? "Операция" : kind === "income" ? "Новый доход" : "Новый расход"}
+      title={
+        editing
+          ? "Операция"
+          : kind === "income"
+            ? "Новый доход"
+            : kind === "expense"
+              ? "Новый расход"
+              : repays
+                ? "Погасить кредитку"
+                : "Перевод между счетами"
+      }
       footer={
         <div className="flex gap-2">
           {existing && (
@@ -230,7 +341,7 @@ export function TransactionSheet({
             </Button>
           )}
           <Button className="flex-1" onClick={save}>
-            {editing ? "Сохранить" : "Добавить"}
+            {editing ? "Сохранить" : kind === "transfer" ? (repays ? "Погасить" : "Перевести") : "Добавить"}
           </Button>
         </div>
       }
@@ -242,27 +353,67 @@ export function TransactionSheet({
           save();
         }}
       >
-        <Segmented<Kind | "transfer">
-          label="Тип операции"
-          value={kind}
-          onChange={(next) => (next === "transfer" ? open({ kind: "transfer" }) : switchKind(next))}
-          options={[
-            { value: "expense", label: "Расход" },
-            { value: "income", label: "Доход" },
-            // Перевод между своими счетами — отдельное окно (погашение кредитки, пополнение накопительного).
-            ...(showAccounts && !editing ? [{ value: "transfer" as const, label: "Перевод" }] : []),
-          ]}
+        {kinds.length > 1 && <Segmented<Kind> label="Тип операции" value={kind} onChange={switchKind} options={kinds} />}
+        {editing && existingKind !== kind && (
+          <p className="-mt-3 text-sm text-muted">
+            {kind === "transfer"
+              ? "Операция станет переводом между вашими счетами — не расходом и не доходом."
+              : `Перевод станет ${kind === "income" ? "доходом" : "расходом"} с категорией.`}
+          </p>
+        )}
+
+        <AmountInput
+          label="Сумма"
+          value={amount}
+          onChange={(v) => {
+            setAmount(v);
+            setErrors((e) => ({ ...e, amount: undefined }));
+          }}
+          error={errors.amount}
+          autoFocus={!editing && preset?.amount === undefined}
         />
 
-        <AmountInput label="Сумма" value={amount} onChange={setAmount} error={errors.amount} autoFocus={!editing} />
-
-        {showAccounts && (
-          <AccountPicker
-            label={kind === "income" ? "На какой счёт" : "С какого счёта"}
-            accounts={payableAccounts(state)}
-            value={accountId}
-            onChange={chooseAccount}
-          />
+        {kind === "transfer" ? (
+          <>
+            <AccountPicker
+              label="Откуда"
+              accounts={accounts}
+              value={from}
+              onChange={(id) => {
+                setFrom(id);
+                if (id === to) setTo(firstOther(id));
+                setErrors((e) => ({ ...e, accounts: undefined }));
+              }}
+            />
+            <AccountPicker
+              label="Куда"
+              accounts={accounts.filter((a) => a.id !== from)}
+              value={to}
+              onChange={(id) => {
+                setTo(id);
+                setErrors((e) => ({ ...e, accounts: undefined }));
+              }}
+              error={errors.accounts}
+            />
+            <p className="-mt-2 text-sm text-muted">
+              {toAccount?.kind === "savings" && fromAccount?.kind !== "savings"
+                ? "Пополнение сбережений — считается отложенным в этом месяце."
+                : fromAccount?.kind === "savings" && toAccount?.kind !== "savings"
+                  ? "Снятие из сбережений на счёт."
+                  : repays
+                    ? "Погашение кредитки — перевод: покупки по ней уже учтены, когда вы их делали."
+                    : "Перевод между своими счетами — не доход и не расход."}
+            </p>
+          </>
+        ) : (
+          showAccounts && (
+            <AccountPicker
+              label={kind === "income" ? "На какой счёт" : "С какого счёта"}
+              accounts={payableAccounts(state)}
+              value={accountId}
+              onChange={chooseAccount}
+            />
+          )
         )}
 
         {cards.length > 0 && (
@@ -275,7 +426,7 @@ export function TransactionSheet({
                   type="button"
                   aria-pressed={cardValue === digits}
                   onClick={() => setCard(digits)}
-                  className={`h-10 rounded-full border px-3.5 text-sm transition ${
+                  className={`h-10 max-w-full truncate rounded-full border px-3.5 text-sm transition ${
                     cardValue === digits ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
                   }`}
                 >
@@ -289,7 +440,7 @@ export function TransactionSheet({
         {picks.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-sm font-medium text-muted">Часто</p>
-            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {picks.map((p) => (
                 <button
                   key={`${p.category}|${p.title}|${p.amount}`}
@@ -301,9 +452,9 @@ export function TransactionSheet({
                     setMandatory(p.mandatory || mandatoryLocked);
                     setMandatoryTouched(true);
                   }}
-                  className="shrink-0 rounded-2xl border border-border bg-surface-2 px-3 py-1.5 text-left text-sm hover:border-accent"
+                  className="max-w-48 shrink-0 rounded-2xl border border-border bg-surface-2 px-3 py-1.5 text-left text-sm hover:border-accent"
                 >
-                  <span className="block font-medium">{p.title || p.category}</span>
+                  <span className="block truncate font-medium">{p.title || p.category}</span>
                   <span className="text-muted">{formatMoney(p.amount)}</span>
                 </button>
               ))}
@@ -311,14 +462,16 @@ export function TransactionSheet({
           </div>
         )}
 
-        <CategoryPicker
-          label="Категория"
-          showValue
-          categories={categories}
-          value={category}
-          onChange={pickCategory}
-          error={errors.category}
-        />
+        {kind !== "transfer" && (
+          <CategoryPicker
+            label="Категория"
+            showValue
+            categories={categories}
+            value={category}
+            onChange={pickCategory}
+            error={errors.category}
+          />
+        )}
 
         <TextInput
           label="Описание"
@@ -330,7 +483,7 @@ export function TransactionSheet({
 
         <div className="space-y-2">
           <DateInput label="Дата" value={date} onChange={(e) => setDate(e.target.value)} error={errors.date} />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {[
               { label: "Сегодня", value: today },
               { label: "Вчера", value: addDays(today, -1) },
@@ -345,7 +498,7 @@ export function TransactionSheet({
                 {d.label}
               </button>
             ))}
-            {date > today && <span className="self-center text-sm text-muted">Запланировано на {formatDay(date)}</span>}
+            {date > today && <span className="text-sm text-muted">Запланировано на {formatDay(date)}</span>}
           </div>
         </div>
 
@@ -383,7 +536,7 @@ export function TransactionSheet({
           />
         )}
 
-        {!editing && (
+        {!editing && kind !== "transfer" && (
           <Switch
             checked={repeat}
             onChange={switchRepeat}

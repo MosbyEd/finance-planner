@@ -1,6 +1,6 @@
 "use client";
 
-import { AccountSheet, TransferSheet } from "./sheets/AccountSheets";
+import { AccountSheet } from "./sheets/AccountSheets";
 import { AiChatSheet } from "./sheets/AiChatSheet";
 import { WhatsNewSheet } from "./sheets/WhatsNewSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
@@ -37,7 +37,12 @@ export function OverlayHost() {
     case "account":
       return <AccountSheet key={overlay.accountId ?? "new"} accountId={overlay.accountId} preset={overlay.preset} />;
     case "transfer":
-      return <TransferSheet from={overlay.from} to={overlay.to} amount={overlay.amount} resolveBank={overlay.resolveBank} />;
+      // Перевод — то же окно операции, сразу на «Перевод».
+      return (
+        <TransactionSheet
+          preset={{ type: "transfer", from: overlay.from, to: overlay.to, amount: overlay.amount, resolveBank: overlay.resolveBank }}
+        />
+      );
     case "explain":
       return <ExplainSheet />;
     case "planned":

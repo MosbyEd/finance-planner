@@ -28,12 +28,13 @@ export function AccountPicker({
             type="button"
             aria-pressed={a.id === value}
             onClick={() => onChange(a.id)}
-            className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
+            className={`inline-flex h-10 max-w-full items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
               a.id === value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
             }`}
           >
-            <Icon name={ACCOUNT_KINDS[a.kind].icon} size={16} />
-            {a.name}
+            <Icon name={ACCOUNT_KINDS[a.kind].icon} size={16} className="shrink-0" />
+            {/* Длинное название обрезается многоточием, а не вылезает за край окна. */}
+            <span className="min-w-0 truncate">{a.name}</span>
           </button>
         ))}
       </div>

@@ -4,25 +4,22 @@ import { useState } from "react";
 import {
   accountBalance,
   accountCards,
-  activeAccounts,
   creditStatus,
   findAccount,
   MAIN_ACCOUNT_ID,
   SAVINGS_ACCOUNT_ID,
 } from "@/domain/accounts";
-import { isValidIsoDate, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { AccountKind } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
-import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";
 import { Button } from "../../ui/Button";
 import { Segmented, Switch } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
-import { DateInput, TextInput, controlClass, controlLookClass } from "../../ui/Field";
+import { TextInput, controlClass, controlLookClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
-import { ACCOUNT_KINDS, bankResolveActions } from "../accounts";
+import { ACCOUNT_KINDS } from "../accounts";
 import { InterestNotes } from "../InterestNotes";
 import { CreditTermsFields, parseTerms, termsDraft, type TermsDraft } from "./CreditTermsFields";
 import { useDispatch } from "../hooks";
@@ -330,119 +327,6 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             операции будет видно, какой картой платили.
           </p>
         </fieldset>
-        <button type="submit" hidden />
-      </form>
-    </Sheet>
-  );
-}
-
-/**
- * Перевод между своими счетами. На накопительный — пополнение сбережений (считается отложенным за месяц),
- * с накопительного — снятие; между остальными (погашение кредитки, снятие наличных) — перевод.
- */
-export function TransferSheet({
-  from: presetFrom,
-  to: presetTo,
-  amount: presetAmount,
-  resolveBank,
-}: {
-  from?: string;
-  to?: string;
-  amount?: number;
-  /** Перевод объясняет расхождение остатка с банком на этом счёте — после него расхождение снимается. */
-  resolveBank?: string;
-}) {
-  const { state } = useSnapshot();
-  const { close } = useUi();
-  const today = useToday();
-  const dispatch = useDispatch();
-  const toast = useToast();
-  const accounts = activeAccounts(state);
-  const firstOther = (except: string) => accounts.find((a) => a.id !== except)?.id ?? "";
-  const initialFrom = presetFrom ?? (presetTo && presetTo === MAIN_ACCOUNT_ID ? firstOther(MAIN_ACCOUNT_ID) : MAIN_ACCOUNT_ID);
-  const [from, setFrom] = useState(initialFrom);
-  const [to, setTo] = useState(presetTo ?? firstOther(initialFrom));
-  const [amount, setAmount] = useState<Kopecks | null>(presetAmount ?? null);
-  const [date, setDate] = useState<IsoDate>(today);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const fromAccount = accounts.find((a) => a.id === from);
-  const toAccount = accounts.find((a) => a.id === to);
-
-  const save = () => {
-    if (!amount || amount <= 0) {
-      setError("Введите сумму");
-      return;
-    }
-    if (!fromAccount || !toAccount || from === to) {
-      setError("Выберите два разных счёта");
-      return;
-    }
-    if (!isValidIsoDate(date)) {
-      setError("Укажите дату");
-      return;
-    }
-    let ok: boolean;
-    if (toAccount.kind === "savings" && fromAccount.kind !== "savings") {
-      ok = dispatch({ type: "savings.move", id: newId(), date, amount, note, accountId: from, toAccountId: to });
-    } else if (fromAccount.kind === "savings" && toAccount.kind !== "savings") {
-      ok = dispatch({ type: "savings.move", id: newId(), date, amount: -amount, note, accountId: to, toAccountId: from });
-    } else {
-      ok = dispatch({ type: "transfer.add", id: newId(), date, from, to, amount, note });
-    }
-    if (!ok) return;
-    if (resolveBank) dispatch(bankResolveActions(state, resolveBank, false, today, newId()));
-    toast(`${toAccount.kind === "credit" ? "Погашено" : "Переведено"} ${formatMoney(amount)}: ${fromAccount.name} → ${toAccount.name}`);
-    close();
-  };
-
-  return (
-    <Sheet
-      open
-      onClose={close}
-      dirty={amount !== null && amount !== presetAmount}
-      title={toAccount?.kind === "credit" ? "Погасить кредитку" : "Перевод между счетами"}
-      footer={
-        <Button className="w-full" onClick={save}>
-          {toAccount?.kind === "credit" ? "Погасить" : "Перевести"}
-        </Button>
-      }
-    >
-      <form
-        className="space-y-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          save();
-        }}
-      >
-        <AmountInput
-          label="Сумма"
-          value={amount}
-          onChange={(v) => {
-            setAmount(v);
-            setError(null);
-          }}
-          autoFocus={presetAmount === undefined}
-          error={error}
-        />
-        <AccountPicker
-          label="Откуда"
-          accounts={accounts}
-          value={from}
-          onChange={(id) => {
-            setFrom(id);
-            if (id === to) setTo(firstOther(id));
-          }}
-        />
-        <AccountPicker label="Куда" accounts={accounts.filter((a) => a.id !== from)} value={to} onChange={setTo} />
-        <p className="text-sm text-muted">
-          {toAccount?.kind === "savings" && fromAccount?.kind !== "savings"
-            ? "Пополнение сбережений — считается отложенным в этом месяце."
-            : "Перевод между своими счетами — не доход и не расход."}
-        </p>
-        <DateInput label="Дата" value={date} onChange={(e) => setDate(e.target.value as IsoDate)} />
-        <TextInput label="Заметка" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         <button type="submit" hidden />
       </form>
     </Sheet>

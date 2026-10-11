@@ -17,6 +17,7 @@ import {
   savingsTarget,
   findAccount,
   sourceAccountId,
+  targetAccountId,
 } from "./accounts";
 import { formatMoney, type Kopecks } from "./money";
 import {
@@ -127,6 +128,20 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tx.add"), tx: txInputSchema }),
   z.object({ type: z.literal("tx.update"), id: idSchema, patch: txPatchSchema }),
   z.object({ type: z.literal("tx.delete"), id: idSchema }),
+  /**
+   * Операция — движение между своими счетами (исправление операции из СМС или правка перевода): на её место
+   * с тем же id — перевод, пополнение или снятие сбережений, как в окне перевода.
+   */
+  z.object({
+    type: z.literal("tx.move"),
+    id: idSchema,
+    date: isoDateSchema,
+    from: idSchema,
+    to: idSchema,
+    amount: positiveKopecksSchema,
+    title: titleSchema.optional(),
+    note: noteSchema.optional(),
+  }),
   z.object({
     type: z.literal("tx.restore"),
     transactions: z.array(transactionSchema).min(1).max(10),
@@ -301,6 +316,15 @@ export function actionToday(action: Action): IsoDate | null {
 }
 
 // ---------- helpers ----------
+
+/**
+ * Операцию можно править в окне операции: доход, расход, перевод или сбережения — кроме служебных
+ * (автоотчисление с покупки, перенос остатка месяца, движения по долгу, корректировки).
+ */
+export function isEditableTransaction(tx: Transaction): boolean {
+  if (tx.linkedTo || tx.rolloverOf || tx.loanId || tx.loanOpening) return false;
+  return tx.type === "income" || tx.type === "expense" || tx.type === "transfer" || tx.type === "saving";
+}
 
 function findTx(state: State, id: string): Transaction {
   const tx = state.transactions.find((t) => t.id === id);
@@ -680,14 +704,33 @@ export function applyAction(state: State, action: Action): State {
     }
 
     case "tx.update": {
-      const current = findTx(state, action.id);
+      let current = findTx(state, action.id);
       if (current.type !== "income" && current.type !== "expense") {
-        throw new DomainError("Сбережения, переводы и корректировки нельзя редактировать — удалите и создайте заново.");
+        // Перевод или сбережения стали расходом или доходом (операция из СМС определилась неверно).
+        if (!isEditableTransaction(current) || !action.patch.type || action.patch.category === undefined) {
+          throw new DomainError("Эту операцию нельзя изменить — удалите её и создайте заново.");
+        }
+        const plain: Transaction = {
+          id: current.id,
+          type: action.patch.type,
+          amount: Math.abs(current.amount),
+          date: current.date,
+          category: action.patch.category,
+          title: current.title,
+          note: current.note,
+          ...(current.accountId ? { accountId: current.accountId } : {}),
+          ...(current.templateId && current.occurrenceMonth
+            ? { templateId: current.templateId, occurrenceMonth: current.occurrenceMonth }
+            : {}),
+        };
+        state = { ...state, transactions: state.transactions.map((t) => (t === current ? plain : t)) };
+        current = plain;
       }
       if (action.patch.accountId !== undefined && action.patch.accountId !== current.accountId) {
         assertAccount(state, action.patch.accountId);
       }
-      const type = action.patch.type ?? current.type;
+      // Здесь операция — уже доход или расход (перевод и сбережения выше превращены в них).
+      const type = (action.patch.type ?? current.type) as "income" | "expense";
       const patch =
         action.patch.category === undefined
           ? action.patch
@@ -713,6 +756,45 @@ export function applyAction(state: State, action: Action): State {
         sourceAccountId(updated) !== sourceAccountId(current) ||
         Boolean(updated.autoSaving) !== Boolean(current.autoSaving);
       return savingInputsChanged ? syncLinkedSaving(next, updated) : moveLinkedSaving(next, updated);
+    }
+
+    case "tx.move": {
+      const current = findTx(state, action.id);
+      if (!isEditableTransaction(current)) throw new DomainError("Эту операцию нельзя сделать переводом.");
+      const from = assertAccount(state, action.from);
+      const to = assertAccount(state, action.to);
+      if (from.id === to.id) throw new DomainError("Выберите два разных счёта.");
+      // Прежняя операция и её автоотчисление уходят; перевод встаёт на её место с тем же id (проверки — как
+      // у нового перевода, без учёта прежней операции).
+      const linked = findLinkedSaving(state, current);
+      const without: State = { ...state, transactions: state.transactions.filter((t) => t !== current && t !== linked) };
+      const note = action.note ?? current.note;
+      const savingsSide = to.kind === "savings" && from.kind !== "savings" ? to.id : from.kind === "savings" && to.kind !== "savings" ? from.id : null;
+      // Пополнение цели остаётся пополнением цели, если деньги идут на тот же накопительный счёт.
+      const goalId =
+        current.type === "saving" && current.goalId && savingsSide === targetAccountId(current) ? current.goalId : undefined;
+      const move: Action =
+        savingsSide === to.id
+          ? { type: "savings.move", id: current.id, date: action.date, amount: action.amount, note, accountId: from.id, toAccountId: to.id, ...(goalId ? { goalId } : {}) }
+          : savingsSide === from.id
+            ? { type: "savings.move", id: current.id, date: action.date, amount: -action.amount, note, accountId: to.id, toAccountId: from.id, ...(goalId ? { goalId } : {}) }
+            : { type: "transfer.add", id: current.id, date: action.date, from: from.id, to: to.id, amount: action.amount, note, ...(action.title ? { title: action.title } : {}) };
+      const next = applyAction(without, move);
+      const title = action.title?.trim();
+      return {
+        ...next,
+        transactions: next.transactions.map((t) =>
+          t.id !== current.id
+            ? t
+            : {
+                ...t,
+                ...(title ? { title: clipTitle(title) } : {}),
+                ...(current.templateId && current.occurrenceMonth
+                  ? { templateId: current.templateId, occurrenceMonth: current.occurrenceMonth }
+                  : {}),
+              },
+        ),
+      };
     }
 
     case "occurrence.detach": {

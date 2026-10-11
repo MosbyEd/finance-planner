@@ -1,12 +1,13 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import type { IsoDate, MonthKey } from "@/domain/dates";
+import type { MonthKey } from "@/domain/dates";
+import type { TxPreset } from "./TransactionSheet";
 import { useConfirm } from "../ui/feedback";
 
 /** Какое окно сейчас открыто поверх экрана. Одновременно открыто не больше одного. */
 export type Overlay =
-  | { kind: "tx"; txId?: string; preset?: { type?: "income" | "expense"; mandatory?: boolean; date?: IsoDate } }
+  | { kind: "tx"; txId?: string; preset?: TxPreset }
   | { kind: "template"; templateId?: string; preset?: { kind?: "income" | "expense" } }
   | { kind: "goal"; goalId?: string }
   | { kind: "goalMoney"; goalId: string; direction: "in" | "out" }
