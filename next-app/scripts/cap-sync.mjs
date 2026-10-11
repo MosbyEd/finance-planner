@@ -44,6 +44,8 @@ console.log(`Приложение будет обращаться к серве�
 execSync("npx vite build --config vite.config.mts", { stdio: "inherit" });
 // Разбор СМС на телефоне (JavaScriptCore) — отдельный файл рядом с интерфейсом.
 execSync("npx vite build --config vite.engine.config.mts", { stdio: "inherit" });
+// Картинки «Что нового» из public (сборка приложения public не копирует: там и файлы сервера).
+fs.cpSync(new URL("../public/whats-new", import.meta.url), new URL("../dist-app/whats-new", import.meta.url), { recursive: true });
 fs.writeFileSync(
   new URL("../dist-app/config.js", import.meta.url),
   `window.__BUDGET_CONFIG__ = ${JSON.stringify({ native: true, apiBase })};\n`,
