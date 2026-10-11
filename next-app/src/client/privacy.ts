@@ -1,13 +1,14 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { desktopBiometricAuth } from "./desktop";
 import { nativeBiometricAuth } from "./native";
 import { isNativeApp } from "./runtime";
 import { storage } from "./storage";
 
 /**
  * Суммы на счетах можно спрятать «глазком» (вместо них — «•••• ₽»). Спрятать — сразу, показать — по Face ID
- * (или коду телефона). Скрытие запоминается на устройстве; показ действует, пока приложение открыто:
+ * (или коду телефона), на Mac — по Touch ID (или паролю). Скрытие запоминается на устройстве; показ действует, пока приложение открыто:
  * свернули — суммы снова спрятаны.
  */
 
@@ -46,10 +47,16 @@ export function hideBalances(): void {
   emit();
 }
 
+/** Face ID в iOS-приложении, Touch ID в приложении для Mac; в браузере проверки нет. */
+async function verifyOwner(reason: string): Promise<boolean> {
+  if (isNativeApp()) return nativeBiometricAuth(reason[0].toUpperCase() + reason.slice(1));
+  return desktopBiometricAuth(reason);
+}
+
 /** Показать до сворачивания приложения. verified — проверка уже пройдена (нативный экран спросил Face ID сам). */
 export async function revealBalances(verified = false): Promise<boolean> {
   if (!hidden) return true;
-  if (!verified && isNativeApp() && !(await nativeBiometricAuth("Показать суммы на счетах"))) return false;
+  if (!verified && !(await verifyOwner("показать суммы на счетах"))) return false;
   revealed = true;
   emit();
   return true;
@@ -58,7 +65,7 @@ export async function revealBalances(verified = false): Promise<boolean> {
 /** Выключить скрытие совсем (из настроек) — тоже по Face ID. */
 export async function stopHidingBalances(): Promise<boolean> {
   if (!hidden) return true;
-  if (isNativeApp() && !(await nativeBiometricAuth("Больше не скрывать суммы на счетах"))) return false;
+  if (!(await verifyOwner("больше не скрывать суммы на счетах"))) return false;
   hidden = false;
   revealed = false;
   storage.set(KEY, "0");

@@ -6,6 +6,7 @@ import { FinanceStore } from "@/client/store";
 import { StoreProvider, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
 import { pickAppleModel } from "@/client/appleAi";
+import { isDesktopApp, onDesktopCommand, postDesktopState } from "@/client/desktop";
 import { onNotificationTap, syncNotifications } from "@/client/notifications";
 import { isNativeApp } from "@/client/runtime";
 import { registerServiceWorker } from "@/client/sw";
@@ -128,6 +129,7 @@ function Shell() {
 
   useRecurringSync();
   useNotificationSync();
+  useDesktopBridge(snapshot.aiEnabled);
   useNativeBridge();
   useReviewPrompt();
   const appleAi = useAppleAiAvailable();
@@ -160,10 +162,11 @@ function Shell() {
   const activeTabIndex = TABS.findIndex((t) => t.id === tab);
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-3xl flex-col">
+    <div className="mx-auto flex min-h-dvh max-w-3xl flex-col desktop-app:max-w-5xl">
       {/* Шапка из стекла: содержимое под ней размывается. На телефоне — во всю ширину под статус-баром,
-          на широком экране — плавающая панель со скруглением. */}
-      <header className="glass sticky top-0 z-30 border-0 pt-safe sm:top-3 sm:mx-4 sm:mt-3 sm:rounded-[28px] sm:border">
+          на широком экране — плавающая панель со скруглением. В приложении для Mac шапки нет: разделы — в боковой
+          панели окна, заголовок и статус — в его заголовке. */}
+      <header className="glass sticky top-0 z-30 border-0 pt-safe sm:top-3 sm:mx-4 sm:mt-3 sm:rounded-[28px] sm:border desktop-app:hidden">
         <div className="flex h-14 items-center gap-2 px-4 sm:h-16 sm:px-5">
           <div className="min-w-0 flex-1">
             {/* Заголовок — название раздела. Кнопка «На главную» лежит поверх него отдельным элементом,
@@ -231,14 +234,17 @@ function Shell() {
             : showAdd
               ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-28"
               : "pb-[calc(6rem+env(safe-area-inset-bottom))] sm:pb-12"
-        }`}
+        } desktop-app:px-6! desktop-app:pt-6! desktop-app:pb-10!`}
       >
-        {tab === "home" && <Dashboard />}
-        {tab === "history" && <History />}
-        {tab === "plans" && <Plans />}
-        {tab === "goals" && <Goals />}
-        {tab === "analytics" && <Analytics />}
-        {tab === "settings" && <Settings />}
+        {/* Главная и аналитика на широком окне — в две колонки; списки — не шире, чем удобно читать. */}
+        <div className={tab === "home" || tab === "analytics" ? "" : "mx-auto max-w-3xl"}>
+          {tab === "home" && <Dashboard />}
+          {tab === "history" && <History />}
+          {tab === "plans" && <Plans />}
+          {tab === "goals" && <Goals />}
+          {tab === "analytics" && <Analytics />}
+          {tab === "settings" && <Settings />}
+        </div>
       </main>
 
       {/* Кнопка «+» — отдельный круг из акцентного стекла над нижней панелью (на широком экране — в углу). */}
@@ -247,7 +253,7 @@ function Shell() {
           type="button"
           aria-label="Добавить операцию"
           onClick={() => open({ kind: "tx" })}
-          className="glass-tint fixed bottom-[calc(var(--dock-offset)+var(--dock-height)+0.75rem)] right-3 z-30 flex h-14 w-14 items-center justify-center rounded-full transition active:scale-95 sm:bottom-8 sm:right-[max(1rem,calc(50%-24rem+1rem))]"
+          className="glass-tint fixed bottom-[calc(var(--dock-offset)+var(--dock-height)+0.75rem)] right-3 z-30 flex h-14 w-14 items-center justify-center rounded-full transition active:scale-95 sm:bottom-8 sm:right-[max(1rem,calc(50%-24rem+1rem))] desktop-app:hidden"
         >
           <Icon name="plus" size={26} />
         </button>
@@ -257,7 +263,7 @@ function Shell() {
       {!nativeBar && (
         <nav
           aria-label="Разделы"
-          className="pointer-events-none fixed inset-x-0 bottom-(--dock-offset) z-30 px-3 sm:hidden"
+          className="pointer-events-none fixed inset-x-0 bottom-(--dock-offset) z-30 px-3 sm:hidden desktop-app:hidden"
         >
           <div className="glass pointer-events-auto relative isolate mx-auto flex h-(--dock-height) max-w-md rounded-full p-1">
             {/* «Линза» под выбранной вкладкой перетекает между пунктами. */}
@@ -292,6 +298,39 @@ function Shell() {
       <OverlayHost />
     </div>
   );
+}
+
+function syncText(snapshot: ReturnType<typeof useSnapshot>): string {
+  const { mode, sync } = snapshot;
+  if (mode === "guest") return "Данные только на этом устройстве";
+  return {
+    synced: "Сохранено",
+    saving: "Сохраняем…",
+    offline: `Офлайн${sync.pending ? ` · не отправлено: ${sync.pending}` : ""}`,
+    error: sync.message ?? "Ошибка синхронизации",
+  }[sync.status];
+}
+
+/**
+ * Приложение для Mac: окну — текущий раздел, заголовок и статус сохранения; от окна — переход в раздел из боковой
+ * панели или меню, новая операция (⌘N) и помощник.
+ */
+function useDesktopBridge(aiEnabled: boolean) {
+  const snapshot = useSnapshot();
+  const { tab, setTab, open } = useUi();
+  const status = syncText(snapshot);
+  const ready = snapshot.phase === "ready";
+  useEffect(() => {
+    if (isDesktopApp()) postDesktopState({ tab, title: SCREEN_TITLES[tab], status, ai: aiEnabled });
+  }, [tab, status, aiEnabled]);
+  useEffect(() => {
+    if (!isDesktopApp() || !ready) return;
+    return onDesktopCommand((command) => {
+      if (command.type === "tab" && command.tab in SCREEN_TITLES) setTab(command.tab as Tab);
+      else if (command.type === "add") open({ kind: "tx" });
+      else if (command.type === "ai" && aiEnabled) open({ kind: "ai" });
+    });
+  }, [ready, aiEnabled, setTab, open]);
 }
 
 function SyncStatus() {

@@ -1,7 +1,10 @@
 "use client";
 
-import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { formatMoney, type Kopecks } from "@/domain/money";
+
+/** Как раскладывать варианты: поровну, по длине подписей или по длине и мельче — чтобы подписи помещались целиком. */
+type SegmentFit = { byContent: boolean; scale: number };
 
 export function Segmented<T extends string>({
   value,
@@ -20,6 +23,47 @@ export function Segmented<T extends string>({
 }) {
   const groupRef = useRef<HTMLDivElement>(null);
   const selectedIndex = options.findIndex((o) => o.value === value);
+  const [fit, setFit] = useState<SegmentFit>({ byContent: false, scale: 1 });
+  const [lens, setLens] = useState<{ left: number; width: number } | null>(null);
+  const baseFont = size === "sm" ? 14 : 15;
+  const optionsKey = options.map((o) => o.value).join("|");
+
+  // Длинные подписи («Повседневные», «Обязательные») поровну не помещаются в узкий экран — тогда ширина делится
+  // по длине подписей, а если не хватает и так, шрифт немного уменьшается. «Линза» встаёт ровно под выбранный вариант.
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const measure = () => {
+      const buttons = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
+      // Спрятанный переключатель (ширина 0) не меряем — пересчитаем, когда появится.
+      if (!buttons.length || !group.clientWidth) return;
+      const available = group.clientWidth - 8;
+      const padding = 16;
+      const current = parseFloat(getComputedStyle(buttons[0]).fontSize) / baseFont || 1;
+      const natural = buttons.map((b) => ((b.firstElementChild as HTMLElement | null)?.scrollWidth ?? 0) / current + 1);
+      const total = natural.reduce((sum, w) => sum + w + padding, 0);
+      const next: SegmentFit =
+        Math.max(...natural) + padding <= available / buttons.length
+          ? { byContent: false, scale: 1 }
+          : total <= available
+            ? { byContent: true, scale: 1 }
+            : { byContent: true, scale: Math.max(0.85, (available - padding * buttons.length) / (total - padding * buttons.length)) };
+      setFit((prev) => (prev.byContent === next.byContent && Math.abs(prev.scale - next.scale) < 0.01 ? prev : next));
+      const selected = selectedIndex >= 0 ? buttons[selectedIndex] : undefined;
+      setLens((prev) =>
+        !selected
+          ? null
+          : prev && prev.left === selected.offsetLeft && prev.width === selected.offsetWidth
+            ? prev
+            : { left: selected.offsetLeft, width: selected.offsetWidth },
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    for (const button of group.querySelectorAll('[role="radio"]')) observer.observe(button);
+    return () => observer.disconnect();
+  }, [selectedIndex, optionsKey, baseFont, fit]);
 
   // Как у радиокнопок: стрелки двигают выбор, Tab попадает только на выбранный вариант.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -45,15 +89,11 @@ export function Segmented<T extends string>({
       onKeyDown={onKeyDown}
       className={`relative isolate flex rounded-full bg-fill p-1 ${disabled ? "opacity-70" : ""}`}
     >
-      {/* «Линза» под выбранным вариантом: варианты одной ширины, поэтому она просто сдвигается на свою долю. */}
-      {selectedIndex >= 0 && (
+      {lens && (
         <span
           aria-hidden
-          className="glass-lens pointer-events-none absolute inset-y-1 left-1 -z-10 rounded-full transition-transform duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none"
-          style={{
-            width: `calc((100% - 0.5rem) / ${options.length})`,
-            transform: `translateX(${selectedIndex * 100}%)`,
-          }}
+          className="glass-lens pointer-events-none absolute inset-y-1 left-0 -z-10 rounded-full transition-[transform,width] duration-300 ease-[cubic-bezier(0.3,1.25,0.5,1)] motion-reduce:transition-none"
+          style={{ width: lens.width, transform: `translateX(${lens.left}px)` }}
         />
       )}
       {options.map((o, i) => {
@@ -70,11 +110,12 @@ export function Segmented<T extends string>({
             onClick={() => {
               if (!disabled) onChange(o.value);
             }}
-            className={`min-w-0 flex-1 rounded-full px-2 font-medium leading-tight transition-colors ${size === "sm" ? "min-h-10 py-1 text-sm" : "min-h-10 py-1.5 text-[15px]"} ${
+            style={fit.scale < 1 ? { fontSize: `${(baseFont * fit.scale).toFixed(2)}px` } : undefined}
+            className={`min-w-0 rounded-full px-2 text-center font-medium leading-tight whitespace-nowrap transition-colors ${fit.byContent ? "flex-auto" : "flex-1 basis-0"} ${size === "sm" ? "min-h-10 py-1 text-sm" : "min-h-10 py-1.5 text-[15px]"} ${
               checked ? "text-text" : "text-muted enabled:hover:text-text"
             }`}
           >
-            {o.label}
+            <span className="inline-block max-w-full truncate align-middle">{o.label}</span>
           </button>
         );
       })}

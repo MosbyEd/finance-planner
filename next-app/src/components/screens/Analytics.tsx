@@ -100,11 +100,14 @@ export function Analytics() {
       {empty ? (
         <EmptyMonth future={metrics.status === "future"} />
       ) : (
-        <>
+        // В широком окне приложения для Mac — итоги слева, расходы и доходы справа.
+        <div className="space-y-4 desktop-app:lg:grid desktop-app:lg:grid-cols-2 desktop-app:lg:items-start desktop-app:lg:gap-4 desktop-app:lg:space-y-0">
           <SummaryCard metrics={metrics} />
-          <ExpensesCard month={month} range={range} today={today} />
-          <IncomeCard range={range} today={today} />
-        </>
+          <div className="space-y-4">
+            <ExpensesCard month={month} range={range} today={today} />
+            <IncomeCard range={range} today={today} />
+          </div>
+        </div>
       )}
       <TrendCard month={month} today={today} hideWhenEmpty={empty} />
     </div>
@@ -192,7 +195,7 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
         />
       </div>
 
-      <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 desktop-app:lg:grid-cols-1">
         <Stat
           label="Доходы"
           value={future ? metrics.income.plan : metrics.income.fact}
@@ -256,10 +259,10 @@ function Stat({
   wide?: boolean;
 }) {
   return (
-    <div className={`flex items-start justify-between gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 ${wide ? "sm:col-span-2" : ""}`}>
-      <dt className="text-sm text-muted">{label}</dt>
+    <div className={`flex items-start justify-between gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 ${wide ? "sm:col-span-2 desktop-app:lg:col-span-1" : ""}`}>
+      <dt className="shrink-0 text-sm text-muted">{label}</dt>
       <dd className="min-w-0 text-right">
-        <Money whole value={value} tone={tone} className="font-semibold" />
+        <Money whole value={value} tone={tone} className="font-semibold whitespace-nowrap" />
         {sub && <span className="block text-xs text-muted">{sub}</span>}
       </dd>
     </div>

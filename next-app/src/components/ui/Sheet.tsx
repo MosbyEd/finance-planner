@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconButton } from "./Button";
 import { useConfirm } from "./feedback";
 
 let openSheets = 0;
+
+const TEXT_FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, [contenteditable=true]";
+
+/** Нажали мимо полей — убрать клавиатуру (на телефоне сама она не уходит). */
+function dismissKeyboard(e: PointerEvent<HTMLDivElement>) {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !active.matches(TEXT_FIELD)) return;
+  if (e.target instanceof Element && e.target.closest(`${TEXT_FIELD}, select, button, label, a, [role=radio]`)) return;
+  active.blur();
+}
 
 /**
  * Модальное окно из «стекла»: на телефоне выезжает снизу, на широком экране — по центру.
@@ -38,7 +48,20 @@ export function Sheet({
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
+  // На телефоне, пока открыта клавиатура, кнопки внизу прячем: вместе с клавиатурой они закрывали пол-экрана.
+  const [typing, setTyping] = useState(false);
+  const onFocusChange = () => {
+    const active = document.activeElement;
+    setTyping(
+      window.matchMedia("(pointer: coarse)").matches &&
+        active instanceof HTMLElement &&
+        active.matches(TEXT_FIELD) &&
+        // Поле в самих кнопках (например, ввод сообщения) не считаем — иначе оно спрячет само себя.
+        Boolean(bodyRef.current?.contains(active)),
+    );
+  };
   const requestClose = async () => {
     if (dirty) {
       const ok = await confirm({
@@ -121,6 +144,8 @@ export function Sheet({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         onKeyDown={onPanelKeyDown}
+        onFocus={onFocusChange}
+        onBlur={() => requestAnimationFrame(onFocusChange)}
         className={`glass-strong relative flex w-full flex-col overflow-hidden rounded-t-[32px] border-b-0 outline-none animate-sheet sm:rounded-[32px] sm:border-b ${width} ${height}`}
       >
         <div className="flex items-center gap-2 border-b border-border px-5 py-3">
@@ -131,7 +156,11 @@ export function Sheet({
           <IconButton icon="close" label="Закрыть" variant="secondary" onClick={() => void requestClose()} size={40} />
         </div>
         {/* Поперёк окно не прокручивается: если что-то шире окна, оно обрезается, а не сдвигает всю страницу вбок. */}
-        <div className="flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-4">
+        <div
+          ref={bodyRef}
+          className="flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-4"
+          onPointerDown={dismissKeyboard}
+        >
           {description && (
             <div id={descriptionId} className="mb-4 text-[15px] text-muted last:mb-0">
               {description}
@@ -139,10 +168,10 @@ export function Sheet({
           )}
           {children}
         </div>
-        {footer && (
+        {footer && !typing && (
           <div className="border-t border-border px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">{footer}</div>
         )}
-        {!footer && <div className="shrink-0 pb-[env(safe-area-inset-bottom)]" />}
+        {(!footer || typing) && <div className="shrink-0 pb-[env(safe-area-inset-bottom)]" />}
       </div>
     </div>,
     document.body,

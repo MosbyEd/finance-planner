@@ -339,6 +339,11 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
   if (existing && !isEditableTransaction(existing)) return <ReadOnlyTransaction tx={existing} />;
 
   const repays = kind === "transfer" && toAccount?.kind === "credit";
+  // Обязательное заполнено — только тогда показываем «Добавить» («Сохранить»).
+  const ready =
+    Boolean(amount && amount > 0) &&
+    isValidIsoDate(date) &&
+    (kind === "transfer" ? Boolean(fromAccount && toAccount && from !== to) : Boolean(category.trim()));
   const kinds: { value: Kind; label: string }[] = [
     { value: "expense", label: "Расход" },
     { value: "income", label: "Доход" },
@@ -363,23 +368,27 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
                 : "Перевод между счетами"
       }
       footer={
-        <div className="flex gap-2">
-          {existing && (
-            <Button
-              variant="secondary"
-              icon="trash"
-              onClick={() => {
-                close();
-                deleteTx(existing.id);
-              }}
-            >
-              Удалить
-            </Button>
-          )}
-          <Button className="flex-1" onClick={save}>
-            {editing ? "Сохранить" : kind === "transfer" ? (repays ? "Погасить" : "Перевести") : "Добавить"}
-          </Button>
-        </div>
+        (existing || ready) && (
+          <div className="flex gap-2">
+            {existing && (
+              <Button
+                variant="secondary"
+                icon="trash"
+                onClick={() => {
+                  close();
+                  deleteTx(existing.id);
+                }}
+              >
+                Удалить
+              </Button>
+            )}
+            {ready && (
+              <Button className="flex-1 animate-fade" onClick={save}>
+                {editing ? "Сохранить" : kind === "transfer" ? (repays ? "Погасить" : "Перевести") : "Добавить"}
+              </Button>
+            )}
+          </div>
+        )
       }
     >
       <form

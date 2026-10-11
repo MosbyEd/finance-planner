@@ -384,8 +384,9 @@ export function Dashboard() {
 
   // Порядок — по дизайн-коду: сначала ответ «сколько можно сегодня», затем то, что ждёт действия,
   // быстрые траты, счёт и сбережения, месяц, ближайшие платежи и последние операции.
+  // На широком экране — две колонки: слева «сегодня» и деньги, справа месяц, платежи и операции.
   return (
-    <div className="space-y-4">
+    <div className={hasData ? "space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0" : "space-y-4"}>
       {!hasData ? (
         <>
           <AttentionCard warnings={[]} />
@@ -393,69 +394,73 @@ export function Dashboard() {
         </>
       ) : (
         <>
-          {progress.balance ? <TodayCard sts={data.sts} /> : <BalancePrompt />}
-          <AttentionCard warnings={data.metrics.warnings} />
-          {onboarding}
-          <QuickSpend />
+          <div className="space-y-4">
+            {progress.balance ? <TodayCard sts={data.sts} /> : <BalancePrompt />}
+            <AttentionCard warnings={data.metrics.warnings} />
+            {onboarding}
+            <QuickSpend />
 
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => open({ kind: "balance" })}
-              className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
-            >
-              <span className="flex items-center gap-1.5 text-sm text-muted">
-                <Icon name="wallet" size={16} /> {hasOwnAccounts(state) ? "На счетах" : "На счёте"}
-              </span>
-              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.balance)}>
-                {masked ? "•••• ₽" : <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />}
-              </span>
-              <span className="mt-1 block text-xs text-muted">
-                {progress.balance ? "Сверить остаток" : "Указать остаток"}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => open({ kind: "savings", direction: "in" })}
-              className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
-            >
-              <span className="flex items-center gap-1.5 text-sm text-muted">
-                <Icon name="piggy" size={16} /> Сбережения
-              </span>
-              <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.savings)}>
-                {masked ? "•••• ₽" : <Money value={data.savings} whole />}
-              </span>
-              <span className="mt-1 block text-xs text-muted">Пополнить или снять</span>
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => open({ kind: "balance" })}
+                className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
+              >
+                <span className="flex items-center gap-1.5 text-sm text-muted">
+                  <Icon name="wallet" size={16} /> {hasOwnAccounts(state) ? "На счетах" : "На счёте"}
+                </span>
+                <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.balance)}>
+                  {masked ? "•••• ₽" : <Money value={data.balance} whole tone={data.balance < 0 ? "negative" : "default"} />}
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  {progress.balance ? "Сверить остаток" : "Указать остаток"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => open({ kind: "savings", direction: "in" })}
+                className="surface-card flex min-w-0 flex-col items-start rounded-[28px] p-4 text-left transition hover:bg-surface-2 active:scale-[0.98]"
+              >
+                <span className="flex items-center gap-1.5 text-sm text-muted">
+                  <Icon name="piggy" size={16} /> Сбережения
+                </span>
+                <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.savings)}>
+                  {masked ? "•••• ₽" : <Money value={data.savings} whole />}
+                </span>
+                <span className="mt-1 block text-xs text-muted">Пополнить или снять</span>
+              </button>
+            </div>
+
+            {hasOwnAccounts(state) && <AccountsCard />}
           </div>
+          <div className="space-y-4">
+            <MonthCard metrics={data.metrics} />
+            <UpcomingCard events={data.upcoming} />
 
-          {hasOwnAccounts(state) && <AccountsCard />}
-          <MonthCard metrics={data.metrics} />
-          <UpcomingCard events={data.upcoming} />
-
-          <Card
-            title="Последние операции"
-            action={
-              <Button variant="ghost" size="sm" onClick={() => setTab("history")}>
-                Вся история
-              </Button>
-            }
-          >
-            {data.recent.length ? (
-              <div className="space-y-0.5">
-                {data.recent.map((tx) => (
-                  <TransactionRow
-                    key={tx.id}
-                    tx={tx}
-                    subtitle={`${formatRelativeDay(tx.date, today)}${tx.title && tx.category ? ` · ${transactionCategoryLabel(tx)}` : ""}`}
-                    onClick={() => open({ kind: "tx", txId: tx.id })}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted">Пока нет операций.</p>
-            )}
-          </Card>
+            <Card
+              title="Последние операции"
+              action={
+                <Button variant="ghost" size="sm" onClick={() => setTab("history")}>
+                  Вся история
+                </Button>
+              }
+            >
+              {data.recent.length ? (
+                <div className="space-y-0.5">
+                  {data.recent.map((tx) => (
+                    <TransactionRow
+                      key={tx.id}
+                      tx={tx}
+                      subtitle={`${formatRelativeDay(tx.date, today)}${tx.title && tx.category ? ` · ${transactionCategoryLabel(tx)}` : ""}`}
+                      onClick={() => open({ kind: "tx", txId: tx.id })}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted">Пока нет операций.</p>
+              )}
+            </Card>
+          </div>
         </>
       )}
     </div>

@@ -22,7 +22,9 @@ struct AddTransactionView: View {
     @State private var card: String?
     @State private var busy = false
     @State private var error: String?
-    @FocusState private var amountFocused: Bool
+    /// Какое поле с клавиатурой сейчас в фокусе; nil — клавиатура убрана.
+    enum Field: Hashable { case amount, title }
+    @FocusState private var focus: Field?
 
     init(add: HomeModel.Add, initialKind: Kind) {
         self.initialAdd = add
@@ -78,7 +80,9 @@ struct AddTransactionView: View {
         return result > 0 ? result : nil
     }
 
-    private var canSave: Bool { amount != nil && !category.isEmpty && !busy }
+    /// Обязательное заполнено: сумма и категория. До этого кнопки «Добавить» нет совсем.
+    private var ready: Bool { amount != nil && !category.isEmpty }
+    private var canSave: Bool { ready && !busy }
 
     var body: some View {
         NavigationStack {
@@ -230,6 +234,8 @@ struct AddTransactionView: View {
 
                     section("Описание") {
                         TextField(kind == .expense ? "Например, кофе" : "Например, аванс", text: $title)
+                            .focused($focus, equals: .title)
+                            .submitLabel(.done)
                             .textInputAutocapitalization(.sentences)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 48)
@@ -257,6 +263,12 @@ struct AddTransactionView: View {
                     }
                 }
                 .padding(20)
+                // Нажатие на свободное место (не на поле и не на кнопку) убирает клавиатуру.
+                .background {
+                    Color.clear
+                        .contentShape(.rect)
+                        .onTapGesture { focus = nil }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.bg)
@@ -266,8 +278,19 @@ struct AddTransactionView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .close) { dismiss() }
                 }
+                // Над клавиатурой: убрать её и сразу добавить — большая кнопка внизу в это время спрятана.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Button("Готово") { focus = nil }
+                    Spacer()
+                    if ready {
+                        Button("Добавить", action: save)
+                            .fontWeight(.semibold)
+                            .disabled(busy)
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
+                if focus == nil && (ready || busy) {
                 Button(action: save) {
                     Group {
                         if busy {
@@ -283,7 +306,10 @@ struct AddTransactionView: View {
                 .disabled(!canSave)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
+                .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.2), value: focus == nil && ready)
             .onChange(of: kind) { previous, next in
                 // Перевод — в полной форме, с уже введённой суммой, датой и счётом.
                 if next == .transfer {
@@ -293,7 +319,7 @@ struct AddTransactionView: View {
                 // Сумма, описание, дата и выбранный счёт остаются; категория — если её нет у нового вида.
                 if !categories.contains(category) { category = Self.defaultCategory(add, next) }
             }
-            .onAppear { amountFocused = true }
+            .onAppear { focus = .amount }
             .sheet(isPresented: $allCategories) {
                 CategoryList(categories: categories, selected: category) { picked in
                     category = picked
@@ -310,7 +336,7 @@ struct AddTransactionView: View {
                 .keyboardType(.decimalPad)
                 .font(.system(size: amountFontSize, weight: .bold))
                 .monospacedDigit()
-                .focused($amountFocused)
+                .focused($focus, equals: .amount)
                 // По ширине числа (пустое — по «0»): «₽» стоит сразу за суммой, а не у правого края.
                 .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("Сумма в рублях")
