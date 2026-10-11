@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type MonthKey } from "@/domain/dates";
-import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID } from "@/domain/accounts";
-import { balanceAt, goalsReserved, monthMetrics, safeToSpend, savingsTotal } from "@/domain/metrics";
+import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "@/domain/accounts";
+import { balanceAt, goalsReservedOn, monthMetrics, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
 import { plural } from "@/domain/text";
@@ -154,9 +154,9 @@ export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const total = savingsTotal(state, today);
-  const inGoals = goalsReserved(state);
-  // Деньги, отложенные на цели, снимаются на вкладке «Цели» — здесь доступно только свободное.
-  const available = Math.max(0, total - inGoals);
+  // Снимается со счёта «Сбережения»: доступно то, что на нём лежит, кроме денег целей (их снимают на вкладке «Цели»).
+  const inGoals = goalsReservedOn(state, SAVINGS_ACCOUNT_ID);
+  const available = Math.max(0, accountBalance(state, SAVINGS_ACCOUNT_ID, today) - inGoals);
   // Снять больше, чем свободно, нельзя — подсказываем сразу, а не после нажатия.
   const overLimit = dir === "out" && amount !== null && amount > available;
   const touchesGoals = dir === "out" && inGoals > 0;

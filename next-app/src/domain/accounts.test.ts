@@ -130,7 +130,7 @@ describe("накопительные счета и переводы", () => {
     expect(monthMetrics(s, "2026-10", "2026-10-10").savings.fact).toBe(200_000);
     expect(() =>
       applyActions(s, [{ type: "savings.move", id: "s2", date: "2026-10-03", amount: -100_000, note: "" }]),
-    ).toThrow(/На счёте «Сбережения» только 0/);
+    ).toThrow(/Нельзя снять больше, чем есть на счёте «Сбережения» \(0/);
   });
 
   it("счёт, отмеченный «учитывать в тратах», входит в деньги на счетах, а не в сбережения", () => {
@@ -337,5 +337,26 @@ describe("регулярный перевод на накопительный", 
     expect(m.savings).toMatchObject({ target: 1_000_000, planned: 2_500_000 });
     expect(m.mandatory.plan).toBe(0);
     expect(m.flexible.extraSavings).toBe(1_500_000);
+  });
+});
+
+describe("перевод со счёта, который не учитывается в сбережениях", () => {
+  it("с «Ремонта» на карту — сколько на нём лежит, даже если в сбережениях ничего нет", () => {
+    const repair: Account = { id: "repair", name: "Ремонт", kind: "savings", spending: false, inSavings: false };
+    const sber: Account = { id: "sber", name: "Сбербанк", kind: "debit", spending: true };
+    let s = run(
+      withCredit(),
+      { type: "account.add", account: repair },
+      { type: "account.add", account: sber },
+      { type: "savings.move", id: "in", date: "2026-10-02", amount: 3_000_000, note: "", toAccountId: "repair" },
+    );
+    expect(savingsTotal(s)).toBe(0);
+    // Как окно перевода: с накопительного на карту — снятие из сбережений на эту карту.
+    s = run(s, { type: "savings.move", id: "out", date: "2026-10-03", amount: -2_000_000, note: "", accountId: "sber", toAccountId: "repair" });
+    expect(accountBalance(s, "repair")).toBe(1_000_000);
+    expect(accountBalance(s, "sber")).toBe(2_000_000);
+    expect(() =>
+      applyActions(s, [{ type: "savings.move", id: "over", date: "2026-10-04", amount: -2_000_000, note: "", accountId: "sber", toAccountId: "repair" }]),
+    ).toThrow(/Нельзя снять больше, чем есть на счёте «Ремонт»/);
   });
 });

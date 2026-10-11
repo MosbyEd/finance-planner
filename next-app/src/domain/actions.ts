@@ -23,12 +23,11 @@ import {
   balanceAt,
   dedicatedGoalAccount,
   goalAvailable,
-  goalsReserved,
+  goalsReservedOn,
   loanOpening,
   loanOpeningSign,
   loanRemaining,
   monthMetrics,
-  savingsTotal,
 } from "./metrics";
 import { getOwn, withKey, withoutKey } from "./records";
 import { dueOccurrences, occurrenceTxId, skippedMonths, type Occurrence } from "./recurring";
@@ -924,7 +923,8 @@ export function applyAction(state: State, action: Action): State {
       const target = assertAccount(state, toId);
       if (target.kind !== "savings") throw new DomainError("Откладывать можно только на накопительный счёт.");
       if (action.amount < 0) {
-        const total = savingsTotal(state);
+        // Снимают с конкретного накопительного счёта — его и проверяем (учитывается ли он в сбережениях,
+        // не важно: со счёта «не в сбережениях» тоже можно перевести на карту).
         // Счёт, закреплённый за целью: всё, что на нём, — деньги цели, и снимать их можно и без отметки цели.
         const ownGoal = goal ?? state.goals.find((g) => dedicatedGoalAccount(state, g) === toId);
         if (ownGoal && dedicatedGoalAccount(state, ownGoal) === toId) {
@@ -933,25 +933,25 @@ export function applyAction(state: State, action: Action): State {
             throw new DomainError(`Нельзя снять больше, чем накоплено (${formatMoney(Math.max(0, available))}).`);
           }
         } else if (goal) {
-          // С цели можно снять только то, что откладывали в приложении (накопленное до него не на счёте),
-          // и не больше, чем всего в сбережениях.
-          const available = Math.min(goalAvailable(state, goal), total);
+          // С цели можно снять только то, что откладывали в приложении (накопленное до него не на счёте).
+          const available = goalAvailable(state, goal);
           if (available + action.amount < 0) {
             throw new DomainError(`Нельзя снять больше, чем накоплено (${formatMoney(Math.max(0, available))}).`);
           }
         } else {
-          // Деньги, отложенные на цели, из общих сбережений не снимаются: иначе их сняли бы второй раз с цели.
-          const free = total - goalsReserved(state);
-          if (free + action.amount < 0) {
+          // Деньги целей на этом счёте снимают через цель: иначе их сняли бы второй раз с цели.
+          const reserved = goalsReservedOn(state, toId);
+          const free = accountBalance(state, toId) - reserved;
+          if (reserved > 0 && free + action.amount < 0) {
             throw new DomainError(
-              `Нельзя снять больше, чем свободно в сбережениях (${formatMoney(Math.max(0, free))}). Деньги на целях снимайте на вкладке «Цели».`,
+              `Нельзя снять больше, чем свободно на счёте «${target.name}» (${formatMoney(Math.max(0, free))}): остальное отложено на цели — их деньги снимайте на вкладке «Цели».`,
             );
           }
         }
         // Сбережения разложены по счетам — снять можно только то, что лежит на выбранном.
         const onAccount = accountBalance(state, toId);
         if (onAccount + action.amount < 0) {
-          throw new DomainError(`На счёте «${target.name}» только ${formatMoney(Math.max(0, onAccount))}.`);
+          throw new DomainError(`Нельзя снять больше, чем есть на счёте «${target.name}» (${formatMoney(Math.max(0, onAccount))}).`);
         }
       }
       const title = goal

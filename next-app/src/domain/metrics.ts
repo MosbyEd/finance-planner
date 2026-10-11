@@ -22,6 +22,7 @@ import {
   savingsAccountIds,
   savingsTarget,
   spendingAccountIds,
+  targetAccountId,
   spendingEffect,
   summarizeParts,
   type CreditSummary,
@@ -77,6 +78,23 @@ export function savingsTotal(state: State, date?: IsoDate): Kopecks {
  * Сколько из сбережений лежит на целях (накоплено в приложении, без initialAmount): эти деньги
  * снимают с самой цели, а не из общих сбережений — иначе одни и те же деньги сняли бы дважды.
  */
+/**
+ * Деньги целей без своего счёта, лежащие на этом накопительном счёте (пополнения с отметкой цели): их снимают
+ * через цель. Учитывается ли счёт в сбережениях — не важно.
+ */
+export function goalsReservedOn(state: State, accountId: string): Kopecks {
+  const perGoal = new Map<string, Kopecks>();
+  for (const goal of state.goals) if (!dedicatedGoalAccount(state, goal)) perGoal.set(goal.id, 0);
+  for (const tx of state.transactions) {
+    if (tx.type !== "saving" || tx.goalId === undefined || targetAccountId(tx) !== accountId) continue;
+    const sum = perGoal.get(tx.goalId);
+    if (sum !== undefined) perGoal.set(tx.goalId, sum + tx.amount);
+  }
+  let reserved = 0;
+  for (const sum of perGoal.values()) reserved += Math.max(0, sum);
+  return reserved;
+}
+
 export function goalsReserved(state: State): Kopecks {
   const perGoal = new Map<string, Kopecks>();
   const inSavings = savingsAccountIds(state);
