@@ -153,6 +153,13 @@ export interface AddModel {
     credit: boolean;
     savings: boolean;
   }[];
+  /** Категории, расход по которым по умолчанию обязательный. */
+  mandatoryCategories: string[];
+  /** Правила автоотчислений (src/domain/savings.ts) — окно показывает, сколько уйдёт в сбережения. */
+  saving: {
+    purchase: { enabled: boolean; percent: number; cap: number; roundTo: number; excluded: string[] };
+    salary: { enabled: boolean; percent: number; categories: string[] };
+  };
   /** Счета для перевода — все свои, с накопительными (меньше двух — перевода нет). */
   transferAccounts: AddModel["accounts"];
   lastExpenseAccount: string;
@@ -465,6 +472,21 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       ? payableAccounts(state).map(choice)
       : [],
     transferAccounts: ownAccounts ? activeAccounts(state).map(choice) : [],
+    mandatoryCategories: state.categories.mandatory.filter((c) => !state.categories.flexible.includes(c)),
+    saving: {
+      purchase: {
+        enabled: state.settings.purchaseSaving.enabled,
+        percent: state.settings.purchaseSaving.percent,
+        cap: state.settings.purchaseSaving.cap,
+        roundTo: state.settings.purchaseSaving.roundTo,
+        excluded: state.settings.purchaseSaving.excludedCategories,
+      },
+      salary: {
+        enabled: state.settings.salarySaving.enabled,
+        percent: state.settings.salarySaving.percent,
+        categories: state.settings.salarySaving.categories,
+      },
+    },
     lastExpenseAccount: lastAccountId(state, "expense"),
     lastIncomeAccount: lastAccountId(state, "income"),
     picks: picks.map((p) => ({ title: p.title || p.category, category: p.category, amount: p.amount, amountText: formatMoney(p.amount) })),

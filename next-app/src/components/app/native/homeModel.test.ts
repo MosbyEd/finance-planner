@@ -175,4 +175,12 @@ describe("перевод из окна «+»", () => {
     expect(transferMessage(s, "main", "cc", 10_000)).toMatch(/^Погашено 100\s₽: Основной счёт → Кредитка$/);
     expect(transferAction(s, { id: "t4", ...draft, to: "main" })).toBeNull();
   });
+
+  it("параметры из окна: правила отчислений и обязательные категории — в модели, повтор — в команде", () => {
+    const add = model(base()).add;
+    expect(add.saving.purchase).toMatchObject({ enabled: expect.any(Boolean), roundTo: expect.any(Number) });
+    expect(add.mandatoryCategories.length).toBeGreaterThan(0);
+    const draft = { kind: "expense", amount: 50_000, category: "Аренда", title: "", date: today, mandatory: true, autoSaving: false, repeat: true };
+    expect(commandSchema.safeParse({ type: "add", draft }).success).toBe(true);
+  });
 });

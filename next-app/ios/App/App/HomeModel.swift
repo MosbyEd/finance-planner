@@ -241,6 +241,42 @@ struct HomeModel: Codable, Equatable, Sendable {
         var amountText: String
     }
 
+    /// Правила автоотчислений — как в src/domain/savings.ts: окно показывает, сколько уйдёт в сбережения.
+    struct SavingRules: Codable, Equatable, Sendable {
+        struct Purchase: Codable, Equatable, Sendable {
+            var enabled: Bool
+            var percent: Int
+            var cap: Int
+            var roundTo: Int
+            var excluded: [String]
+        }
+        struct Salary: Codable, Equatable, Sendable {
+            var enabled: Bool
+            var percent: Int
+            var categories: [String]
+        }
+        var purchase: Purchase
+        var salary: Salary
+
+        /// Процент, округлённый до целых рублей (percentOf).
+        private static func percent(_ kopecks: Int, _ percent: Int) -> Int {
+            Int((Double(kopecks * percent) / 100 / 100).rounded()) * 100
+        }
+
+        /// Сколько уйдёт в сбережения с операции (0 — отчисления нет).
+        func amount(expense: Bool, amount: Int, category: String) -> Int {
+            guard amount > 0 else { return 0 }
+            if expense {
+                guard purchase.enabled, !purchase.excluded.contains(category) else { return 0 }
+                let percentPart = min(Self.percent(amount, purchase.percent), purchase.cap)
+                let roundPart = purchase.roundTo > 0 ? (amount + purchase.roundTo - 1) / purchase.roundTo * purchase.roundTo - amount : 0
+                return percentPart + roundPart
+            }
+            guard salary.enabled, salary.categories.contains(category) else { return 0 }
+            return Self.percent(amount, salary.percent)
+        }
+    }
+
     struct Add: Codable, Equatable, Sendable {
         var expense: [String]
         var income: [String]
@@ -254,6 +290,9 @@ struct HomeModel: Codable, Equatable, Sendable {
         var accounts: [AccountChoice]?
         /// Счета для перевода — все свои, с накопительными.
         var transferAccounts: [AccountChoice]?
+        /// Категории, расход по которым по умолчанию обязательный.
+        var mandatoryCategories: [String]?
+        var saving: SavingRules?
         var lastExpenseAccount: String?
         var lastIncomeAccount: String?
     }

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Окно «Новый расход / доход / перевод»: сумма → счёт → категория → «Добавить» (дизайн-код: запись траты за три
 /// касания). У всех трёх видов один и тот же верх — переключение не двигает сумму и выбор счёта. Частые траты
-/// заполняют форму одним касанием. Повтор и прочие параметры — в полной форме интерфейса: туда уходит всё введённое.
+/// заполняют форму одним касанием. Повтор, обязательность и отчисление в сбережения раскрываются здесь же.
 struct AddTransactionView: View {
     enum Kind: String { case expense, income, transfer }
 
@@ -25,6 +25,12 @@ struct AddTransactionView: View {
     @State private var card: String?
     @State private var busy = false
     @State private var error: String?
+    /// «Повтор и другие параметры» раскрыты.
+    @State private var showMore = false
+    /// Выбор человека; nil — по категории (обязательность) и настройкам сбережений (отчисление).
+    @State private var mandatoryChoice: Bool?
+    @State private var autoSavingChoice: Bool?
+    @State private var repeatMonthly = false
     /// Какое поле с клавиатурой сейчас в фокусе; nil — клавиатура убрана.
     enum Field: Hashable { case amount, title }
     @FocusState private var focus: Field?
@@ -104,6 +110,24 @@ struct AddTransactionView: View {
         return !category.isEmpty
     }
     private var canSave: Bool { ready && !busy }
+
+    /// Регулярный расход всегда обязательный; иначе — как выбрали или по категории.
+    private var mandatory: Bool {
+        repeatMonthly || (mandatoryChoice ?? (add.mandatoryCategories ?? []).contains(category))
+    }
+    /// Сколько уйдёт в сбережения с этой операции (0 — отчисления нет, переключатель не показываем).
+    private var savingPreview: Int {
+        add.saving?.amount(expense: kind == .expense, amount: amount ?? 0, category: category) ?? 0
+    }
+    private var autoSaving: Bool {
+        autoSavingChoice ?? ((add.saving?.amount(expense: kind == .expense, amount: amount ?? (kind == .expense ? 1 : 100), category: category) ?? 0) > 0)
+    }
+    private var repeatDay: Int { Calendar.current.component(.day, from: date) }
+    /// Между датой операции и сегодня были ещё платёжные дни — задним числом они не появятся.
+    private var repeatSkipsPast: Bool {
+        guard let next = Calendar.current.date(byAdding: .month, value: 1, to: date) else { return false }
+        return Calendar.current.startOfDay(for: next) < Calendar.current.startOfDay(for: Date())
+    }
     private var actionTitle: String { kind == .transfer ? (repays ? "Погасить" : "Перевести") : "Добавить" }
     private var screenTitle: String {
         switch kind {
@@ -115,6 +139,7 @@ struct AddTransactionView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     Picker("Вид операции", selection: $kind) {
@@ -226,14 +251,55 @@ struct AddTransactionView: View {
                         .environment(\.locale, Locale(identifier: "ru_RU"))
 
                     if kind != .transfer {
+                        // Раскрывается здесь же, без перехода в другое окно.
                         Button {
-                            openFullForm(kind)
+                            showMore.toggle()
                         } label: {
-                            Label("Повтор и другие параметры", systemImage: "slider.horizontal.3")
-                                .font(.subheadline.weight(.medium))
+                            HStack {
+                                Label("Повтор и другие параметры", systemImage: "slider.horizontal.3")
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.down")
+                                    .font(.footnote.weight(.semibold))
+                                    .rotationEffect(.degrees(showMore ? 180 : 0))
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .contentShape(.rect)
                         }
                         .foregroundStyle(Theme.accent)
                         .frame(minHeight: 44)
+                        .accessibilityValue(showMore ? "раскрыто" : "свёрнуто")
+
+                        if showMore {
+                            VStack(alignment: .leading, spacing: 18) {
+                                if kind == .expense {
+                                    option(
+                                        "Обязательный расход",
+                                        repeatMonthly
+                                            ? "Регулярные расходы считаются обязательными"
+                                            : mandatory
+                                                ? "Как аренда и кредиты: заранее вычитается из бюджета месяца"
+                                                : "Повседневная трата — из гибкого бюджета. Обязательность подставляется по категории",
+                                        isOn: Binding(get: { mandatory }, set: { mandatoryChoice = $0 })
+                                    )
+                                    .disabled(repeatMonthly)
+                                }
+                                if savingPreview > 0 {
+                                    option(
+                                        "Отложить в сбережения",
+                                        autoSaving ? "\(Money.whole(savingPreview)) уйдёт в сбережения" : "Можно отложить \(Money.whole(savingPreview))",
+                                        isOn: Binding(get: { autoSaving }, set: { autoSavingChoice = $0 })
+                                    )
+                                }
+                                option(
+                                    "Повторять каждый месяц",
+                                    "Операция будет добавляться каждый месяц \(repeatDay)-го числа."
+                                        + (repeatSkipsPast ? " Прошедшие месяцы не заполнятся — начнём со следующего платежа." : ""),
+                                    isOn: $repeatMonthly
+                                )
+                            }
+                            .id("more")
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
 
                     if let error {
@@ -244,8 +310,9 @@ struct AddTransactionView: View {
                     }
                 }
                 .padding(20)
-                // Переключение вида — плавно: поля ниже появляются и исчезают, а не прыгают.
+                // Переключение вида и раскрытие параметров — плавно: поля появляются и исчезают, а не прыгают.
                 .animation(.snappy(duration: 0.25), value: kind)
+                .animation(.snappy(duration: 0.3), value: showMore)
                 // Нажатие на свободное место (не на поле и не на кнопку) убирает клавиатуру.
                 .background {
                     Color.clear
@@ -254,6 +321,15 @@ struct AddTransactionView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            // Раскрыли параметры — докрутить до них.
+            .onChange(of: showMore) { _, open in
+                guard open else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    withAnimation(.snappy(duration: 0.3)) { scroller.scrollTo("more", anchor: .bottom) }
+                }
+            }
+            }
             // Фон — и под клавиатурой, иначе над ней видна белая полоса.
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(screenTitle)
@@ -371,6 +447,25 @@ struct AddTransactionView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    private func option(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: Binding(
+            get: { isOn.wrappedValue },
+            set: { value in
+                isOn.wrappedValue = value
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(Theme.action)
+    }
+
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         section(title, trailing: { EmptyView() }, content: content)
     }
@@ -446,19 +541,6 @@ struct AddTransactionView: View {
         }
     }
 
-    /// Полная форма интерфейса (повтор, обязательность) — со всем, что уже введено здесь.
-    private func openFullForm(_ type: Kind) {
-        var preset: [String: JSONValue] = ["type": .string(type.rawValue), "date": .string(WidgetSnapshot.today(date))]
-        if let amount { preset["amount"] = .number(Double(amount)) }
-        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanTitle.isEmpty { preset["title"] = .string(cleanTitle) }
-        if !category.isEmpty { preset["category"] = .string(category) }
-        preset["accountId"] = .string(accountId)
-        if let card { preset["card"] = .string(card) }
-        dismiss()
-        AppShell.shared.open(["kind": .string("tx"), "preset": .object(preset)])
-    }
-
     private func formatForInput(_ kopecks: Int) -> String {
         kopecks % 100 == 0 ? "\(kopecks / 100)" : String(format: "%d,%02d", kopecks / 100, kopecks % 100)
     }
@@ -487,6 +569,11 @@ struct AddTransactionView: View {
             ]
             .merging(payable.count > 1 ? ["accountId": .string(accountId)] : [:]) { current, _ in current }
             .merging(card.map { ["card": .string($0)] } ?? [:]) { current, _ in current }
+            .merging([
+                "mandatory": .bool(kind == .expense && mandatory),
+                "autoSaving": .bool(savingPreview > 0 && autoSaving),
+                "repeat": .bool(repeatMonthly),
+            ]) { current, _ in current }
             command = .command("add", ["draft": .object(draft)])
         }
         Task {

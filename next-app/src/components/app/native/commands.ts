@@ -36,6 +36,11 @@ export interface AddDraft {
   accountId?: string;
   /** Карта, которой платили. */
   card?: string;
+  /** Из «Повтор и другие параметры»; нет — по категории и настройкам сбережений. */
+  mandatory?: boolean;
+  autoSaving?: boolean;
+  /** Повторять каждый месяц — создать регулярный платёж. */
+  repeat?: boolean;
 }
 
 export interface TransferDraft {
@@ -98,6 +103,9 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
       date: isoDate,
       accountId: z.string().min(1).max(120).optional(),
       card: z.string().regex(/^\d{4}$/).optional(),
+      mandatory: z.boolean().optional(),
+      autoSaving: z.boolean().optional(),
+      repeat: z.boolean().optional(),
     }),
   }),
   z.object({

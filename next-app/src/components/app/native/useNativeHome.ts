@@ -162,11 +162,13 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           return { ok: true, txId: id, message: `${pick.title || pick.category} · ${formatMoney(pick.amount)} — добавлено` };
         }
         case "add": {
-          const { kind, amount, title, date, accountId, card } = command.draft;
+          const { kind, amount, title, date, accountId, card, repeat } = command.draft;
           const category = command.draft.category.trim();
           const autoSaving =
             autoSavingAmount({ type: kind, amount, category, autoSaving: true }, state.settings) > 0 &&
-            autoSavingByDefault({ type: kind, amount, category }, state.settings);
+            (command.draft.autoSaving ?? autoSavingByDefault({ type: kind, amount, category }, state.settings));
+          // Регулярный расход всегда обязательный.
+          const mandatory = kind === "expense" && (Boolean(repeat) || (command.draft.mandatory ?? isMandatoryCategory(state, category)));
           const id = newId();
           const result = store.dispatch({
             type: "tx.add",
@@ -178,14 +180,16 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
               category,
               title: title.trim(),
               note: "",
-              mandatory: kind === "expense" && isMandatoryCategory(state, category),
+              mandatory,
               autoSaving,
               ...(accountId ? { accountId } : {}),
               ...(card ? { card } : {}),
+              ...(repeat ? { repeat: { templateId: newId(), startDate: date > day ? date : day } } : {}),
             },
           });
           if (!result.ok) return result;
-          return { ok: true, txId: id, message: kind === "income" ? "Доход добавлен" : "Расход добавлен" };
+          const added = kind === "income" ? "Доход добавлен" : "Расход добавлен";
+          return { ok: true, txId: id, message: repeat ? `${added} — будет повторяться каждый месяц` : added };
         }
         case "transfer": {
           const { amount, from, to, title, date } = command.draft;
