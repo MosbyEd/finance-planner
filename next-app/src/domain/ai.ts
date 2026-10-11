@@ -143,7 +143,14 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
       active: t.active,
       next: nextOccurrence(state, t, today)?.date ?? null,
       account: findAccount(state, t.accountId ?? MAIN_ACCOUNT_ID)?.name ?? null,
-      to: t.toAccountId ? (findAccount(state, t.toAccountId)?.name ?? null) : t.loanId ? (state.loans.find((l) => l.id === t.loanId)?.name ?? null) : null,
+      to: t.toAccountId
+        ? (findAccount(state, t.toAccountId)?.name ?? null)
+        : t.loanId
+          ? (state.loans.find((l) => l.id === t.loanId)?.name ?? null)
+          : t.goalId
+            ? (state.goals.find((g) => g.id === t.goalId)?.name ?? null)
+            : null,
+      until: t.untilDone ? "done" : (t.endDate ?? null),
     })),
     goals: state.goals.map((g) => ({
       name: g.name,
@@ -213,12 +220,13 @@ export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDeta
     "",
     "Если пользователь просит что-то добавить или изменить, в самом конце ответа добавь одну строку",
     "(пользователь подтвердит её перед применением):",
-    'AI_CMDS: {"operations":[...],"templates":[...],"categoryLimits":{...},"transfers":[...],"templateUpdates":[...],"balances":[...],"goals":[...],"loanPayments":[...]}',
+    'AI_CMDS: {"operations":[...],"templates":[...],"newGoals":[...],"categoryLimits":{...},"transfers":[...],"templateUpdates":[...],"balances":[...],"goals":[...],"loanPayments":[...]}',
     '- operations: {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"date":"YYYY-MM-DD","mandatory":true|false,"account":"название счёта"}',
-    '- templates (новые ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31,"account":"с какого счёта","to":"куда: свой счёт или кредит из loans"}',
+    '- templates (новые ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31,"account":"с какого счёта","to":"куда: свой счёт, кредит из loans или цель из goals/newGoals","until":"YYYY-MM-DD — последний платёж, или done — пока не закрыт долг / не накоплена цель"}',
+    '- newGoals (создать цель): {"name":"название","target":сумма в рублях,"dueDate":"YYYY-MM-DD или null","account":"накопительный счёт или null"} — регулярное пополнение новой цели: template с "to":"название цели"',
     '- categoryLimits: {"Категория": лимит в рублях на месяц}',
     '- transfers (между своими счетами, погашение кредитки, пополнение накопительного): {"from":"счёт","to":"счёт","amount":число,"date":"YYYY-MM-DD"}',
-    '- templateUpdates (изменить существующий регулярный): {"title":"название из templates","amount":число,"dayOfMonth":1-31,"active":true|false,"account":"счёт","to":"счёт, кредит или null"} — только меняемые поля',
+    '- templateUpdates (изменить существующий регулярный): {"title":"название из templates","amount":число,"dayOfMonth":1-31,"active":true|false,"account":"счёт","to":"счёт, кредит, цель или null","until":"YYYY-MM-DD, done или null — без срока"} — только меняемые поля',
     '- balances (сверить остаток): {"account":"счёт","amount":число} — сколько сейчас на счёте, у кредитки — долг',
     '- goals (пополнить цель, минус — снять): {"goal":"название цели","amount":число}',
     '- loanPayments (платёж по долгу или кредиту): {"loan":"название из loans","amount":число,"date":"YYYY-MM-DD"}',
@@ -254,6 +262,19 @@ export interface AiTemplate {
   accountId?: string;
   toAccountId?: string;
   loanId?: string;
+  goalId?: string;
+  /** Пополнение цели, которую создаёт это же предложение (по названию). */
+  newGoal?: string;
+  endDate?: IsoDate;
+  untilDone?: true;
+}
+
+/** Новая цель. */
+export interface AiNewGoal {
+  name: string;
+  targetAmount: Kopecks;
+  dueDate: IsoDate | null;
+  accountId?: string;
 }
 
 /** Перевод между своими счетами (на накопительный — пополнение сбережений, с него — снятие). */
@@ -273,6 +294,9 @@ export interface AiTemplateUpdate {
   accountId?: string;
   toAccountId?: string | null;
   loanId?: string | null;
+  goalId?: string | null;
+  endDate?: IsoDate | null;
+  untilDone?: boolean;
 }
 
 export interface AiProposal {
@@ -286,11 +310,22 @@ export interface AiProposal {
   /** Пополнение цели (минус — снять). */
   goals: { goalId: string; amount: Kopecks }[];
   loanPayments: { loanId: string; amount: Kopecks; date: IsoDate }[];
+  newGoals: AiNewGoal[];
 }
 
 /** Пустое предложение — заготовка для разбора и для предложений, сохранённых до новых видов действий. */
 export function emptyProposal(): AiProposal {
-  return { operations: [], templates: [], limits: [], transfers: [], templateUpdates: [], balances: [], goals: [], loanPayments: [] };
+  return {
+    operations: [],
+    templates: [],
+    limits: [],
+    transfers: [],
+    templateUpdates: [],
+    balances: [],
+    goals: [],
+    loanPayments: [],
+    newGoals: [],
+  };
 }
 
 export function proposalSize(p: AiProposal): number {
@@ -302,7 +337,8 @@ export function proposalSize(p: AiProposal): number {
     p.templateUpdates.length +
     p.balances.length +
     p.goals.length +
-    p.loanPayments.length
+    p.loanPayments.length +
+    p.newGoals.length
   );
 }
 
@@ -377,6 +413,13 @@ const rawTemplate = z.object({
   dayOfMonth: z.coerce.number().int().min(1).max(31),
   account: z.unknown().optional(),
   to: z.unknown().optional(),
+  until: z.unknown().optional(),
+});
+const rawNewGoal = z.object({
+  name: rawText(LIMITS.title),
+  target: rawAmount,
+  dueDate: z.unknown().optional(),
+  account: z.unknown().optional(),
 });
 const rawTransfer = z.object({ from: z.unknown(), to: z.unknown(), amount: rawAmount, date: z.unknown().optional() });
 const rawTemplateUpdate = z.object({
@@ -386,6 +429,7 @@ const rawTemplateUpdate = z.object({
   active: z.boolean().optional(),
   account: z.unknown().optional(),
   to: z.unknown().optional(),
+  until: z.unknown().optional(),
 });
 const rawBalance = z.object({
   account: z.unknown(),
@@ -413,14 +457,32 @@ const rawGoalMove = z.object({
 });
 const rawLoanPayment = z.object({ loan: z.unknown(), amount: rawAmount, date: z.unknown().optional() });
 
-/** «to» регулярного платежа: свой счёт или кредит (мой долг) по названию; null/"" — обычный платёж. */
-function templateTarget(state: State, value: unknown): { toAccountId?: string; loanId?: string } | null | "none" {
+type TemplateTarget = { toAccountId?: string; loanId?: string; goalId?: string; newGoal?: string };
+
+/**
+ * «to» регулярного платежа: свой счёт, кредит (мой долг) или цель по названию — в том числе цель, которую
+ * создаёт это же предложение (newGoals); null/"" — обычный платёж.
+ */
+function templateTarget(state: State, value: unknown, newGoals: readonly AiNewGoal[] = []): TemplateTarget | null | "none" {
   if (value === null || value === "" || (typeof value === "string" && /^(null|нет|обычный)/i.test(value.trim()))) return "none";
   if (value === undefined) return null;
   const account = accountByName(state, value);
   if (account) return { toAccountId: account.id };
   const loan = byName(state.loans.filter((l) => l.kind !== "lend"), value, (l) => l.name);
-  return loan ? { loanId: loan.id } : null;
+  if (loan) return { loanId: loan.id };
+  const goal = byName(state.goals, value, (g) => g.name);
+  if (goal) return { goalId: goal.id };
+  const fresh = byName(newGoals, value, (g) => g.name);
+  return fresh ? { newGoal: fresh.name } : null;
+}
+
+/** Срок регулярного платежа: дата последнего платежа или «done» — пока не закрыт долг / не накоплена цель. */
+function templateUntil(value: unknown, today: IsoDate): { endDate?: IsoDate; untilDone?: true } | null | "none" {
+  if (value === undefined) return {};
+  if (value === null || value === "" || (typeof value === "string" && /^(null|нет|never|без)/i.test(value.trim()))) return "none";
+  if (typeof value === "string" && /^(done|пока|до закрыт|до цел)/i.test(value.trim())) return { untilDone: true };
+  if (isValidIsoDate(value) && value >= today && value <= addDays(today, 366 * 40)) return { endDate: value };
+  return null;
 }
 
 const CMD_MARKER = /AI_CMDS\s*:\s*/;
@@ -508,6 +570,23 @@ export function parseAiReply(
     proposal.operations.push({ type, amount: op.amount, category, title: op.title, date, mandatory, ...(account ? { accountId: account.id } : {}) });
   }
 
+  for (const item of Array.isArray(obj.newGoals) ? obj.newGoals.slice(0, 10) : []) {
+    const parsed = rawNewGoal.safeParse(item);
+    if (!parsed.success || !parsed.data.name) {
+      skipped++;
+      continue;
+    }
+    const g = parsed.data;
+    const dueMissing = g.dueDate === undefined || g.dueDate === null || g.dueDate === "";
+    const dueDate = dueMissing ? null : isValidIsoDate(g.dueDate) && g.dueDate > today ? g.dueDate : undefined;
+    const account = g.account === undefined || g.account === null || g.account === "" ? undefined : accountByName(state, g.account);
+    if (dueDate === undefined || (account && account.kind !== "savings")) {
+      skipped++;
+      continue;
+    }
+    proposal.newGoals.push({ name: g.name, targetAmount: g.target, dueDate, ...(account ? { accountId: account.id } : {}) });
+  }
+
   const templates = Array.isArray(obj.templates) ? obj.templates : Array.isArray(obj.presets) ? obj.presets : [];
   for (const item of templates.slice(0, 20)) {
     const parsed = rawTemplate.safeParse(item);
@@ -519,11 +598,16 @@ export function parseAiReply(
     const type = t.type === "income" ? "income" : "expense";
     const category = t.category || (type === "income" ? "Доход" : "Обязательные");
     const account = t.account === undefined || t.account === null || t.account === "" ? undefined : accountByName(state, t.account);
-    const target = type === "expense" ? templateTarget(state, t.to) : null;
-    if ((t.account && !account) || (t.to !== undefined && t.to !== null && t.to !== "" && target === null)) {
+    const target = type === "expense" ? templateTarget(state, t.to, proposal.newGoals) : null;
+    const until = templateUntil(t.until, today);
+    if ((t.account && !account) || (t.to !== undefined && t.to !== null && t.to !== "" && target === null) || until === null) {
       skipped++;
       continue;
     }
+    const targetFields = target && target !== "none" ? target : {};
+    // «Пока не закрыт» — только у платежа по долгу или в цель.
+    const untilFields =
+      until === "none" || (until.untilDone && !targetFields.loanId && !targetFields.goalId && !targetFields.newGoal) ? {} : until;
     proposal.templates.push({
       type,
       amount: t.amount,
@@ -531,7 +615,8 @@ export function parseAiReply(
       title: t.title || category,
       dayOfMonth: t.dayOfMonth,
       ...(account ? { accountId: account.id } : {}),
-      ...(target && target !== "none" ? target : {}),
+      ...targetFields,
+      ...untilFields,
     });
   }
 
@@ -569,7 +654,8 @@ export function parseAiReply(
     const u = parsed.data;
     const account = u.account === undefined ? undefined : accountByName(state, u.account);
     const target = template.kind === "expense" ? templateTarget(state, u.to) : null;
-    if ((u.account !== undefined && !account) || (u.to !== undefined && target === null)) {
+    const until = templateUntil(u.until, today);
+    if ((u.account !== undefined && !account) || (u.to !== undefined && target === null) || until === null) {
       skipped++;
       continue;
     }
@@ -579,7 +665,13 @@ export function parseAiReply(
       ...(u.dayOfMonth !== undefined ? { dayOfMonth: u.dayOfMonth } : {}),
       ...(u.active !== undefined ? { active: u.active } : {}),
       ...(account ? { accountId: account.id } : {}),
-      ...(target === "none" ? { toAccountId: null, loanId: null } : target ? { toAccountId: target.toAccountId ?? null, loanId: target.loanId ?? null } : {}),
+      ...(target === "none"
+        ? { toAccountId: null, loanId: null, goalId: null }
+        : target
+          ? { toAccountId: target.toAccountId ?? null, loanId: target.loanId ?? null, goalId: target.goalId ?? null }
+          : {}),
+      ...(until === "none" ? { endDate: null, untilDone: false } : until.endDate ? { endDate: until.endDate, untilDone: false } : {}),
+      ...(until !== "none" && until.untilDone ? { untilDone: true, endDate: null } : {}),
     };
     if (Object.keys(update).length > 1) proposal.templateUpdates.push(update);
     else skipped++;
@@ -624,6 +716,25 @@ export function parseAiReply(
 /** Превращает подтверждённое предложение в действия. ids — генератор идентификаторов. */
 export function proposalToActions(proposal: AiProposal, state: State, today: IsoDate, newId: () => string): Action[] {
   const actions: Action[] = [];
+  // Новые цели — первыми: на них могут ссылаться регулярные пополнения из этого же предложения.
+  const createdGoals = new Map<string, string>();
+  for (const g of proposal.newGoals) {
+    const id = newId();
+    createdGoals.set(g.name, id);
+    actions.push({
+      type: "goal.add",
+      goal: {
+        id,
+        name: g.name,
+        targetAmount: g.targetAmount,
+        initialAmount: 0,
+        dueDate: g.dueDate,
+        note: "",
+        createdAt: today,
+        ...(g.accountId ? { accountId: g.accountId } : {}),
+      },
+    });
+  }
   for (const op of proposal.operations) {
     const tx = { type: op.type, amount: op.amount, category: op.category };
     actions.push({
@@ -644,6 +755,8 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
   }
   for (const t of proposal.templates) {
     // Начинаем со следующего наступления дня (не сегодня), чтобы не начислить задним числом.
+    const goalOf = (x: AiTemplate) => x.goalId ?? (x.newGoal ? createdGoals.get(x.newGoal) : undefined);
+    if (t.newGoal && !createdGoals.has(t.newGoal)) continue;
     const startDate =
       parseIsoDate(today).day < t.dayOfMonth ? addDays(today, 1) : firstDayOfMonth(addMonths(monthKeyOf(today), 1));
     actions.push({
@@ -661,6 +774,10 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
         ...(t.accountId && t.accountId !== MAIN_ACCOUNT_ID ? { accountId: t.accountId } : {}),
         ...(t.toAccountId ? { toAccountId: t.toAccountId } : {}),
         ...(t.loanId ? { loanId: t.loanId } : {}),
+        ...(goalOf(t) ? { goalId: goalOf(t) } : {}),
+        ...(t.endDate ? { endDate: t.endDate } : {}),
+        // Цель из этого предложения не выбрали — «пока не накоплена» без цели не имеет смысла.
+        ...(t.untilDone && (t.loanId || goalOf(t)) ? { untilDone: true as const } : {}),
       },
     });
   }
@@ -693,6 +810,9 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
       ...(u.accountId !== undefined ? { accountId: u.accountId === MAIN_ACCOUNT_ID ? null : u.accountId } : {}),
       ...(u.toAccountId !== undefined ? { toAccountId: u.toAccountId } : {}),
       ...(u.loanId !== undefined ? { loanId: u.loanId } : {}),
+      ...(u.goalId !== undefined ? { goalId: u.goalId } : {}),
+      ...(u.endDate !== undefined ? { endDate: u.endDate } : {}),
+      ...(u.untilDone !== undefined ? { untilDone: u.untilDone } : {}),
     };
     if (Object.keys(patch).length) actions.push({ type: "template.update", id: template.id, patch });
   }

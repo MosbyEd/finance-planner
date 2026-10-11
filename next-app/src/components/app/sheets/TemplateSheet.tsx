@@ -3,10 +3,11 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { formatDay, isValidIsoDate, type IsoDate } from "@/domain/dates";
 import type { Kopecks } from "@/domain/money";
-import { dueOccurrences, nextOccurrence, type Occurrence } from "@/domain/recurring";
+import { dueOccurrences, nextOccurrence, templateEnd, type Occurrence } from "@/domain/recurring";
 import { LIMITS, type Template } from "@/domain/schema";
 import { activeAccounts, findAccount, MAIN_ACCOUNT_ID } from "@/domain/accounts";
-import { loanRemaining } from "@/domain/metrics";
+import { goalSaved, loanRemaining } from "@/domain/metrics";
+import { formatMoney } from "@/domain/money";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { AccountPicker } from "../../ui/AccountPicker";
 import { AmountInput } from "../../ui/AmountInput";
@@ -23,7 +24,10 @@ import { useUi } from "../overlays";
 import { plural } from "@/domain/text";
 
 type Kind = Template["kind"];
-type Errors = { amount?: string; title?: string; category?: string; day?: string; startDate?: string };
+type Errors = { amount?: string; title?: string; category?: string; day?: string; startDate?: string; endDate?: string };
+
+/** Сколько повторять: без срока, до даты или пока не закрыт долг / не накоплена цель. */
+type Until = "never" | "date" | "done";
 
 const QUICK_DAYS = [1, 5, 10, 15, 20, 25];
 
@@ -37,13 +41,18 @@ function groupOf(kind: Kind): "income" | "mandatory" {
   return kind === "income" ? "income" : "mandatory";
 }
 
-/** Куда идут деньги платежа: обычный расход, свой счёт или кредит из «Долгов». */
-type Target = { kind: "none" } | { kind: "account"; id: string } | { kind: "loan"; id: string };
+/** Куда идут деньги платежа: обычный расход, свой счёт, кредит из «Долгов» или цель. */
+type Target = { kind: "none" } | { kind: "account"; id: string } | { kind: "loan"; id: string } | { kind: "goal"; id: string };
 
 function targetOf(t: Template | undefined): Target {
   if (t?.toAccountId) return { kind: "account", id: t.toAccountId };
   if (t?.loanId) return { kind: "loan", id: t.loanId };
+  if (t?.goalId) return { kind: "goal", id: t.goalId };
   return { kind: "none" };
+}
+
+function untilOf(t: Template | undefined): Until {
+  return t?.untilDone ? "done" : t?.endDate ? "date" : "never";
 }
 
 function sameTarget(a: Target, b: Target): boolean {
@@ -79,6 +88,8 @@ export function TemplateSheet({
     active: existing?.active ?? true,
     accountId: existing?.accountId ?? MAIN_ACCOUNT_ID,
     target: targetOf(existing),
+    until: untilOf(existing),
+    endDate: existing?.endDate ?? "",
   }));
   const [kind, setKind] = useState<Kind>(initial.kind);
   const [amount, setAmount] = useState<Kopecks | null>(initial.amount);
@@ -94,6 +105,8 @@ export function TemplateSheet({
   // Счета: с какого списывается платёж (или куда приходит доход) и куда идут деньги платежа.
   const [accountId, setAccountId] = useState(initial.accountId);
   const [target, setTarget] = useState<Target>(initial.target);
+  const [untilChoice, setUntil] = useState<Until>(initial.until);
+  const [endDate, setEndDate] = useState<string>(initial.endDate);
   const accounts = activeAccounts(state);
   const showAccounts = hasOwnAccounts(state) || initial.accountId !== MAIN_ACCOUNT_ID;
   // Кредиты и займы, по которым платят (свой долг): действующие и уже выбранный.
@@ -101,7 +114,17 @@ export function TemplateSheet({
     (l) => l.kind !== "lend" && (loanRemaining(state, l) > 0 || (target.kind === "loan" && target.id === l.id)),
   );
   const targetAccounts = accounts.filter((a) => a.id !== accountId);
-  const showTarget = kind === "expense" && (targetAccounts.length > 0 || loans.length > 0) && (showAccounts || loans.length > 0);
+  // Цели, которые ещё копятся, и уже выбранная.
+  const goals = state.goals.filter(
+    (g) => goalSaved(state, g) < g.targetAmount || (target.kind === "goal" && target.id === g.id),
+  );
+  const showTarget =
+    kind === "expense" &&
+    (targetAccounts.length > 0 || loans.length > 0 || goals.length > 0) &&
+    (showAccounts || loans.length > 0 || goals.length > 0);
+  // «Пока не закрыт» — только у платежа по долгу или в цель; цель сменили на обычный платёж — без срока.
+  const canUntilDone = kind === "expense" && (target.kind === "loan" || target.kind === "goal");
+  const until: Until = untilChoice === "done" && !canUntilDone ? "never" : untilChoice;
   const [errors, setErrors] = useState<Errors>({});
 
   const resuming = Boolean(existing && !existing.active && active);
@@ -142,7 +165,9 @@ export function TemplateSheet({
     (startDraft !== null && startDraft !== currentStart) ||
     active !== initial.active ||
     accountId !== initial.accountId ||
-    !sameTarget(target, initial.target);
+    !sameTarget(target, initial.target) ||
+    until !== initial.until ||
+    (until === "date" && endDate !== initial.endDate);
   const clearError = (key: keyof Errors) => setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
 
   const pickCategory = (value: string) => {
@@ -169,6 +194,8 @@ export function TemplateSheet({
     if (!title.trim()) next.title = "Введите название";
     if (day === null) next.day = "Укажите число от 1 до 31";
     if (!isValidIsoDate(startDate)) next.startDate = "Укажите дату";
+    if (until === "date" && !isValidIsoDate(endDate)) next.endDate = "Укажите дату";
+    else if (until === "date" && isValidIsoDate(startDate) && endDate < startDate) next.endDate = "Не раньше даты начала";
     setErrors(next);
     if (Object.keys(next).length || !amount || day === null) return;
 
@@ -176,6 +203,9 @@ export function TemplateSheet({
     const effectiveTarget: Target = kind === "expense" ? target : { kind: "none" };
     const toAccountId = effectiveTarget.kind === "account" ? effectiveTarget.id : null;
     const loanId = effectiveTarget.kind === "loan" ? effectiveTarget.id : null;
+    const goalId = effectiveTarget.kind === "goal" ? effectiveTarget.id : null;
+    const end = until === "date" ? endDate : null;
+    const untilDone = until === "done";
     if (!existing) {
       if (templateId) return;
       const template: Template = {
@@ -186,6 +216,9 @@ export function TemplateSheet({
         ...(accountId !== MAIN_ACCOUNT_ID ? { accountId } : {}),
         ...(toAccountId ? { toAccountId } : {}),
         ...(loanId ? { loanId } : {}),
+        ...(goalId ? { goalId } : {}),
+        ...(end ? { endDate: end } : {}),
+        ...(untilDone ? { untilDone: true as const } : {}),
       };
       if (dispatch({ type: "template.add", template })) close();
       return;
@@ -198,7 +231,15 @@ export function TemplateSheet({
       {
         type: "template.update",
         id: existing.id,
-        patch: { ...fields, accountId: accountId === MAIN_ACCOUNT_ID ? null : accountId, toAccountId, loanId },
+        patch: {
+          ...fields,
+          accountId: accountId === MAIN_ACCOUNT_ID ? null : accountId,
+          toAccountId,
+          loanId,
+          goalId,
+          endDate: end,
+          untilDone,
+        },
       },
     ]);
     if (!ok) return;
@@ -304,6 +345,12 @@ export function TemplateSheet({
                   value: { kind: "loan", id: l.id } as Target,
                   icon: "handshake" as const,
                 })),
+                ...goals.map((g) => ({
+                  key: `g:${g.id}`,
+                  label: g.name,
+                  value: { kind: "goal", id: g.id } as Target,
+                  icon: "target" as const,
+                })),
               ].map((option) => {
                 const selected = sameTarget(option.value, target);
                 return (
@@ -392,6 +439,36 @@ export function TemplateSheet({
           }}
         />
 
+        {active ? (
+          <div className="space-y-2">
+            <Segmented
+              label="Повторять"
+              value={until}
+              onChange={(v) => {
+                setUntil(v);
+                clearError("endDate");
+              }}
+              options={[
+                { value: "never" as const, label: "Без срока" },
+                { value: "date" as const, label: "До даты" },
+                ...(canUntilDone ? [{ value: "done" as const, label: target.kind === "goal" ? "До цели" : "До закрытия" }] : []),
+              ]}
+            />
+            {until === "date" && (
+              <DateInput
+                label="Последний платёж — не позже"
+                value={endDate}
+                error={errors.endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  clearError("endDate");
+                }}
+              />
+            )}
+            <p className="text-sm text-muted">{endHint(until, target, amount, state, day, startDate, endDate, today)}</p>
+          </div>
+        ) : null}
+
         {!active ? (
           <PreviewBox>На паузе — новые операции не появятся в истории.</PreviewBox>
         ) : (
@@ -420,7 +497,52 @@ export function TemplateSheet({
   );
 }
 
+/** Когда закончится платёж: по сроку или по остатку долга / до цели. */
+function endHint(
+  until: Until,
+  target: Target,
+  amount: Kopecks | null,
+  state: Parameters<typeof templateEnd>[0],
+  day: number | null,
+  startDate: string,
+  endDate: string,
+  today: IsoDate,
+): string {
+  if (until === "never") return "Повторяется каждый месяц, пока вы его не остановите.";
+  if (!amount || day === null || !isValidIsoDate(startDate) || (until === "date" && !isValidIsoDate(endDate))) {
+    return until === "date" ? "После этой даты платёж перестанет повторяться." : "Остановится сам, когда платить больше не нужно.";
+  }
+  const draft: Template = {
+    id: "draft",
+    kind: "expense",
+    title: "-",
+    category: "-",
+    amount,
+    dayOfMonth: day,
+    active: true,
+    startDate,
+    note: "",
+    ...(until === "date" ? { endDate } : {}),
+    ...(until === "done" ? { untilDone: true as const } : {}),
+    ...(target.kind === "loan" ? { loanId: target.id } : target.kind === "goal" ? { goalId: target.id } : {}),
+  };
+  const end = templateEnd({ ...state, templates: [draft] }, draft, today);
+  if (end.status === "finished") {
+    return end.reason === "loan" ? "Долг уже закрыт — платить больше не нужно." : end.reason === "goal" ? "Цель уже накоплена." : "Срок уже прошёл.";
+  }
+  if (end.status === "ends") {
+    const last = `Последний платёж — ${formatDay(end.last, today)}`;
+    if (until === "done") {
+      const what = target.kind === "goal" ? "цель накопится" : "долг закроется";
+      return `${last}${end.amount < amount ? ` на остаток ${formatMoney(end.amount)}` : ""}: ${what}, и платёж перестанет повторяться.`;
+    }
+    return `${last}, дальше не повторяется.`;
+  }
+  return "Остановится сам, когда платить больше не нужно.";
+}
+
 function targetHint(target: Target, state: Parameters<typeof findAccount>[0]): string {
+  if (target.kind === "goal") return "Пополнение цели — это сбережения: деньги уходят на её счёт с отметкой цели.";
   if (target.kind === "loan") return "Платёж по кредиту — обязательный расход месяца, уменьшает остаток долга.";
   if (target.kind === "account") {
     const account = findAccount(state, target.id);

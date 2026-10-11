@@ -181,10 +181,17 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("template.update"),
     id: idSchema,
-    // null — убрать счёт, свой счёт назначения или кредит (платёж стал обычным).
+    // null — убрать счёт, свой счёт назначения, кредит или цель (платёж стал обычным), срок; untilDone: false — без условия.
     patch: templateSchema
       .omit({ id: true, active: true })
-      .extend({ accountId: idSchema.nullable(), toAccountId: idSchema.nullable(), loanId: idSchema.nullable() })
+      .extend({
+        accountId: idSchema.nullable(),
+        toAccountId: idSchema.nullable(),
+        loanId: idSchema.nullable(),
+        goalId: idSchema.nullable(),
+        endDate: isoDateSchema.nullable(),
+        untilDone: z.boolean(),
+      })
       .partial()
       .strict(),
   }),
@@ -370,8 +377,13 @@ function assertAccount(state: State, id: string, forNew = true): Account {
  */
 function assertTemplateTargets(state: State, t: Template, current?: Template): void {
   if (t.accountId && t.accountId !== current?.accountId) assertAccount(state, t.accountId);
-  if (t.toAccountId && t.loanId) throw new DomainError("Выберите что-то одно: счёт или кредит.");
-  if ((t.toAccountId || t.loanId) && t.kind !== "expense") throw new DomainError("Счёт или кредит выбирают только у платежа.");
+  if ([t.toAccountId, t.loanId, t.goalId].filter(Boolean).length > 1) throw new DomainError("Выберите что-то одно: счёт, кредит или цель.");
+  if ((t.toAccountId || t.loanId || t.goalId) && t.kind !== "expense") {
+    throw new DomainError("Счёт, кредит или цель выбирают только у платежа.");
+  }
+  if (t.goalId && !state.goals.some((g) => g.id === t.goalId)) throw new DomainError("Цель не найдена.");
+  if (t.untilDone && !t.loanId && !t.goalId) throw new DomainError("«Пока не закрыт» — только у платежа по долгу или в цель.");
+  if (t.endDate && t.endDate < t.startDate) throw new DomainError("Срок окончания раньше даты начала.");
   if (t.toAccountId) {
     if (t.toAccountId !== current?.toAccountId) assertAccount(state, t.toAccountId);
     if (t.toAccountId === (t.accountId ?? MAIN_ACCOUNT_ID)) throw new DomainError("Платёж не может идти на тот же счёт.");
@@ -486,6 +498,7 @@ function templateOccurrence(template: Template, month: MonthKey): Omit<Occurrenc
     ...(template.accountId ? { accountId: template.accountId } : {}),
     ...(template.toAccountId ? { toAccountId: template.toAccountId } : {}),
     ...(template.loanId ? { loanId: template.loanId } : {}),
+    ...(template.goalId ? { goalId: template.goalId } : {}),
   };
 }
 
@@ -510,6 +523,19 @@ function occurrenceTransaction(
     ...(fields.review ? { review: true as const } : {}),
     ...(accountId ? { accountId } : {}),
   };
+  if (occ.kind === "expense" && occ.goalId) {
+    // Пополнение цели — отложено в месяце, на счёт цели (или в «Сбережения»), с отметкой цели.
+    const goal = state.goals.find((g) => g.id === occ.goalId);
+    const to = savingsTarget(state, goal?.accountId);
+    return {
+      ...base,
+      type: "saving",
+      amount: fields.amount,
+      category: SAVINGS_CATEGORY,
+      ...(goal ? { goalId: goal.id } : {}),
+      ...(to !== SAVINGS_ACCOUNT_ID ? { toAccountId: to } : {}),
+    };
+  }
   if (occ.kind === "expense" && occ.toAccountId) {
     if (findAccount(state, occ.toAccountId)?.kind === "savings") {
       return {
@@ -962,16 +988,20 @@ export function applyAction(state: State, action: Action): State {
 
     case "template.update": {
       const current = findTemplate(state, action.id);
-      const { accountId, toAccountId, loanId, ...fields } = action.patch;
+      const { accountId, toAccountId, loanId, goalId, endDate, untilDone, ...fields } = action.patch;
       const patched: Template = { ...current, ...fields };
       for (const [key, value] of [
         ["accountId", accountId],
         ["toAccountId", toAccountId],
         ["loanId", loanId],
+        ["goalId", goalId],
+        ["endDate", endDate],
       ] as const) {
         if (value === null) delete patched[key];
         else if (value !== undefined) patched[key] = value;
       }
+      if (untilDone === false) delete patched.untilDone;
+      else if (untilDone) patched.untilDone = true;
       assertTemplateTargets(state, patched, current);
       const updated: Template =
         fields.category === undefined ? patched : { ...patched, category: canonicalCategory(state, fields.category) };
@@ -1090,11 +1120,20 @@ export function applyAction(state: State, action: Action): State {
     }
 
     case "goal.delete": {
-      if (!state.goals.some((g) => g.id === action.id)) throw new DomainError("Цель не найдена.");
-      // Накопленные деньги остаются в общих сбережениях.
+      const deleted = state.goals.find((g) => g.id === action.id);
+      if (!deleted) throw new DomainError("Цель не найдена.");
+      // Накопленные деньги остаются в общих сбережениях; регулярные пополнения цели — пополнения её счёта.
       return {
         ...state,
         goals: state.goals.filter((g) => g.id !== action.id),
+        templates: state.templates.map((t) => {
+          if (t.goalId !== action.id) return t;
+          const rest = { ...t };
+          delete rest.goalId;
+          delete rest.untilDone;
+          const to = savingsTarget(state, deleted.accountId);
+          return { ...rest, toAccountId: to };
+        }),
         transactions: state.transactions.map((t) => {
           if (t.goalId !== action.id) return t;
           const rest = { ...t };
@@ -1181,6 +1220,7 @@ export function applyAction(state: State, action: Action): State {
           if (t.loanId !== action.id) return t;
           const rest = { ...t };
           delete rest.loanId;
+          delete rest.untilDone;
           return rest;
         }),
         transactions: state.transactions.map((t) => {

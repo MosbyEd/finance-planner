@@ -127,6 +127,15 @@ export const templateSchema = z.object({
    */
   toAccountId: idSchema.optional(),
   loanId: idSchema.optional(),
+  /** Регулярное пополнение цели: деньги уходят на её счёт (или в «Сбережения») с отметкой цели. */
+  goalId: idSchema.optional(),
+  /** Последний день, когда платёж ещё начисляется. Нет — без срока. */
+  endDate: isoDateSchema.optional(),
+  /**
+   * Платёж по долгу или в цель — пока долг не закрыт / цель не накоплена: последний платёж — на остаток,
+   * дальше платёж не повторяется (увеличили цель — снова пойдёт).
+   */
+  untilDone: z.literal(true).optional(),
 });
 export type Template = z.infer<typeof templateSchema>;
 

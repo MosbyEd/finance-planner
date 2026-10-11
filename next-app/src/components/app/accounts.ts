@@ -107,14 +107,20 @@ export function transactionAccountLabel(state: State, tx: Transaction): string |
  * Откуда и куда идёт регулярный платёж: «Основной → Кредитка», «Основной → Ипотека», «Кредитка» (только откуда).
  * null — счетов нет и платёж обычный.
  */
-export function templateRoute(state: State, t: { accountId?: string; toAccountId?: string; loanId?: string }): string | null {
+export function templateRoute(
+  state: State,
+  t: { accountId?: string; toAccountId?: string; loanId?: string; goalId?: string },
+): string | null {
   const own = hasOwnAccounts(state);
   const from = own ? (findAccount(state, t.accountId ?? MAIN_ACCOUNT_ID)?.name ?? "счёт") : null;
+  const goal = t.goalId ? state.goals.find((g) => g.id === t.goalId)?.name : undefined;
   const to = t.toAccountId
     ? findAccount(state, t.toAccountId)?.name
     : t.loanId
       ? state.loans.find((l) => l.id === t.loanId)?.name
-      : undefined;
+      : goal
+        ? `цель «${goal}»`
+        : undefined;
   if (to) return from ? `${from} → ${to}` : `→ ${to}`;
   return from;
 }

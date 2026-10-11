@@ -115,6 +115,10 @@ const proposalSchema = z.object({
       accountId: z.string().optional(),
       toAccountId: z.string().optional(),
       loanId: z.string().optional(),
+      goalId: z.string().optional(),
+      newGoal: z.string().optional(),
+      endDate: z.string().refine(isValidIsoDate).optional(),
+      untilDone: z.literal(true).optional(),
     }),
   ),
   limits: z.array(z.object({ category: z.string(), amount: z.number().int() })),
@@ -131,6 +135,9 @@ const proposalSchema = z.object({
         accountId: z.string().optional(),
         toAccountId: z.string().nullable().optional(),
         loanId: z.string().nullable().optional(),
+        goalId: z.string().nullable().optional(),
+        endDate: z.string().refine(isValidIsoDate).nullable().optional(),
+        untilDone: z.boolean().optional(),
       }),
     )
     .default([]),
@@ -138,6 +145,16 @@ const proposalSchema = z.object({
   goals: z.array(z.object({ goalId: z.string(), amount: z.number().int() })).default([]),
   loanPayments: z
     .array(z.object({ loanId: z.string(), amount: z.number().int(), date: z.string().refine(isValidIsoDate) }))
+    .default([]),
+  newGoals: z
+    .array(
+      z.object({
+        name: z.string(),
+        targetAmount: z.number().int(),
+        dueDate: z.string().refine(isValidIsoDate).nullable(),
+        accountId: z.string().optional(),
+      }),
+    )
     .default([]),
 });
 

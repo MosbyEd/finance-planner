@@ -135,6 +135,7 @@ const aiChatSchema = z.object({
       balances: z.array(z.any()).default([]),
       goals: z.array(z.any()).default([]),
       loanPayments: z.array(z.any()).default([]),
+      newGoals: z.array(z.any()).default([]),
     })
     .nullable(),
   skipped: z.number(),

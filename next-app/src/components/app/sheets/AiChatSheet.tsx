@@ -701,6 +701,7 @@ interface ProposalItem {
 }
 
 const GROUP_TITLES: Partial<Record<ProposalKey, string>> = {
+  newGoals: "Новые цели",
   operations: "Операции",
   limits: "Лимиты по категориям",
   transfers: "Переводы между счетами",
@@ -714,6 +715,17 @@ const GROUP_TITLES: Partial<Record<ProposalKey, string>> = {
 function proposalItems(proposal: AiProposal, state: State, today: IsoDate): ProposalItem[] {
   const accountName = (id: string | undefined) => (id ? (findAccount(state, id)?.name ?? "счёт") : null);
   const items: ProposalItem[] = [];
+  proposal.newGoals.forEach((g, index) =>
+    items.push({
+      id: `newGoals:${index}`,
+      group: "newGoals",
+      index,
+      title: g.name,
+      subtitle: [g.dueDate ? `к ${formatDay(g.dueDate, today)}` : "без срока", accountName(g.accountId)].filter(Boolean).join(" · "),
+      amount: null,
+      right: formatMoney(g.targetAmount),
+    }),
+  );
   proposal.operations.forEach((op, index) =>
     items.push({
       id: `operations:${index}`,
@@ -732,7 +744,12 @@ function proposalItems(proposal: AiProposal, state: State, today: IsoDate): Prop
       group: "templates",
       index,
       title: t.title || t.category,
-      subtitle: [`${t.type === "income" ? "доход" : "платёж"} каждое ${t.dayOfMonth}-е число`, t.category, templateRoute(state, t)]
+      subtitle: [
+        `${t.type === "income" ? "доход" : "платёж"} каждое ${t.dayOfMonth}-е число`,
+        t.category,
+        t.newGoal ? `в новую цель «${t.newGoal}»` : templateRoute(state, t),
+        t.untilDone ? (t.loanId ? "пока не закрыт долг" : "пока не накоплена цель") : t.endDate ? `до ${formatDay(t.endDate, today)}` : null,
+      ]
         .filter(Boolean)
         .join(" · "),
       amount: t.type === "income" ? t.amount : -t.amount,
@@ -761,7 +778,11 @@ function proposalItems(proposal: AiProposal, state: State, today: IsoDate): Prop
     if (u.accountId !== undefined) changes.push(`со счёта «${accountName(u.accountId)}»`);
     if (u.toAccountId) changes.push(`на «${accountName(u.toAccountId)}»`);
     else if (u.loanId) changes.push(`в счёт «${state.loans.find((l) => l.id === u.loanId)?.name ?? "долга"}»`);
+    else if (u.goalId) changes.push(`в цель «${state.goals.find((g) => g.id === u.goalId)?.name ?? "цель"}»`);
     else if (u.toAccountId === null && u.loanId === null) changes.push("обычный платёж");
+    if (u.untilDone) changes.push("пока не закрыт долг или не накоплена цель");
+    else if (u.endDate) changes.push(`до ${formatDay(u.endDate, today)}`);
+    else if (u.endDate === null && u.untilDone === false) changes.push("без срока");
     items.push({ id: `templateUpdates:${index}`, group: "templateUpdates", index, title: template?.title ?? "Регулярный платёж", subtitle: changes.join(" · "), amount: null });
   });
   proposal.balances.forEach((b, index) => {
@@ -811,6 +832,7 @@ export function pickProposal(proposal: AiProposal, selected: ReadonlySet<string>
     balances: keep("balances", proposal.balances),
     goals: keep("goals", proposal.goals),
     loanPayments: keep("loanPayments", proposal.loanPayments),
+    newGoals: keep("newGoals", proposal.newGoals),
   };
 }
 

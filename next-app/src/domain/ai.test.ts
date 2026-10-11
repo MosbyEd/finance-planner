@@ -187,3 +187,24 @@ describe("выбор модели", () => {
     expect(pickAiMode("Составь план накоплений на цель")).toBe("reasoning");
   });
 });
+
+describe("помощник: цели и срок регулярных", () => {
+  it("создаёт цель и регулярное пополнение в неё до накопления; ставит срок существующему платежу", () => {
+    const s0 = stateWith();
+    s0.templates = [
+      { id: "net", kind: "expense", title: "Интернет", category: "Связь и интернет", amount: 70_000, dayOfMonth: 15, active: true, startDate: "2026-10-01", note: "" },
+    ];
+    const reply = `Создам цель и пополнение.
+AI_CMDS: {"newGoals":[{"name":"Отпуск","target":150000,"dueDate":"2027-06-01"}],"templates":[{"type":"expense","amount":15000,"category":"Сбережения","title":"На отпуск","dayOfMonth":10,"to":"Отпуск","until":"done"}],"templateUpdates":[{"title":"Интернет","until":"2027-03-31"}]}`;
+    const parsed = parseAiReply(reply, s0, "2026-10-11");
+    expect(parsed.skipped).toBe(0);
+    expect(parsed.proposal?.newGoals).toEqual([{ name: "Отпуск", targetAmount: 15_000_000, dueDate: "2027-06-01" }]);
+    expect(parsed.proposal?.templates[0]).toMatchObject({ newGoal: "Отпуск", untilDone: true });
+
+    let n = 0;
+    const s = applyActions(s0, proposalToActions(parsed.proposal!, s0, "2026-10-11", () => `ai${++n}`));
+    const goal = s.goals.find((g) => g.name === "Отпуск")!;
+    expect(s.templates.find((t) => t.title === "На отпуск")).toMatchObject({ goalId: goal.id, untilDone: true });
+    expect(s.templates.find((t) => t.id === "net")).toMatchObject({ endDate: "2027-03-31" });
+  });
+});

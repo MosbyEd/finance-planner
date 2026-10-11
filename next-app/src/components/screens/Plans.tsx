@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
-import { isSkipped, nextOccurrence, occurrenceDate } from "@/domain/recurring";
+import { isSkipped, nextOccurrence, occurrenceDate, templateEnd, type TemplateEnd } from "@/domain/recurring";
 import { findAccount } from "@/domain/accounts";
 import type { State, Template } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
@@ -31,18 +31,27 @@ function byActiveAndDay(a: Template, b: Template): number {
   return Number(b.active) - Number(a.active) || a.dayOfMonth - b.dayOfMonth || a.title.localeCompare(b.title, "ru");
 }
 
-/** Сумма действующих шаблонов. Платежи на свои счета (погашение кредитки, пополнение накопительного) — не расходы. */
-function sumActive(templates: Template[], kind: Kind): Kopecks {
-  return templates.reduce((sum, t) => (t.active && t.kind === kind && !(kind === "expense" && t.toAccountId) ? sum + t.amount : sum), 0);
+/** Шаблон ещё действует: не на паузе и не закончился (срок, закрытый долг, накопленная цель). */
+function isLive(state: State, t: Template, today: IsoDate): boolean {
+  return t.active && templateEnd(state, t, today).status !== "finished";
 }
 
-/** Регулярные переводы на свои счета: на накопительные — это сбережения, остальное (погашение кредиток) — перевод. */
-function sumTransfers(state: State): { savings: Kopecks; other: Kopecks } {
+/** Сумма действующих шаблонов. Платежи на свои счета и в цели (погашение кредитки, сбережения) — отдельно. */
+function sumActive(state: State, kind: Kind, today: IsoDate): Kopecks {
+  return state.templates.reduce(
+    (sum, t) =>
+      isLive(state, t, today) && t.kind === kind && !(kind === "expense" && (t.toAccountId || t.goalId)) ? sum + t.amount : sum,
+    0,
+  );
+}
+
+/** Регулярные переводы на свои счета: на накопительные и в цели — это сбережения, остальное — погашение кредиток. */
+function sumTransfers(state: State, today: IsoDate): { savings: Kopecks; other: Kopecks } {
   let savings = 0;
   let other = 0;
   for (const t of state.templates) {
-    if (!t.active || t.kind !== "expense" || !t.toAccountId) continue;
-    if (findAccount(state, t.toAccountId)?.kind === "savings") savings += t.amount;
+    if (!isLive(state, t, today) || t.kind !== "expense" || (!t.toAccountId && !t.goalId)) continue;
+    if (t.goalId || findAccount(state, t.toAccountId!)?.kind === "savings") savings += t.amount;
     else other += t.amount;
   }
   return { savings, other };
@@ -59,10 +68,10 @@ export function Plans() {
         .filter((t) => t.kind === kind)
         .sort(byActiveAndDay)
         .map((t) => ({ template: t, next: nextOccurrence(state, t, today)?.date ?? null }));
-    const income = sumActive(state.templates, "income");
-    const expense = sumActive(state.templates, "expense");
+    const income = sumActive(state, "income", today);
+    const expense = sumActive(state, "expense", today);
     const savingsTarget = percentOf(income, state.settings.savingsRatePercent);
-    const transfers = sumTransfers(state);
+    const transfers = sumTransfers(state, today);
     // Регулярные переводы на накопительные покрывают норму сбережений; больше нормы — откладывается больше.
     const saving = Math.max(savingsTarget, transfers.savings);
     const skipped: SkippedRow[] = state.templates
@@ -78,7 +87,8 @@ export function Plans() {
       transfers,
       savingsTarget,
       saving,
-      free: income - expense - saving,
+      // Погашение кредиток — деньги уходят со счёта каждый месяц, поэтому вычитаем и его.
+      free: income - expense - saving - transfers.other,
       skipped,
     };
   }, [state, today]);
@@ -149,9 +159,8 @@ function SummaryCard({
           // Погашение кредитки — перевод между своими счетами: покупки по ней уже учтены, когда их делали.
           <SummaryRow
             label="Погашение кредиток"
-            value={transfers.other}
-            neutral
-            note="Не расход: покупки по кредитке уже учтены в бюджете, когда вы их делали"
+            value={-transfers.other}
+            note="Уходит со счёта каждый месяц. В лимите на день покупки по кредитке считаются, когда вы их делаете"
           />
         )}
         <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-border pt-3">
@@ -247,6 +256,18 @@ function TemplateSection({ kind, rows }: { kind: Kind; rows: Row[] }) {
   );
 }
 
+/** Строка состояния: следующий платёж и когда закончится (или почему уже закончился). */
+function statusLine(end: TemplateEnd, next: IsoDate | null, today: IsoDate): string {
+  if (end.status === "finished") {
+    return end.reason === "loan" ? "Закончился — долг закрыт" : end.reason === "goal" ? "Закончился — цель накоплена" : "Закончился — срок прошёл";
+  }
+  const first = next ? `Следующий — ${formatDay(next, today)}` : "Начнётся позже";
+  if (end.status !== "ends" || (next && end.last === next)) {
+    return end.status === "ends" ? `${first}, последний` : first;
+  }
+  return `${first} · последний — ${formatDay(end.last, today)}`;
+}
+
 function TemplateRow({ row }: { row: Row }) {
   const { template: t, next } = row;
   const { state } = useSnapshot();
@@ -269,6 +290,7 @@ function TemplateRow({ row }: { row: Row }) {
 
   const amount = t.kind === "income" ? t.amount : -t.amount;
   const route = templateRoute(state, t);
+  const end = templateEnd(state, t, today);
 
   // Строка открывает шаблон: кнопка растянута на всю строку через ::after. Справа — сумма и под ней
   // подписанная кнопка паузы, так на узком экране тексту слева остаётся вся ширина.
@@ -289,8 +311,8 @@ function TemplateRow({ row }: { row: Row }) {
           </span>
         </span>
         {route && <span className="block truncate text-xs text-muted">{route}</span>}
-        <span className={`block text-xs ${t.active ? "text-muted" : "font-medium text-warning"}`}>
-          {!t.active ? "На паузе" : next ? `Следующий — ${formatDay(next, today)}` : "Начнётся позже"}
+        <span className={`block text-xs ${t.active && end.status !== "finished" ? "text-muted" : "font-medium text-warning"}`}>
+          {!t.active ? "На паузе" : statusLine(end, next, today)}
         </span>
         <span className="sr-only">, {formatMoney(amount, { sign: true })}</span>
       </button>

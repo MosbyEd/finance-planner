@@ -20,13 +20,25 @@ import {
   creditDebts,
   findAccount,
   savingsAccountIds,
+  savingsTarget,
   spendingAccountIds,
   spendingEffect,
   summarizeParts,
   type CreditSummary,
 } from "./accounts";
 import { creditParts, hasTerms, resolveTerms, type CreditMove } from "./interest";
-import type { Goal, Loan, Settings, State, Transaction } from "./schema";
+import {
+  dedicatedGoalAccount,
+  goalAvailable,
+  goalSaved,
+  loanOpening,
+  loanOpeningSign,
+  loanPaid,
+  loanRemaining,
+} from "./progress";
+import type { Loan, Settings, State, Transaction } from "./schema";
+
+export { dedicatedGoalAccount, goalAvailable, goalSaved, loanOpening, loanOpeningSign, loanPaid, loanRemaining };
 
 /**
  * Сумма операции со знаком для показа: доходы и корректировки — как есть, расходы и отчисления в сбережения —
@@ -62,29 +74,6 @@ export function savingsTotal(state: State, date?: IsoDate): Kopecks {
 }
 
 /**
- * Счёт цели, если он только её: тогда цель и счёт связаны в обе стороны — накоплено столько, сколько лежит
- * на счёте (пополнили счёт любым способом — пополнилась цель). Счёт нескольких целей — null: деньги делятся
- * по пополнениям с отметкой цели.
- */
-export function dedicatedGoalAccount(state: State, goal: Goal): string | null {
-  if (!goal.accountId) return null;
-  return state.goals.some((g) => g.id !== goal.id && g.accountId === goal.accountId) ? null : goal.accountId;
-}
-
-export function goalSaved(state: State, goal: Goal): Kopecks {
-  const account = dedicatedGoalAccount(state, goal);
-  if (account) return Math.max(0, accountBalances(state).get(account) ?? 0);
-  let sum = goal.initialAmount;
-  for (const tx of state.transactions) if (tx.type === "saving" && tx.goalId === goal.id) sum += tx.amount;
-  return sum;
-}
-
-/** Сколько можно снять с цели: остаток её счёта или отложенное на неё в приложении (без накопленного до него). */
-export function goalAvailable(state: State, goal: Goal): Kopecks {
-  return dedicatedGoalAccount(state, goal) ? goalSaved(state, goal) : goalSaved(state, goal) - goal.initialAmount;
-}
-
-/**
  * Сколько из сбережений лежит на целях (накоплено в приложении, без initialAmount): эти деньги
  * снимают с самой цели, а не из общих сбережений — иначе одни и те же деньги сняли бы дважды.
  */
@@ -106,46 +95,6 @@ export function goalsReserved(state: State): Kopecks {
   let reserved = dedicated;
   for (const sum of perGoal.values()) reserved += Math.max(0, sum);
   return reserved;
-}
-
-/** Знак корректировки, с которой долг открыт через счёт: взял в долг — деньги пришли (+), дал — ушли (−). */
-export function loanOpeningSign(kind: Loan["kind"]): 1 | -1 {
-  return kind === "lend" ? -1 : 1;
-}
-
-/**
- * Корректировка остатка, созданная вместе с долгом (деньги прошли через счёт). Отмечена loanOpening.
- * У долгов, созданных до этой отметки, — первая корректировка долга со знаком открытия: платежи
- * по таким долгам тогда записывались доходом или расходом, а корректировки-платежи имеют обратный знак.
- */
-export function loanOpening(state: State, loan: Loan): Transaction | undefined {
-  const sign = loanOpeningSign(loan.kind);
-  let legacy: Transaction | undefined;
-  for (const tx of state.transactions) {
-    if (tx.type !== "adjustment" || tx.loanId !== loan.id) continue;
-    if (tx.loanOpening) return tx;
-    if (!legacy && Math.sign(tx.amount) === sign) legacy = tx;
-  }
-  return legacy;
-}
-
-/**
- * Погашено (или возвращено): до приложения + платежи. Платёж — доход/расход по долгу или,
- * если деньги долга прошли через счёт, корректировка (по модулю). Корректировка открытия — не платёж.
- */
-export function loanPaid(state: State, loan: Loan): Kopecks {
-  const opening = loanOpening(state, loan);
-  let sum = loan.initialPaid;
-  for (const tx of state.transactions) {
-    if (tx.loanId !== loan.id || tx === opening) continue;
-    if (tx.type === "income" || tx.type === "expense") sum += tx.amount;
-    else if (tx.type === "adjustment") sum += Math.abs(tx.amount);
-  }
-  return sum;
-}
-
-export function loanRemaining(state: State, loan: Loan): Kopecks {
-  return Math.max(0, loan.amount - loanPaid(state, loan));
 }
 
 /** День, с которого идёт долг: указанный или день записи. */
@@ -277,7 +226,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   for (const occ of plannedOccurrences(state, cutoff, last)) {
     if (occ.kind === "income") incomeFuture += occ.amount;
     else if (occurrenceIsExpense(state, occ)) mandatoryFuture += occ.amount;
-    else if (occ.toAccountId && findAccount(state, occ.toAccountId)?.kind === "savings") savingsPlanned += occ.amount;
+    else if (occ.goalId || (occ.toAccountId && findAccount(state, occ.toAccountId)?.kind === "savings")) savingsPlanned += occ.amount;
   }
 
   const incomePlan = incomeFact + incomeFuture;
@@ -335,12 +284,17 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   };
 }
 
+/** Куда уходят деньги регулярного пополнения цели: её накопительный счёт или «Сбережения». */
+function goalTargetAccount(state: State, goalId: string): string {
+  return savingsTarget(state, state.goals.find((g) => g.id === goalId)?.accountId);
+}
+
 /**
  * Будущее начисление шаблона — расход бюджета? Перевод на свой счёт (погашение кредитки, пополнение
  * накопительного) — нет; платёж по долгу, деньги которого прошли через счёт, — тоже нет (корректировка).
  */
-function occurrenceIsExpense(state: State, occ: { toAccountId?: string; loanId?: string }): boolean {
-  if (occ.toAccountId) return false;
+function occurrenceIsExpense(state: State, occ: { toAccountId?: string; loanId?: string; goalId?: string }): boolean {
+  if (occ.toAccountId || occ.goalId) return false;
   if (occ.loanId) {
     const loan = state.loans.find((l) => l.id === occ.loanId);
     return !loan || !loanOpening(state, loan);
@@ -396,11 +350,13 @@ export function upcomingEvents(state: State, today: IsoDate, until: IsoDate): Up
     });
   }
   for (const occ of plannedOccurrences(state, today, until)) {
-    // Платёж на свой счёт двигает деньги между счетами: на счетах для трат меняется только то, что ушло с них.
-    const toOwn = occ.kind === "expense" && occ.toAccountId;
+    // Платёж на свой счёт (и пополнение цели — на её счёт) двигает деньги между счетами: на счетах для трат
+    // меняется только то, что ушло с них.
+    const ownTarget = occ.kind !== "expense" ? undefined : occ.goalId ? goalTargetAccount(state, occ.goalId) : occ.toAccountId;
+    const toOwn = Boolean(ownTarget);
     const type: Transaction["type"] = toOwn ? "transfer" : occ.kind;
     const effect = toOwn
-      ? spendingEffect(spending, { type: "transfer", amount: occ.amount, accountId: occ.accountId, toAccountId: occ.toAccountId })
+      ? spendingEffect(spending, { type: "transfer", amount: occ.amount, accountId: occ.accountId, toAccountId: ownTarget })
       : onSpending(occ.accountId)
         ? occ.kind === "income"
           ? occ.amount

@@ -8,6 +8,7 @@ import {
   type IsoDate,
   type MonthKey,
 } from "./dates";
+import { goalSaved, loanRemaining } from "./progress";
 import { getOwn } from "./records";
 import type { State, Template } from "./schema";
 
@@ -28,6 +29,7 @@ export interface Occurrence {
   /** Куда идут деньги: свой счёт или кредит (см. Template). */
   toAccountId?: string;
   loanId?: string;
+  goalId?: string;
 }
 
 /**
@@ -133,7 +135,54 @@ function toOccurrence(template: Template, month: MonthKey, date: IsoDate): Occur
     ...(template.accountId ? { accountId: template.accountId } : {}),
     ...(template.toAccountId ? { toAccountId: template.toAccountId } : {}),
     ...(template.loanId ? { loanId: template.loanId } : {}),
+    ...(template.goalId ? { goalId: template.goalId } : {}),
   };
+}
+
+/**
+ * Сколько ещё платить по шаблону «пока не закрыт долг / не накоплена цель»: остаток долга или до цели.
+ * null — платёж без такого условия. Долг или цель удалили — 0 (платить больше некуда).
+ */
+export function templateRemaining(state: State, template: Template): number | null {
+  if (!template.untilDone) return null;
+  if (template.loanId) {
+    const loan = state.loans.find((l) => l.id === template.loanId);
+    return loan ? loanRemaining(state, loan) : 0;
+  }
+  if (template.goalId) {
+    const goal = state.goals.find((g) => g.id === template.goalId);
+    return goal ? Math.max(0, goal.targetAmount - goalSaved(state, goal)) : 0;
+  }
+  return null;
+}
+
+/**
+ * Начисления шаблона по месяцам окна (по порядку) с учётом срока и условия «пока не закрыт»: после срока
+ * не начисляется; при условии каждое начисление уменьшает остаток, последнее — на остаток, дальше — ничего.
+ */
+function templateOccurrences(
+  state: State,
+  template: Template,
+  slots: MonthSlot[],
+  include: (slot: MonthSlot, date: IsoDate) => boolean,
+): Occurrence[] {
+  const result: Occurrence[] = [];
+  const startMonth = monthKeyOf(template.startDate);
+  let left = templateRemaining(state, template);
+  for (const slot of slots) {
+    if (slot.month < startMonth) continue;
+    const date = slotDate(slot, template.dayOfMonth);
+    if (template.endDate && date > template.endDate) break;
+    if (!include(slot, date)) continue;
+    if (left !== null && left <= 0) break;
+    const occurrence = toOccurrence(template, slot.month, date);
+    if (left !== null) {
+      occurrence.amount = Math.min(template.amount, left);
+      left -= occurrence.amount;
+    }
+    result.push(occurrence);
+  }
+  return result;
 }
 
 /**
@@ -148,14 +197,18 @@ export function dueOccurrences(state: State, today: IsoDate): Occurrence[] {
   const result: Occurrence[] = [];
   for (const template of state.templates) {
     if (!template.active || template.startDate > today) continue;
-    const startMonth = monthKeyOf(template.startDate);
-    for (const slot of slots) {
-      if (slot.month < startMonth) continue;
-      const date = slotDate(slot, template.dayOfMonth);
-      if (date < template.startDate || date > today) continue;
-      if (index.isDone(template.id, slot.month) || index.isSkipped(template.id, slot.month)) continue;
-      result.push(toOccurrence(template, slot.month, date));
-    }
+    result.push(
+      ...templateOccurrences(
+        state,
+        template,
+        slots,
+        (slot, date) =>
+          date >= template.startDate &&
+          date <= today &&
+          !index.isDone(template.id, slot.month) &&
+          !index.isSkipped(template.id, slot.month),
+      ),
+    );
   }
   // Обычное сравнение строк, без localeCompare: порядок создаваемых операций не зависит от локали устройства.
   return result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -172,14 +225,19 @@ export function plannedOccurrences(state: State, after: IsoDate, until: IsoDate)
   const result: Occurrence[] = [];
   for (const template of state.templates) {
     if (!template.active) continue;
-    const startMonth = monthKeyOf(template.startDate);
-    for (const slot of slots) {
-      if (slot.month < startMonth) continue;
-      const date = slotDate(slot, template.dayOfMonth);
-      if (date <= after || date > until || date < template.startDate) continue;
-      if (index.isDone(template.id, slot.month) || index.isSkipped(template.id, slot.month)) continue;
-      result.push(toOccurrence(template, slot.month, date));
-    }
+    result.push(
+      ...templateOccurrences(
+        state,
+        template,
+        slots,
+        (slot, date) =>
+          date > after &&
+          date <= until &&
+          date >= template.startDate &&
+          !index.isDone(template.id, slot.month) &&
+          !index.isSkipped(template.id, slot.month),
+      ),
+    );
   }
   return result.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
 }
@@ -189,4 +247,32 @@ export function nextOccurrence(state: State, template: Template, today: IsoDate)
   if (!template.active) return null;
   const single: State = { ...state, templates: [template] };
   return plannedOccurrences(single, today, addDays(today, 400))[0] ?? null;
+}
+
+export type TemplateEnd =
+  /** Платёж закончился: прошёл срок, долг закрыт или цель накоплена. */
+  | { status: "finished"; reason: "date" | "loan" | "goal" }
+  /** Последний платёж и его сумма (у «пока не закрыт» — на остаток). */
+  | { status: "ends"; last: IsoDate; amount: number }
+  | { status: "open" };
+
+/** Когда платёж закончится. Для «пока не закрыт» — по остатку и сумме платежа (без учёта пропусков). */
+export function templateEnd(state: State, template: Template, today: IsoDate): TemplateEnd {
+  const left = templateRemaining(state, template);
+  if (left !== null && left <= 0) return { status: "finished", reason: template.loanId ? "loan" : "goal" };
+  // Последнее начисление по сроку: в месяц срока, если день платежа не позже срока, иначе — в предыдущий.
+  let lastByDate: IsoDate | null = null;
+  if (template.endDate) {
+    const endMonth = monthKeyOf(template.endDate);
+    const inEndMonth = occurrenceDate(template, endMonth);
+    lastByDate = inEndMonth <= template.endDate ? inEndMonth : occurrenceDate(template, addMonths(endMonth, -1));
+    if (lastByDate < today || lastByDate < template.startDate) return { status: "finished", reason: "date" };
+  }
+  const next = left !== null ? nextOccurrence(state, template, today) : null;
+  if (left !== null && next) {
+    const count = Math.ceil(left / template.amount);
+    const last = occurrenceDate(template, addMonths(next.month, count - 1));
+    if (!lastByDate || last <= lastByDate) return { status: "ends", last, amount: left - (count - 1) * template.amount };
+  }
+  return lastByDate ? { status: "ends", last: lastByDate, amount: template.amount } : { status: "open" };
 }
