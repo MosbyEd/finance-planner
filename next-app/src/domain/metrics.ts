@@ -18,6 +18,7 @@ import {
   MAIN_ACCOUNT_ID,
   accountBalances,
   creditDebts,
+  findAccount,
   savingsAccountIds,
   spendingAccountIds,
   spendingEffect,
@@ -202,7 +203,8 @@ export interface MonthMetrics {
   daysLeft: number;
   income: { fact: Kopecks; plan: Kopecks };
   mandatory: { fact: Kopecks; plan: Kopecks };
-  savings: { fact: Kopecks; target: Kopecks };
+  /** planned — регулярные переводы на накопительные, которые ещё впереди в этом месяце. */
+  savings: { fact: Kopecks; target: Kopecks; planned: Kopecks };
   flexible: {
     /** Гибкий бюджет: доходы − обязательные − цель по сбережениям. */
     budget: Kopecks;
@@ -270,16 +272,21 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
     }
   }
 
+  // Регулярные переводы на накопительные, которые ещё впереди в этом месяце, — тоже сбережения месяца.
+  let savingsPlanned = 0;
   for (const occ of plannedOccurrences(state, cutoff, last)) {
     if (occ.kind === "income") incomeFuture += occ.amount;
     else if (occurrenceIsExpense(state, occ)) mandatoryFuture += occ.amount;
+    else if (occ.toAccountId && findAccount(state, occ.toAccountId)?.kind === "savings") savingsPlanned += occ.amount;
   }
 
   const incomePlan = incomeFact + incomeFuture;
   const mandatoryPlan = mandatoryFact + mandatoryFuture;
   const savingsTarget = percentOf(incomePlan, savingsRateFor(state.settings, month));
   const budget = incomePlan - mandatoryPlan - savingsTarget;
-  const extraSavings = Math.max(0, savingsFact - savingsTarget);
+  // Отложено сверх нормы урезает гибкий бюджет. Запланированные переводы на накопительные учитываем заранее:
+  // иначе лимит на день проседал бы в день перевода.
+  const extraSavings = Math.max(0, savingsFact + savingsPlanned - savingsTarget);
   const left = budget - flexibleSpent - flexibleReserved - extraSavings;
 
   const totalDays = daysInMonth(month);
@@ -314,7 +321,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
     daysLeft,
     income: { fact: incomeFact, plan: incomePlan },
     mandatory: { fact: mandatoryFact, plan: mandatoryPlan },
-    savings: { fact: savingsFact, target: savingsTarget },
+    savings: { fact: savingsFact, target: savingsTarget, planned: savingsPlanned },
     flexible: {
       budget,
       spent: flexibleSpent,

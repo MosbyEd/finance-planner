@@ -321,3 +321,21 @@ describe("цель со своим счётом", () => {
     expect(detached.goals[0].accountId).toBeUndefined();
   });
 });
+
+describe("регулярный перевод на накопительный", () => {
+  it("это сбережения: покрывает норму заранее, сверх нормы — урезает гибкий бюджет сразу, а не в день перевода", () => {
+    const savingsAcc: Account = { id: "alfa", name: "Накопительный", kind: "savings", spending: false };
+    const s0 = run(base(), { type: "account.add", account: savingsAcc });
+    s0.settings.savingsRatePercent = 10;
+    s0.templates = [
+      template({ kind: "income", amount: 10_000_000, dayOfMonth: 5, startDate: "2026-10-01" }),
+      template({ kind: "expense", amount: 2_500_000, dayOfMonth: 25, startDate: "2026-10-01", toAccountId: "alfa" }),
+    ];
+    const s = run(s0, { type: "recurring.sync", today: "2026-10-11" });
+    const m = monthMetrics(s, "2026-10", "2026-10-11");
+    // Норма 10% — 10 000 ₽, перевод 25 000 ₽ ещё впереди: сверх нормы 15 000 ₽ уже учтены.
+    expect(m.savings).toMatchObject({ target: 1_000_000, planned: 2_500_000 });
+    expect(m.mandatory.plan).toBe(0);
+    expect(m.flexible.extraSavings).toBe(1_500_000);
+  });
+});

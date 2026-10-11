@@ -62,6 +62,15 @@ private struct HomeContent: View {
     let model: HomeModel
 
     var body: some View {
+        // Все стеклянные карточки — в одном контейнере: система рисует их стекло за один проход, а не
+        // отдельно под каждой карточкой в каждом кадре прокрутки. spacing 0 — карточки не сливаются.
+        GlassEffectContainer(spacing: 0) {
+            cards
+        }
+        .animation(.smooth(duration: 0.3), value: model)
+    }
+
+    private var cards: some View {
         VStack(spacing: 16) {
             if model.hasData, let today = model.today {
                 if today.kind == "limit" {
@@ -93,7 +102,6 @@ private struct HomeContent: View {
                 RecentCard(rows: model.recent)
             }
         }
-        .animation(.smooth(duration: 0.3), value: model)
     }
 }
 
@@ -771,28 +779,27 @@ private struct RecentRow: View {
 
 // MARK: - Значок помощника
 
-/// Стеклянный серый «шар» в духе Siri из iOS 27: серебристый перелив под стеклом.
+/// Стеклянный серый «шар» в духе Siri из iOS 27: серебристый перелив под стеклом. Неподвижный: значок виден
+/// всё время, а постоянная анимация (перерисовка 30 раз в секунду с размытием) не даёт экрану простаивать
+/// и греет телефон.
 struct SiriOrbIcon: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
-            let angle = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 6) / 6 * 360
-            ZStack {
-                Circle()
-                    .fill(AngularGradient(
-                        colors: [0.96, 0.62, 0.88, 0.5, 0.8, 0.58, 0.96].map { Color(white: $0) },
-                        center: .center,
-                        angle: .degrees(angle)
-                    ))
-                    .blur(radius: 2.5)
-                Circle()
-                    .fill(RadialGradient(colors: [.white.opacity(0.75), .clear], center: .init(x: 0.32, y: 0.28), startRadius: 0, endRadius: 9))
-                Circle().strokeBorder(.white.opacity(0.55), lineWidth: 0.75)
-            }
-            .clipShape(.circle)
-            .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        ZStack {
+            Circle()
+                .fill(AngularGradient(
+                    colors: [0.96, 0.62, 0.88, 0.5, 0.8, 0.58, 0.96].map { Color(white: $0) },
+                    center: .center,
+                    angle: .degrees(40)
+                ))
+                .blur(radius: 2.5)
+            Circle()
+                .fill(RadialGradient(colors: [.white.opacity(0.75), .clear], center: .init(x: 0.32, y: 0.28), startRadius: 0, endRadius: 9))
+            Circle().strokeBorder(.white.opacity(0.55), lineWidth: 0.75)
         }
+        .clipShape(.circle)
+        // Размытие считается один раз в картинку, а не заново при каждой перерисовке экрана.
+        .drawingGroup()
+        .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
         .accessibilityHidden(true)
     }
 }

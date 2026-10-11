@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { isSkipped, nextOccurrence, occurrenceDate } from "@/domain/recurring";
-import type { Template } from "@/domain/schema";
+import { findAccount } from "@/domain/accounts";
+import type { State, Template } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { templateRoute } from "../app/accounts";
 import { useDispatch } from "../app/hooks";
@@ -35,8 +36,16 @@ function sumActive(templates: Template[], kind: Kind): Kopecks {
   return templates.reduce((sum, t) => (t.active && t.kind === kind && !(kind === "expense" && t.toAccountId) ? sum + t.amount : sum), 0);
 }
 
-function sumTransfers(templates: Template[]): Kopecks {
-  return templates.reduce((sum, t) => (t.active && t.kind === "expense" && t.toAccountId ? sum + t.amount : sum), 0);
+/** Регулярные переводы на свои счета: на накопительные — это сбережения, остальное (погашение кредиток) — перевод. */
+function sumTransfers(state: State): { savings: Kopecks; other: Kopecks } {
+  let savings = 0;
+  let other = 0;
+  for (const t of state.templates) {
+    if (!t.active || t.kind !== "expense" || !t.toAccountId) continue;
+    if (findAccount(state, t.toAccountId)?.kind === "savings") savings += t.amount;
+    else other += t.amount;
+  }
+  return { savings, other };
 }
 
 export function Plans() {
@@ -53,6 +62,9 @@ export function Plans() {
     const income = sumActive(state.templates, "income");
     const expense = sumActive(state.templates, "expense");
     const savingsTarget = percentOf(income, state.settings.savingsRatePercent);
+    const transfers = sumTransfers(state);
+    // Регулярные переводы на накопительные покрывают норму сбережений; больше нормы — откладывается больше.
+    const saving = Math.max(savingsTarget, transfers.savings);
     const skipped: SkippedRow[] = state.templates
       .filter((t) => isSkipped(state, t.id, month))
       .map((t) => ({ template: t, date: occurrenceDate(t, month) }))
@@ -63,9 +75,10 @@ export function Plans() {
       expenses: rows("expense"),
       income,
       expense,
-      transfers: sumTransfers(state.templates),
+      transfers,
       savingsTarget,
-      free: income - expense - savingsTarget,
+      saving,
+      free: income - expense - saving,
       skipped,
     };
   }, [state, today]);
@@ -86,6 +99,7 @@ export function Plans() {
             expense={data.expense}
             transfers={data.transfers}
             savingsTarget={data.savingsTarget}
+            saving={data.saving}
             rate={state.settings.savingsRatePercent}
             free={data.free}
           />
@@ -103,13 +117,15 @@ function SummaryCard({
   expense,
   transfers,
   savingsTarget,
+  saving,
   rate,
   free,
 }: {
   income: Kopecks;
   expense: Kopecks;
-  transfers: Kopecks;
+  transfers: { savings: Kopecks; other: Kopecks };
   savingsTarget: Kopecks;
+  saving: Kopecks;
   rate: number;
   free: Kopecks;
 }) {
@@ -118,10 +134,25 @@ function SummaryCard({
       <dl className="space-y-1.5 text-[15px]">
         <SummaryRow label="Доходы" value={income} tone="positive" />
         <SummaryRow label="Обязательные платежи" value={-expense} />
-        <SummaryRow label={`Норма сбережений, ${rate}%`} value={-savingsTarget} />
-        {transfers > 0 && (
-          // Погашение кредитки и пополнение накопительного — не расходы бюджета, показываем справочно.
-          <SummaryRow label="Переводы на свои счета (не расход)" value={-transfers} />
+        <SummaryRow
+          label="Сбережения"
+          value={-saving}
+          note={
+            transfers.savings === 0
+              ? `Норма ${rate}% от доходов`
+              : transfers.savings < savingsTarget
+                ? `Норма ${rate}%, из них ${formatMoney(transfers.savings)} — регулярными переводами на накопительные`
+                : `Регулярные переводы на накопительные${transfers.savings > savingsTarget ? ` — больше нормы ${rate}% (${formatMoney(savingsTarget)})` : ` — это и есть норма ${rate}%`}`
+          }
+        />
+        {transfers.other > 0 && (
+          // Погашение кредитки — перевод между своими счетами: покупки по ней уже учтены, когда их делали.
+          <SummaryRow
+            label="Погашение кредиток"
+            value={transfers.other}
+            neutral
+            note="Не расход: покупки по кредитке уже учтены в бюджете, когда вы их делали"
+          />
         )}
         <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-border pt-3">
           <dt className="font-medium">Свободно после регулярных платежей</dt>
@@ -147,13 +178,35 @@ function SummaryCard({
   );
 }
 
-function SummaryRow({ label, value, tone = "default" }: { label: string; value: Kopecks; tone?: "default" | "positive" }) {
+function SummaryRow({
+  label,
+  value,
+  tone = "default",
+  note,
+  neutral = false,
+}: {
+  label: string;
+  value: Kopecks;
+  tone?: "default" | "positive";
+  /** Пояснение под строкой. */
+  note?: string;
+  /** Справочная сумма: без знака, в «Свободно» не входит. */
+  neutral?: boolean;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-muted">{label}</dt>
-      <dd>
-        <Money value={value} sign={value > 0} tone={value > 0 ? tone : "default"} className="font-medium" />
-      </dd>
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <dt className="text-muted">{label}</dt>
+        <dd>
+          <Money
+            value={value}
+            sign={!neutral && value > 0}
+            tone={!neutral && value > 0 ? tone : "default"}
+            className={neutral ? "font-medium text-muted" : "font-medium"}
+          />
+        </dd>
+      </div>
+      {note && <p className="text-xs text-muted">{note}</p>}
     </div>
   );
 }

@@ -52,7 +52,7 @@ describe("метрики месяца", () => {
     const m = monthMetrics(s, "2026-03", "2026-03-15");
     expect(m.income).toEqual({ fact: 10_000_000, plan: 10_000_000 });
     expect(m.mandatory).toEqual({ fact: 0, plan: 3_000_000 });
-    expect(m.savings).toEqual({ fact: 1_500_000, target: 1_500_000 });
+    expect(m.savings).toEqual({ fact: 1_500_000, target: 1_500_000, planned: 0 });
     expect(m.flexible.budget).toBe(5_500_000);
     expect(m.flexible.extraSavings).toBe(0);
     expect(m.flexible.left).toBe(4_500_000);

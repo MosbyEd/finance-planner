@@ -89,6 +89,9 @@ struct PageBackground: View {
                         .position(x: geo.size.width * 0.25, y: geo.size.height)
                 }
             }
+            // Три размытия радиусом 90 — одной готовой картинкой: иначе система пересчитывает их в каждом
+            // кадре, пока поверх что-то прокручивается или движется.
+            .drawingGroup()
         }
         .ignoresSafeArea()
     }

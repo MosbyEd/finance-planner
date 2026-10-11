@@ -388,12 +388,6 @@
  * Ответ проявляется по словам, по пузырю проходит стеклянный блик. При «Уменьшить движение»
  * анимации останавливает правило выше.
  */
-@property --siri-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
 :root {
   --siri-silver-1: #f5f5f7;
   --siri-silver-2: #aeaeb2;
@@ -411,9 +405,18 @@
   }
 }
 
-@keyframes siri-spin {
+@keyframes siri-rotate {
   to {
-    --siri-angle: 360deg;
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes siri-rotate-breathe {
+  50% {
+    transform: rotate(180deg) scale(0.86);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -470,39 +473,60 @@
   }
 }
 
-/* Стеклянный шар: блик сверху слева, отражение снизу и переливающееся серебро внутри. */
+/*
+ * Стеклянный шар: блик сверху слева, отражение снизу и переливающееся серебро внутри. Серебро крутится
+ * поворотом слоя (::before) — это делает видеокарта без перерисовки; анимировать угол градиента нельзя:
+ * он перерисовывает шар и всё стекло вокруг в каждом кадре (телефон греется).
+ */
 .siri-orb {
   position: relative;
   width: 22px;
   height: 22px;
   flex: none;
+  overflow: hidden;
+  isolation: isolate;
   border-radius: 9999px;
-  background:
-    radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.95) 0 9%, rgb(255 255 255 / 0) 36%),
-    radial-gradient(circle at 68% 80%, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0) 46%),
-    conic-gradient(
-      from var(--siri-angle),
-      var(--siri-silver-1),
-      var(--siri-silver-2),
-      var(--siri-silver-3),
-      var(--siri-silver-4),
-      var(--siri-silver-3),
-      var(--siri-silver-2),
-      var(--siri-silver-1)
-    );
+  background: var(--siri-silver-2);
   box-shadow:
     inset 0 0 0 0.5px rgb(255 255 255 / 0.7),
     inset 0 -3px 6px rgb(0 0 0 / 0.22),
     0 2px 8px rgb(0 0 0 / 0.18);
-  animation:
-    siri-spin 3s linear infinite,
-    siri-breathe 1.8s ease-in-out infinite;
+  animation: siri-breathe 1.8s ease-in-out infinite;
 }
-/* Значок помощника в шапке: тот же шар, спокойнее. */
+.siri-orb::before,
+.siri-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.siri-orb::before {
+  background: conic-gradient(
+    from 40deg,
+    var(--siri-silver-1),
+    var(--siri-silver-2),
+    var(--siri-silver-3),
+    var(--siri-silver-4),
+    var(--siri-silver-3),
+    var(--siri-silver-2),
+    var(--siri-silver-1)
+  );
+  animation: siri-rotate 3s linear infinite;
+}
+.siri-orb::after {
+  background:
+    radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.95) 0 9%, rgb(255 255 255 / 0) 36%),
+    radial-gradient(circle at 68% 80%, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0) 46%);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.7);
+}
+/* Значок помощника в шапке виден всегда — поэтому неподвижен: постоянная анимация не даёт экрану простаивать. */
 .siri-orb-icon {
   width: 24px;
   height: 24px;
-  animation: siri-spin 8s linear infinite;
+  animation: none;
+}
+.siri-orb-icon::before {
+  animation: none;
 }
 
 /*
@@ -543,7 +567,7 @@
   inset: 9px;
   border-radius: inherit;
   background: conic-gradient(
-    from var(--siri-angle),
+    from 0deg,
     var(--siri-silver-1),
     var(--siri-silver-4),
     var(--siri-silver-3),
@@ -552,9 +576,7 @@
   );
   filter: blur(6px);
   opacity: 0.85;
-  animation:
-    siri-spin 2.6s linear infinite,
-    siri-breathe 2s ease-in-out infinite;
+  animation: siri-rotate-breathe 2.6s linear infinite;
 }
 
 /* Переливающийся серый текст «Думаю…». */
@@ -625,7 +647,7 @@
   animation-delay: var(--wn-delay, 0ms);
 }
 .whats-new-shot img {
-  animation: whats-new-pan 14s ease-in-out 1.2s infinite alternate;
+  animation: whats-new-pan 14s ease-in-out 1.2s 2 alternate;
 }
 .whats-new-pulse {
   display: inline-flex;

@@ -15,11 +15,11 @@ echo "→ Интерфейс"
 npm run ios:sync >/dev/null
 
 echo "→ Сборка"
-(cd ios/App && xcodebuild -project App.xcodeproj -scheme App -configuration Debug -destination "id=$DEVICE" \
+(cd ios/App && xcodebuild -project App.xcodeproj -scheme App -configuration Release -destination "id=$DEVICE" \
   -derivedDataPath "$DERIVED" -allowProvisioningUpdates build 2>&1 | grep -E " error:|BUILD" | sort -u)
 
 echo "→ Установка"
-xcrun devicectl device install app --device "$DEVICE" "$DERIVED/Build/Products/Debug-iphoneos/App.app" >/dev/null
+xcrun devicectl device install app --device "$DEVICE" "$DERIVED/Build/Products/Release-iphoneos/App.app" >/dev/null
 
 if [ -n "$NOTICE" ] && [ "${IOS_NOTIFY:-1}" = 1 ]; then
   echo "→ Пуш «Бюджет обновлён»"
