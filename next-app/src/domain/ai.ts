@@ -223,7 +223,7 @@ export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDeta
     'AI_CMDS: {"operations":[...],"templates":[...],"newGoals":[...],"categoryLimits":{...},"transfers":[...],"templateUpdates":[...],"balances":[...],"goals":[...],"loanPayments":[...]}',
     '- operations: {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"date":"YYYY-MM-DD","mandatory":true|false,"account":"название счёта"}',
     '- templates (новые ежемесячные): {"type":"income"|"expense","amount":число,"category":строка,"title":строка,"dayOfMonth":1-31,"account":"с какого счёта","to":"куда: свой счёт, кредит из loans или цель из goals/newGoals","until":"YYYY-MM-DD — последний платёж, или done — пока не закрыт долг / не накоплена цель"}',
-    '- newGoals (создать цель): {"name":"название","target":сумма в рублях,"dueDate":"YYYY-MM-DD или null","account":"накопительный счёт или null"} — регулярное пополнение новой цели: template с "to":"название цели"',
+    '- newGoals (создать цель): {"name":"название","target":сумма в рублях или null, если пользователь её не назвал (он укажет сам),"dueDate":"YYYY-MM-DD или null","account":"накопительный счёт или null"} — регулярное пополнение новой цели: template с "to":"название цели"',
     '- categoryLimits: {"Категория": лимит в рублях на месяц}',
     '- transfers (между своими счетами, погашение кредитки, пополнение накопительного): {"from":"счёт","to":"счёт","amount":число,"date":"YYYY-MM-DD"}',
     '- templateUpdates (изменить существующий регулярный): {"title":"название из templates","amount":число,"dayOfMonth":1-31,"active":true|false,"account":"счёт","to":"счёт, кредит, цель или null","until":"YYYY-MM-DD, done или null — без срока"} — только меняемые поля',
@@ -272,7 +272,8 @@ export interface AiTemplate {
 /** Новая цель. */
 export interface AiNewGoal {
   name: string;
-  targetAmount: Kopecks;
+  /** null — модель не знает сумму: её укажет пользователь в карточке предложения. */
+  targetAmount: Kopecks | null;
   dueDate: IsoDate | null;
   accountId?: string;
 }
@@ -417,7 +418,7 @@ const rawTemplate = z.object({
 });
 const rawNewGoal = z.object({
   name: rawText(LIMITS.title),
-  target: rawAmount,
+  target: rawAmount.nullable().optional(),
   dueDate: z.unknown().optional(),
   account: z.unknown().optional(),
 });
@@ -512,42 +513,54 @@ function extractJsonObject(text: string, start: number): { json: string; end: nu
   return null;
 }
 
+/** « «Название»» из поля команды модели — для причины пропуска; нет поля — пусто. */
+function quoted(item: unknown, key: string): string {
+  const value = item && typeof item === "object" ? (item as Record<string, unknown>)[key] : undefined;
+  return typeof value === "string" && value.trim() ? ` «${value.trim().slice(0, 60)}»` : "";
+}
+
 /**
  * Отделяет текст ответа от служебной строки AI_CMDS и превращает команды в проверенное предложение.
- * Невалидные элементы отбрасываются (их число возвращается в skipped).
+ * Невалидные элементы отбрасываются: их число — skipped, причины по-русски — skippedReasons.
  */
 export function parseAiReply(
   reply: string,
   state: State,
   today: IsoDate,
-): { text: string; proposal: AiProposal | null; skipped: number } {
+): { text: string; proposal: AiProposal | null; skipped: number; skippedReasons: string[] } {
   const marker = CMD_MARKER.exec(reply);
-  if (!marker) return { text: reply.trim(), proposal: null, skipped: 0 };
+  if (!marker) return { text: reply.trim(), proposal: null, skipped: 0, skippedReasons: [] };
+  const broken = (text: string) => ({ text, proposal: null, skipped: 1, skippedReasons: ["Не смог разобрать команды помощника"] });
 
   const extracted = extractJsonObject(reply, marker.index + marker[0].length);
   const before = reply.slice(0, marker.index);
   const after = extracted ? reply.slice(extracted.end) : "";
   const text = `${before}${after}`.replace(/```(json)?\s*```/g, "").trim();
-  if (!extracted) return { text, proposal: null, skipped: 1 };
+  if (!extracted) return broken(text);
 
   let data: unknown;
   try {
     data = JSON.parse(extracted.json);
   } catch {
-    return { text, proposal: null, skipped: 1 };
+    return broken(text);
   }
-  if (typeof data !== "object" || data === null) return { text, proposal: null, skipped: 1 };
+  if (typeof data !== "object" || data === null) return broken(text);
   const obj = data as Record<string, unknown>;
 
   const proposal: AiProposal = emptyProposal();
   let skipped = 0;
+  const reasons: string[] = [];
+  const skip = (reason: string) => {
+    skipped++;
+    if (reasons.length < 12) reasons.push(reason);
+  };
   const maxDate = addDays(today, 366);
   const minDate = addDays(today, -366 * 3);
 
   for (const item of Array.isArray(obj.operations) ? obj.operations.slice(0, 50) : []) {
     const parsed = rawOperation.safeParse(item);
     if (!parsed.success) {
-      skipped++;
+      skip(`Операция${quoted(item, "title")}: не понял сумму или тип`);
       continue;
     }
     const op = parsed.data;
@@ -555,7 +568,7 @@ export function parseAiReply(
     const dateMissing = op.date === undefined || op.date === null || op.date === "";
     const date = dateMissing ? today : isValidIsoDate(op.date) ? op.date : null;
     if (!date || date > maxDate || date < minDate) {
-      skipped++;
+      skip(`Операция${quoted(item, "title")}: непонятная или слишком далёкая дата`);
       continue;
     }
     const category = op.category || (type === "income" ? "Доход" : "Другое");
@@ -564,7 +577,7 @@ export function parseAiReply(
       (op.mandatory ?? (op.type === "fixedexpense" || op.type === "recurringexpense" || state.categories.mandatory.includes(category)));
     const account = op.account === undefined ? undefined : accountByName(state, op.account);
     if (op.account !== undefined && op.account !== null && op.account !== "" && !account) {
-      skipped++;
+      skip(`Операция${quoted(item, "title")}: нет счёта${quoted(item, "account")}`);
       continue;
     }
     proposal.operations.push({ type, amount: op.amount, category, title: op.title, date, mandatory, ...(account ? { accountId: account.id } : {}) });
@@ -573,25 +586,35 @@ export function parseAiReply(
   for (const item of Array.isArray(obj.newGoals) ? obj.newGoals.slice(0, 10) : []) {
     const parsed = rawNewGoal.safeParse(item);
     if (!parsed.success || !parsed.data.name) {
-      skipped++;
+      skip(`Новая цель${quoted(item, "name")}: нет названия или непонятная сумма`);
       continue;
     }
     const g = parsed.data;
     const dueMissing = g.dueDate === undefined || g.dueDate === null || g.dueDate === "";
     const dueDate = dueMissing ? null : isValidIsoDate(g.dueDate) && g.dueDate > today ? g.dueDate : undefined;
-    const account = g.account === undefined || g.account === null || g.account === "" ? undefined : accountByName(state, g.account);
-    if (dueDate === undefined || (account && account.kind !== "savings")) {
-      skipped++;
+    const accountGiven = g.account !== undefined && g.account !== null && g.account !== "";
+    const account = accountGiven ? accountByName(state, g.account) : undefined;
+    if (dueDate === undefined) {
+      skip(`Цель «${g.name}»: срок в прошлом или не дата`);
       continue;
     }
-    proposal.newGoals.push({ name: g.name, targetAmount: g.target, dueDate, ...(account ? { accountId: account.id } : {}) });
+    if (accountGiven && !account) {
+      skip(`Цель «${g.name}»: нет счёта${quoted(item, "account")}`);
+      continue;
+    }
+    if (account && account.kind !== "savings") {
+      skip(`Цель «${g.name}»: «${account.name}» — не накопительный счёт`);
+      continue;
+    }
+    // Сумму модель может не знать — тогда её спросит карточка предложения.
+    proposal.newGoals.push({ name: g.name, targetAmount: g.target ?? null, dueDate, ...(account ? { accountId: account.id } : {}) });
   }
 
   const templates = Array.isArray(obj.templates) ? obj.templates : Array.isArray(obj.presets) ? obj.presets : [];
   for (const item of templates.slice(0, 20)) {
     const parsed = rawTemplate.safeParse(item);
     if (!parsed.success) {
-      skipped++;
+      skip(`Регулярный платёж${quoted(item, "title")}: не понял сумму или день`);
       continue;
     }
     const t = parsed.data;
@@ -600,8 +623,17 @@ export function parseAiReply(
     const account = t.account === undefined || t.account === null || t.account === "" ? undefined : accountByName(state, t.account);
     const target = type === "expense" ? templateTarget(state, t.to, proposal.newGoals) : null;
     const until = templateUntil(t.until, today);
-    if ((t.account && !account) || (t.to !== undefined && t.to !== null && t.to !== "" && target === null) || until === null) {
-      skipped++;
+    const name = t.title || category;
+    if (t.account && !account) {
+      skip(`«${name}»: нет счёта${quoted(item, "account")}`);
+      continue;
+    }
+    if (t.to !== undefined && t.to !== null && t.to !== "" && target === null) {
+      skip(`«${name}»: не нашёл${quoted(item, "to")} среди счетов, долгов и целей`);
+      continue;
+    }
+    if (until === null) {
+      skip(`«${name}»: непонятный срок${quoted(item, "until")}`);
       continue;
     }
     const targetFields = target && target !== "none" ? target : {};
@@ -625,7 +657,7 @@ export function parseAiReply(
       const category = clip(name, LIMITS.category);
       const amount = rawAmount.safeParse(value);
       if (!category || isReservedKey(category) || !amount.success) {
-        skipped++;
+        skip(`Лимит «${name}»: не понял сумму`);
         continue;
       }
       proposal.limits.push({ category, amount: amount.data });
@@ -638,7 +670,7 @@ export function parseAiReply(
     const to = parsed.success ? accountByName(state, parsed.data.to) : undefined;
     const date = parsed.success ? aiDate(parsed.data.date, today) : null;
     if (!parsed.success || !from || !to || from.id === to.id || !date) {
-      skipped++;
+      skip(`Перевод${quoted(item, "from")} →${quoted(item, "to")}: не нашёл счета или дату`);
       continue;
     }
     proposal.transfers.push({ from: from.id, to: to.id, amount: parsed.data.amount, date });
@@ -648,7 +680,7 @@ export function parseAiReply(
     const parsed = rawTemplateUpdate.safeParse(item);
     const template = parsed.success ? byName(state.templates, parsed.data.title, (t) => t.title) : undefined;
     if (!parsed.success || !template) {
-      skipped++;
+      skip(`Не нашёл регулярный платёж${quoted(item, "title")}`);
       continue;
     }
     const u = parsed.data;
@@ -656,7 +688,7 @@ export function parseAiReply(
     const target = template.kind === "expense" ? templateTarget(state, u.to) : null;
     const until = templateUntil(u.until, today);
     if ((u.account !== undefined && !account) || (u.to !== undefined && target === null) || until === null) {
-      skipped++;
+      skip(`«${template.title}»: не нашёл счёт, получателя или не понял срок`);
       continue;
     }
     const update: AiTemplateUpdate = {
@@ -674,14 +706,14 @@ export function parseAiReply(
       ...(until !== "none" && until.untilDone ? { untilDone: true, endDate: null } : {}),
     };
     if (Object.keys(update).length > 1) proposal.templateUpdates.push(update);
-    else skipped++;
+    else skip(`«${template.title}»: нечего менять`);
   }
 
   for (const item of Array.isArray(obj.balances) ? obj.balances.slice(0, 20) : []) {
     const parsed = rawBalance.safeParse(item);
     const account = parsed.success ? accountByName(state, parsed.data.account) : undefined;
     if (!parsed.success || !account) {
-      skipped++;
+      skip(`Остаток: нет счёта${quoted(item, "account")}`);
       continue;
     }
     // У кредитки модель называет долг — остаток счёта со знаком минус.
@@ -693,7 +725,7 @@ export function parseAiReply(
     const parsed = rawGoalMove.safeParse(item);
     const goal = parsed.success ? byName(state.goals, parsed.data.goal, (g) => g.name) : undefined;
     if (!parsed.success || !goal) {
-      skipped++;
+      skip(`Пополнение: нет цели${quoted(item, "goal")}`);
       continue;
     }
     proposal.goals.push({ goalId: goal.id, amount: parsed.data.amount });
@@ -704,13 +736,13 @@ export function parseAiReply(
     const loan = parsed.success ? byName(state.loans, parsed.data.loan, (l) => l.name) : undefined;
     const date = parsed.success ? aiDate(parsed.data.date, today) : null;
     if (!parsed.success || !loan || !date) {
-      skipped++;
+      skip(`Платёж по долгу: нет долга${quoted(item, "loan")}`);
       continue;
     }
     proposal.loanPayments.push({ loanId: loan.id, amount: parsed.data.amount, date });
   }
 
-  return { text, proposal: proposalSize(proposal) ? proposal : null, skipped };
+  return { text, proposal: proposalSize(proposal) ? proposal : null, skipped, skippedReasons: reasons };
 }
 
 /** Превращает подтверждённое предложение в действия. ids — генератор идентификаторов. */
@@ -719,6 +751,8 @@ export function proposalToActions(proposal: AiProposal, state: State, today: Iso
   // Новые цели — первыми: на них могут ссылаться регулярные пополнения из этого же предложения.
   const createdGoals = new Map<string, string>();
   for (const g of proposal.newGoals) {
+    // Без суммы цель не создать: карточка просит её указать.
+    if (!g.targetAmount) continue;
     const id = newId();
     createdGoals.set(g.name, id);
     actions.push({

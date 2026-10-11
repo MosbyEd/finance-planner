@@ -70,6 +70,7 @@ export const POST = withUser(async (req, { user }) => {
       text: parsed.text || "Готово.",
       proposal: parsed.proposal,
       skipped: parsed.skipped,
+      skippedReasons: parsed.skippedReasons,
       reasoning: reply.reasoning,
       model: reply.model,
     });

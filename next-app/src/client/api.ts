@@ -139,6 +139,7 @@ const aiChatSchema = z.object({
     })
     .nullable(),
   skipped: z.number(),
+  skippedReasons: z.array(z.string()).default([]),
   reasoning: z.string().nullable(),
   model: z.string(),
 });
@@ -146,6 +147,7 @@ export interface AiChatResponse {
   text: string;
   proposal: AiProposal | null;
   skipped: number;
+  skippedReasons?: string[];
   reasoning: string | null;
   model: string;
 }

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { findAccount } from "@/domain/accounts";
 import { proposalSize, proposalToActions, type AiOperation, type AiProposal } from "@/domain/ai";
 import { diffDays, formatDay, todayLocal, type IsoDate } from "@/domain/dates";
-import { formatMoney } from "@/domain/money";
+import { formatMoney, parseAmount, type Kopecks } from "@/domain/money";
 import type { State } from "@/domain/schema";
 import { pickAppleModel } from "@/client/appleAi";
 import { nativeSiriOrb, type AppleModel } from "@/client/native";
@@ -13,7 +13,7 @@ import { newId, useSnapshot, useToday } from "@/client/react";
 import { Button, IconButton } from "../../ui/Button";
 import { EmptyState, Money, Notice } from "../../ui/controls";
 import { useConfirm, useToast } from "../../ui/feedback";
-import { controlClass } from "../../ui/Field";
+import { controlClass, controlLookClass } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { templateRoute } from "../accounts";
@@ -579,14 +579,22 @@ function AssistantBubble({
         />
       )}
       {message.skipped > 0 && (
-        <p className="px-1 text-xs text-muted">
-          {message.skipped}{" "}
-          {plural(message.skipped, [
-            "предложение не распознано и пропущено",
-            "предложения не распознаны и пропущены",
-            "предложений не распознано и пропущено",
-          ])}
-        </p>
+        <details className="group px-1 text-xs text-muted">
+          <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1 hover:text-text [&::-webkit-details-marker]:hidden">
+            {message.skipped}{" "}
+            {plural(message.skipped, ["предложение пропущено", "предложения пропущены", "предложений пропущено"])} — почему
+            <Icon name="chevronDown" size={14} className="transition group-open:rotate-180" />
+          </summary>
+          {message.skippedReasons?.length ? (
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {message.skippedReasons.map((reason, i) => (
+                <li key={i}>{reason}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1">Помощник прислал команды, которые приложение не смогло понять.</p>
+          )}
+        </details>
       )}
     </div>
   );
@@ -723,7 +731,7 @@ function proposalItems(proposal: AiProposal, state: State, today: IsoDate): Prop
       title: g.name,
       subtitle: [g.dueDate ? `к ${formatDay(g.dueDate, today)}` : "без срока", accountName(g.accountId)].filter(Boolean).join(" · "),
       amount: null,
-      right: formatMoney(g.targetAmount),
+      right: g.targetAmount ? formatMoney(g.targetAmount) : "",
     }),
   );
   proposal.operations.forEach((op, index) =>
@@ -867,6 +875,16 @@ function ProposalCard({
     });
   const groups = [...new Set(items.map((item) => item.group))];
   const pending = status === "pending";
+  // Сумма новой цели, которую модель не знала: человек вводит её здесь.
+  const [goalText, setGoalText] = useState<Record<number, string>>({});
+  const goalTarget = (index: number): Kopecks | null =>
+    proposal.newGoals[index]?.targetAmount ?? parseAmount(goalText[index] ?? "");
+  const missingTarget = proposal.newGoals.some((_, i) => selected.has(`newGoals:${i}`) && !goalTarget(i));
+  const picked = (): AiProposal => {
+    const chosen = pickProposal(proposal, selected);
+    const targets = proposal.newGoals.map((g, i) => ({ ...g, targetAmount: goalTarget(i) }));
+    return { ...chosen, newGoals: targets.filter((_, i) => selected.has(`newGoals:${i}`)) };
+  };
 
   return (
     <section
@@ -908,6 +926,19 @@ function ProposalCard({
                       item.right && <span className="shrink-0 font-semibold tabular-nums">{item.right}</span>
                     )}
                   </label>
+                  {item.group === "newGoals" && !proposal.newGoals[item.index]?.targetAmount && pending && (
+                    <label className="mb-2 flex items-center gap-2 text-sm">
+                      <span className="shrink-0 text-muted">Сколько нужно накопить</span>
+                      <input
+                        inputMode="decimal"
+                        placeholder="Сумма, ₽"
+                        value={goalText[item.index] ?? ""}
+                        onChange={(e) => setGoalText((v) => ({ ...v, [item.index]: e.target.value }))}
+                        aria-invalid={Boolean(goalText[item.index]) && !goalTarget(item.index)}
+                        className={`${controlLookClass} h-10 min-w-0 flex-1 text-right tabular-nums`}
+                      />
+                    </label>
+                  )}
                 </li>
               ))}
           </ul>
@@ -919,11 +950,12 @@ function ProposalCard({
           <Button variant="secondary" className="flex-1" onClick={onDismiss}>
             Отклонить
           </Button>
-          <Button icon="check" className="flex-1" disabled={selected.size === 0} onClick={() => onApply(pickProposal(proposal, selected))}>
+          <Button icon="check" className="flex-1" disabled={selected.size === 0 || missingTarget} onClick={() => onApply(picked())}>
             {items.length > 1 && selected.size < items.length ? `Применить ${selected.size} из ${items.length}` : "Применить"}
           </Button>
         </div>
       )}
+      {pending && missingTarget && <p className="mt-2 text-xs text-muted">Укажите сумму цели — без неё цель не создать.</p>}
       {status === "applied" && <p className="mt-3 text-sm font-medium text-positive">Применено ✓</p>}
       {status === "dismissed" && <p className="mt-3 text-sm text-muted">Отклонено</p>}
     </section>

@@ -43,6 +43,8 @@ export interface AssistantMessage {
   reasoning: string | null;
   proposal: AiProposal | null;
   skipped: number;
+  /** Почему пропущены предложения (по-русски). */
+  skippedReasons?: string[];
   status: ProposalStatus;
   engine?: AiEngine;
   at?: number;
@@ -150,7 +152,7 @@ const proposalSchema = z.object({
     .array(
       z.object({
         name: z.string(),
-        targetAmount: z.number().int(),
+        targetAmount: z.number().int().nullable(),
         dueDate: z.string().refine(isValidIsoDate).nullable(),
         accountId: z.string().optional(),
       }),
@@ -167,6 +169,7 @@ const storedMessageSchema = z.discriminatedUnion("role", [
     reasoning: z.string().nullable(),
     proposal: proposalSchema.nullable(),
     skipped: z.number().int(),
+    skippedReasons: z.array(z.string()).optional(),
     status: z.enum(["pending", "applied", "dismissed"]),
     engine: z.enum(["fast", "reasoning", "apple"]).optional(),
     at: z.number().optional(),
@@ -583,7 +586,8 @@ export class ChatStore {
 
 function fromServer(response: AiChatResponse): AssistantMessage {
   const engine: AiEngine = /reason/i.test(response.model) ? "reasoning" : "fast";
-  return assistant(response.text, response.reasoning?.trim() || null, response.proposal, response.skipped, engine);
+  const message = assistant(response.text, response.reasoning?.trim() || null, response.proposal, response.skipped, engine);
+  return response.skippedReasons?.length ? { ...message, skippedReasons: response.skippedReasons } : message;
 }
 
 function assistant(

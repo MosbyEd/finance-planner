@@ -9,7 +9,7 @@ describe("разбор ответа модели", () => {
   const today = "2026-03-15";
 
   it("без команд возвращает текст", () => {
-    expect(parseAiReply("Всё хорошо.", state, today)).toEqual({ text: "Всё хорошо.", proposal: null, skipped: 0 });
+    expect(parseAiReply("Всё хорошо.", state, today)).toEqual({ text: "Всё хорошо.", proposal: null, skipped: 0, skippedReasons: [] });
   });
 
   it("вырезает AI_CMDS и проверяет команды", () => {
@@ -36,7 +36,7 @@ describe("разбор ответа модели", () => {
 
   it("битый JSON не ломает ответ", () => {
     const r = parseAiReply('Текст\nAI_CMDS: {"operations":[', state, today);
-    expect(r).toEqual({ text: "Текст", proposal: null, skipped: 1 });
+    expect(r).toEqual({ text: "Текст", proposal: null, skipped: 1, skippedReasons: ["Не смог разобрать команды помощника"] });
   });
 
   it("подтверждённое предложение превращается в валидные действия", () => {
@@ -206,5 +206,24 @@ AI_CMDS: {"newGoals":[{"name":"Отпуск","target":150000,"dueDate":"2027-06-
     const goal = s.goals.find((g) => g.name === "Отпуск")!;
     expect(s.templates.find((t) => t.title === "На отпуск")).toMatchObject({ goalId: goal.id, untilDone: true });
     expect(s.templates.find((t) => t.id === "net")).toMatchObject({ endDate: "2027-03-31" });
+  });
+});
+
+describe("помощник: цель без суммы и причины пропусков", () => {
+  it("цель без суммы не пропускается — сумму укажет человек; пропуски объясняются", () => {
+    const s0 = applyActions(stateWith(), [{ type: "account.add", account: { id: "pod", name: "Подушка", kind: "savings", spending: false } }]);
+    const reply = `Предлагаю.
+AI_CMDS: {"newGoals":[{"name":"Красная Поляна","target":null,"account":"Подушка"}],"templates":[{"type":"expense","amount":12750,"category":"Сбережения","title":"С аванса","dayOfMonth":25,"to":"Красная Поляна"},{"type":"expense","amount":5000,"category":"Сбережения","title":"В никуда","dayOfMonth":10,"to":"Мальдивы"}]}`;
+    const parsed = parseAiReply(reply, s0, "2026-10-11");
+    expect(parsed.proposal?.newGoals).toEqual([{ name: "Красная Поляна", targetAmount: null, dueDate: null, accountId: "pod" }]);
+    expect(parsed.proposal?.templates).toHaveLength(1);
+    expect(parsed.skippedReasons).toEqual(["«В никуда»: не нашёл «Мальдивы» среди счетов, долгов и целей"]);
+
+    // Человек ввёл сумму в карточке — цель и пополнение создаются.
+    const proposal = { ...parsed.proposal!, newGoals: [{ ...parsed.proposal!.newGoals[0], targetAmount: 30_000_000 }] };
+    let n = 0;
+    const s = applyActions(s0, proposalToActions(proposal, s0, "2026-10-11", () => `g${++n}`));
+    expect(s.goals[0]).toMatchObject({ name: "Красная Поляна", targetAmount: 30_000_000, accountId: "pod" });
+    expect(s.templates[0]).toMatchObject({ goalId: s.goals[0].id });
   });
 });
