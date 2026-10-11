@@ -258,7 +258,8 @@ struct AddTransactionView: View {
                 .font(.system(size: amountFontSize, weight: .bold))
                 .monospacedDigit()
                 .focused($amountFocused)
-                .fixedSize(horizontal: amountText.count > 0, vertical: false)
+                // По ширине числа (пустое — по «0»): «₽» стоит сразу за суммой, а не у правого края.
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("Сумма в рублях")
             Text("₽")
                 .font(.system(size: amountFontSize, weight: .bold))

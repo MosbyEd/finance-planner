@@ -23,7 +23,7 @@ export const ACCOUNT_KINDS: Record<AccountKind, { label: string; icon: IconName;
   debit: { label: "Обычный счёт", icon: "card", symbol: "creditcard" },
   cash: { label: "Наличные", icon: "wallet", symbol: "banknote" },
   savings: { label: "Накопительный", icon: "piggy", symbol: "building.columns" },
-  credit: { label: "Кредитная карта", icon: "card", symbol: "creditcard.trianglebadge.exclamationmark" },
+  credit: { label: "Кредитная карта", icon: "card", symbol: "creditcard.and.123" },
 };
 
 /** Завёл ли пользователь свои счета — иначе интерфейс не показывает выбор счёта (у всех операций основной). */
