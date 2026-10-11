@@ -11,12 +11,15 @@ export function AccountPicker({
   value,
   onChange,
   error,
+  amounts,
 }: {
   label: string;
   accounts: Account[];
   value: string;
   onChange: (id: string) => void;
   error?: string | null;
+  /** Сколько на счёте — мелко рядом с названием (нет — суммы спрятаны или не нужны). */
+  amounts?: Record<string, string>;
 }) {
   return (
     <fieldset className="space-y-2">
@@ -35,6 +38,9 @@ export function AccountPicker({
             <Icon name={ACCOUNT_KINDS[a.kind].icon} size={16} className="shrink-0" />
             {/* Длинное название обрезается многоточием, а не вылезает за край окна. */}
             <span className="min-w-0 truncate">{a.name}</span>
+            {amounts?.[a.id] && (
+              <span className={`shrink-0 tabular-nums ${a.id === value ? "opacity-80" : "text-muted"}`}>{amounts[a.id]}</span>
+            )}
           </button>
         ))}
       </div>

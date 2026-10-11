@@ -266,3 +266,35 @@ export function interestLines(summary: CreditSummary, today: IsoDate): InterestL
   }
   return lines;
 }
+
+// ---------- сколько на счёте при вводе операции ----------
+
+/** Деньги счёта для подсказки в окне операции: остаток, у кредитки — долг и лимит. */
+export interface Funds {
+  account: Account;
+  /** Остаток (у кредитки — минус долг). */
+  balance: Kopecks;
+  limit: Kopecks | null;
+}
+
+export function fundsOf(balances: ReadonlyMap<string, Kopecks>, account: Account): Funds {
+  return { account, balance: balances.get(account.id) ?? 0, limit: account.kind === "credit" ? (account.creditLimit ?? null) : null };
+}
+
+/**
+ * Что показать о деньгах счёта после изменения delta: у карты и накопительного — остаток, у кредитки — доступный
+ * лимит (без лимита — долг). short — для чипа («50 000 ₽»), иначе с подписью («доступно 120 000 ₽»).
+ */
+export function fundsText(f: Funds, delta = 0, short = false): { text: string; negative: boolean } {
+  const balance = f.balance + delta;
+  if (f.account.kind === "credit") {
+    if (f.limit !== null) {
+      const available = f.limit + balance;
+      const text = formatMoney(available, { whole: true });
+      return { text: short ? text : `доступно ${text}`, negative: available < 0 };
+    }
+    const debt = Math.max(0, -balance);
+    return { text: debt > 0 ? `долг ${formatMoney(debt, { whole: true })}` : "долга нет", negative: false };
+  }
+  return { text: formatMoney(balance, { whole: true }), negative: balance < 0 };
+}

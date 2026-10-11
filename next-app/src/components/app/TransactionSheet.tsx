@@ -9,7 +9,16 @@ import { autoSavingAmount, autoSavingByDefault } from "@/domain/savings";
 import { suggestCategory } from "@/domain/sms";
 import type { State, Transaction } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
-import { accountCards, activeAccounts, cardLabel, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, sourceAccountId } from "@/domain/accounts";
+import {
+  accountBalances,
+  accountCards,
+  activeAccounts,
+  cardLabel,
+  findAccount,
+  MAIN_ACCOUNT_ID,
+  SAVINGS_ACCOUNT_ID,
+  sourceAccountId,
+} from "@/domain/accounts";
 import { isEditableTransaction } from "@/domain/actions";
 import { AccountPicker } from "../ui/AccountPicker";
 import { AmountInput } from "../ui/AmountInput";
@@ -19,7 +28,17 @@ import { Segmented, Switch } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { DateInput, TextInput } from "../ui/Field";
 import { Sheet } from "../ui/Sheet";
-import { bankResolveActions, hasOwnAccounts, lastAccountId, lastCardOf, payableAccounts } from "./accounts";
+import {
+  bankResolveActions,
+  type Funds,
+  fundsOf,
+  fundsText,
+  hasOwnAccounts,
+  lastAccountId,
+  lastCardOf,
+  payableAccounts,
+} from "./accounts";
+import { useBalancesPrivacy } from "@/client/privacy";
 import { useDeleteTransaction, useDispatch } from "./hooks";
 import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
@@ -163,6 +182,19 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
   const categories = kind === "income" ? state.categories.income : expenseCategories(state);
   const fromAccount = accounts.find((a) => a.id === from) ?? findAccount(state, from);
   const toAccount = accounts.find((a) => a.id === to) ?? findAccount(state, to);
+
+  // Сколько на счетах — без этой операции (у правки — как будто её ещё нет): по ним «было → станет».
+  const { masked } = useBalancesPrivacy();
+  const balances = useMemo(() => {
+    const others = existing
+      ? { ...state, transactions: state.transactions.filter((t) => t.id !== existing.id && t.linkedTo !== existing.id) }
+      : state;
+    return accountBalances(others, today);
+  }, [existing, state, today]);
+  const chipAmounts = masked
+    ? undefined
+    : Object.fromEntries(accounts.map((a) => [a.id, fundsText(fundsOf(balances, a), 0, true).text]));
+  const value = amount ?? 0;
 
   const pickCategory = (next: string) => {
     setCategory(next);
@@ -379,6 +411,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
               label="Откуда"
               accounts={accounts}
               value={from}
+              amounts={chipAmounts}
               onChange={(id) => {
                 setFrom(id);
                 if (id === to) setTo(firstOther(id));
@@ -389,12 +422,19 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
               label="Куда"
               accounts={accounts.filter((a) => a.id !== from)}
               value={to}
+              amounts={chipAmounts}
               onChange={(id) => {
                 setTo(id);
                 setErrors((e) => ({ ...e, accounts: undefined }));
               }}
               error={errors.accounts}
             />
+            {!masked && fromAccount && toAccount && from !== to && (
+              <div className="-mt-2 space-y-0.5">
+                <FundsLine funds={fundsOf(balances, fromAccount)} delta={-value} />
+                <FundsLine funds={fundsOf(balances, toAccount)} delta={value} />
+              </div>
+            )}
             <p className="-mt-2 text-sm text-muted">
               {toAccount?.kind === "savings" && fromAccount?.kind !== "savings"
                 ? "Пополнение сбережений — считается отложенным в этом месяце."
@@ -407,12 +447,20 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
           </>
         ) : (
           showAccounts && (
-            <AccountPicker
-              label={kind === "income" ? "На какой счёт" : "С какого счёта"}
-              accounts={payableAccounts(state)}
-              value={accountId}
-              onChange={chooseAccount}
-            />
+            <>
+              <AccountPicker
+                label={kind === "income" ? "На какой счёт" : "С какого счёта"}
+                accounts={payableAccounts(state)}
+                value={accountId}
+                amounts={chipAmounts}
+                onChange={chooseAccount}
+              />
+              {!masked && selectedAccount && (
+                <div className="-mt-2">
+                  <FundsLine funds={fundsOf(balances, selectedAccount)} delta={kind === "income" ? value : -value} />
+                </div>
+              )}
+            </>
           )
         )}
 
@@ -562,6 +610,25 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
         <button type="submit" hidden />
       </form>
     </Sheet>
+  );
+}
+
+/** «Сбербанк: 50 000 ₽ → 48 500 ₽» — сколько на счёте сейчас и сколько станет после операции. */
+function FundsLine({ funds, delta }: { funds: Funds; delta: number }) {
+  const before = fundsText(funds);
+  const after = fundsText(funds, delta);
+  const changes = delta !== 0 && after.text !== before.text;
+  return (
+    <p className={`text-sm ${changes && after.negative ? "font-medium text-negative" : "text-muted"}`}>
+      <span className="text-text">{funds.account.name}</span>: {before.text}
+      {changes && (
+        <>
+          {" → "}
+          <span className={after.negative ? "" : "text-text"}>{after.text}</span>
+          {after.negative && (funds.account.kind === "credit" ? " — больше лимита" : " — не хватает")}
+        </>
+      )}
+    </p>
   );
 }
 

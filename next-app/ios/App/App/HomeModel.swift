@@ -209,6 +209,27 @@ struct HomeModel: Codable, Equatable, Sendable {
         var symbol: String
         var cards: [CardChoice]?
         var lastCard: String?
+        /// Остаток в копейках (у кредитки — минус долг); nil — суммы спрятаны глазком.
+        var balance: Int?
+        var limit: Int?
+        var credit: Bool?
+
+        /// Сколько на счёте после изменения delta: у кредитки — доступный лимит (без лимита — долг), иначе остаток.
+        /// nil — суммы спрятаны. short — без подписи «доступно» (для чипа).
+        func funds(delta: Int = 0, short: Bool = false) -> (text: String, negative: Bool)? {
+            guard let balance else { return nil }
+            let value = balance + delta
+            if credit == true {
+                if let limit {
+                    let available = limit + value
+                    let text = Money.whole(available)
+                    return (short ? text : "доступно \(text)", available < 0)
+                }
+                let debt = max(0, -value)
+                return (debt > 0 ? "долг \(Money.whole(debt))" : "долга нет", false)
+            }
+            return (Money.whole(value), value < 0)
+        }
     }
 
     struct Pick: Codable, Equatable, Sendable, Hashable {
@@ -328,5 +349,23 @@ extension WidgetSnapshot {
             detail: today.detail ?? "",
             over: today.over ?? false
         ))
+    }
+}
+
+/// Суммы для показа: целые рубли с пробелами между разрядами — «155 968 ₽», «−1 200 ₽».
+enum Money {
+    private static let formatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "ru_RU")
+        f.maximumFractionDigits = 0
+        f.roundingMode = .halfUp
+        return f
+    }()
+
+    static func whole(_ kopecks: Int) -> String {
+        let rubles = (Double(abs(kopecks)) / 100).rounded()
+        let text = formatter.string(from: NSNumber(value: rubles)) ?? "\(Int(rubles))"
+        return "\(kopecks < 0 ? "−" : "")\(text) ₽"
     }
 }

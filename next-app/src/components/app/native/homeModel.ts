@@ -12,7 +12,7 @@ import {
 import { formatMoney } from "@/domain/money";
 import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
-import { accountCards, cardLabel } from "@/domain/accounts";
+import { accountBalances, accountCards, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
 import { quickPicks, type QuickPick } from "../quickPicks";
 import {
@@ -136,7 +136,18 @@ export interface AddModel {
   lastExpense: string | null;
   lastIncome: string | null;
   /** Счета для выбора (пусто — выбор не показывается, всё на основном). */
-  accounts: { id: string; name: string; symbol: string; cards: { digits: string; label: string }[]; lastCard: string | null }[];
+  accounts: {
+    id: string;
+    name: string;
+    symbol: string;
+    cards: { digits: string; label: string }[];
+    lastCard: string | null;
+    /** Остаток в копейках (у кредитки — минус долг); null — суммы спрятаны глазком. */
+    balance: number | null;
+    /** Кредитный лимит кредитки; null — не кредитка или лимит не задан. */
+    limit: number | null;
+    credit: boolean;
+  }[];
   lastExpenseAccount: string;
   lastIncomeAccount: string;
   /** Частые траты: заполняют форму одним касанием (сумма в копейках). */
@@ -421,6 +432,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
   const metrics = monthMetrics(state, month, today);
   const picks = quickPicks(state, today, 6);
   const ownAccounts = hasOwnAccounts(state);
+  const balances = accountBalances(state, today);
   const add: AddModel = {
     expense: expenseCategories(state),
     income: state.categories.income,
@@ -434,6 +446,10 @@ export function buildHomeModel(input: HomeInput): HomeModel {
           symbol: ACCOUNT_KINDS[a.kind].symbol,
           cards: accountCards(a).map((c) => ({ digits: c.digits, label: cardLabel(a, c.digits) })),
           lastCard: lastCardOf(state, a.id),
+          // Сколько на счёте — в окне добавления (если суммы не спрятаны глазком).
+          balance: masked ? null : (balances.get(a.id) ?? 0),
+          limit: a.kind === "credit" ? (a.creditLimit ?? null) : null,
+          credit: a.kind === "credit",
         }))
       : [],
     lastExpenseAccount: lastAccountId(state, "expense"),

@@ -91,8 +91,16 @@ struct AddTransactionView: View {
                                         card = account.lastCard
                                         UISelectionFeedbackGenerator().selectionChanged()
                                     } label: {
-                                        Label(account.name, systemImage: account.symbol)
-                                            .lineLimit(1)
+                                        HStack(spacing: 6) {
+                                            Label(account.name, systemImage: account.symbol).lineLimit(1)
+                                            // Сколько на счёте (если суммы не спрятаны глазком).
+                                            if let funds = account.funds(short: true) {
+                                                Text(funds.text)
+                                                    .monospacedDigit()
+                                                    .lineLimit(1)
+                                                    .foregroundStyle(selected ? .white.opacity(0.8) : Theme.muted)
+                                            }
+                                        }
                                             .font(.subheadline.weight(selected ? .semibold : .regular))
                                             .padding(.horizontal, 14)
                                             .frame(minHeight: 40)
@@ -104,6 +112,21 @@ struct AddTransactionView: View {
                                 }
                             }
                         }
+                    }
+
+                    if let account = add.accounts?.first(where: { $0.id == accountId }),
+                       let before = account.funds(), (add.accounts?.count ?? 0) > 1 {
+                        // «Сбербанк: 50 000 ₽ → 48 500 ₽» — сколько станет после операции.
+                        let after = account.funds(delta: kind == .income ? (amount ?? 0) : -(amount ?? 0))
+                        let changes = amount != nil && after?.text != before.text
+                        (Text("\(account.name): ").foregroundStyle(Theme.text)
+                            + Text(before.text)
+                            + Text(changes ? " → \(after?.text ?? "")" : "")
+                            + Text(changes && after?.negative == true ? (account.credit == true ? " — больше лимита" : " — не хватает") : ""))
+                            .font(.footnote)
+                            .monospacedDigit()
+                            .foregroundStyle(changes && after?.negative == true ? Theme.negative : Theme.muted)
+                            .padding(.top, -16)
                     }
 
                     if !accountCards.isEmpty {
