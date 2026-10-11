@@ -19,6 +19,7 @@ import { DateInput, TextInput } from "../../ui/Field";
 import { Icon } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { ACCOUNT_KINDS, hasOwnAccounts } from "../accounts";
+import { frequentCategories } from "../frequent";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
 import { plural } from "@/domain/text";
@@ -309,6 +310,7 @@ export function TemplateSheet({
 
         <CategoryPicker
           label="Категория"
+          frequent={frequentCategories(state, kind, state.categories[groupOf(kind)])}
           categories={state.categories[groupOf(kind)]}
           value={category}
           onChange={pickCategory}

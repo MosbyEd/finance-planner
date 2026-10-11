@@ -14,6 +14,7 @@ import type { State, Transaction } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import { accountBalances, accountCards, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
+import { frequentCategories } from "../frequent";
 import { quickPicks, type QuickPick } from "../quickPicks";
 import {
   ACCOUNT_KINDS,
@@ -133,6 +134,9 @@ export interface AccountModel {
 export interface AddModel {
   expense: string[];
   income: string[];
+  /** Частые категории — чипами сразу. */
+  expenseTop: string[];
+  incomeTop: string[];
   lastExpense: string | null;
   lastIncome: string | null;
   /** Счета для выбора (пусто — выбор не показывается, всё на основном). */
@@ -436,6 +440,9 @@ export function buildHomeModel(input: HomeInput): HomeModel {
   const add: AddModel = {
     expense: expenseCategories(state),
     income: state.categories.income,
+    // Частые — видны сразу, остальные — по «Все категории».
+    expenseTop: frequentCategories(state, "expense", expenseCategories(state)),
+    incomeTop: frequentCategories(state, "income", state.categories.income),
     lastExpense: lastCategory(state, "expense"),
     lastIncome: lastCategory(state, "income"),
     // Счета с картами — даже при одном счёте: чтобы выбрать карту.

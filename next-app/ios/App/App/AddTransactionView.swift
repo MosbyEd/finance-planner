@@ -6,8 +6,12 @@ import SwiftUI
 struct AddTransactionView: View {
     enum Kind: String { case expense, income, transfer }
 
-    let add: HomeModel.Add
+    /// Модель на момент открытия; дальше — живая из HomeStore (например, после «Показать остатки» по Face ID).
+    let initialAdd: HomeModel.Add
+    private var add: HomeModel.Add { HomeStore.shared.model?.add ?? initialAdd }
+    private var balancesHidden: Bool { HomeStore.shared.model?.balancesHidden ?? false }
     @Environment(\.dismiss) private var dismiss
+    @State private var allCategories = false
 
     @State private var kind: Kind
     @State private var amountText = ""
@@ -21,7 +25,7 @@ struct AddTransactionView: View {
     @FocusState private var amountFocused: Bool
 
     init(add: HomeModel.Add, initialKind: Kind) {
-        self.add = add
+        self.initialAdd = add
         _kind = State(initialValue: initialKind)
         _category = State(initialValue: Self.defaultCategory(add, initialKind))
         let account = Self.defaultAccount(add, initialKind)
@@ -45,6 +49,14 @@ struct AddTransactionView: View {
     }
 
     private var categories: [String] { kind == .income ? add.income : add.expense }
+    /// Чипами — частые и выбранная; остальные — в списке «Все категории».
+    private var shownCategories: [String] {
+        let top = (kind == .income ? add.incomeTop : add.expenseTop) ?? []
+        guard !top.isEmpty, categories.count > top.count + 2 else { return categories }
+        var list = category.isEmpty || top.contains(category) ? [] : [category]
+        list += top.filter { categories.contains($0) }
+        return list
+    }
     /// Перевод — только когда своих счетов несколько.
     private var canTransfer: Bool { (add.accounts?.count ?? 0) > 1 }
     /// Сумма крупными цифрами, но длинная — мельче, чтобы не вылезать за край.
@@ -81,8 +93,12 @@ struct AddTransactionView: View {
 
                     amountField
 
-                    if let accounts = add.accounts, accounts.count > 1 {
-                        section(kind == .expense ? "С какого счёта" : "На какой счёт") {
+                    if let accounts = add.accounts, accounts.count > 4 {
+                        section(kind == .income ? "На какой счёт" : "С какого счёта", trailing: { BalancesEye(hidden: balancesHidden) }) {
+                            accountMenu(accounts)
+                        }
+                    } else if let accounts = add.accounts, accounts.count > 1 {
+                        section(kind == .income ? "На какой счёт" : "С какого счёта", trailing: { BalancesEye(hidden: balancesHidden) }) {
                             FlowLayout(spacing: 8) {
                                 ForEach(accounts) { account in
                                     let selected = account.id == accountId
@@ -185,7 +201,7 @@ struct AddTransactionView: View {
 
                     section("Категория") {
                         FlowLayout(spacing: 8) {
-                            ForEach(categories, id: \.self) { item in
+                            ForEach(shownCategories, id: \.self) { item in
                                 let selected = item == category
                                 Button {
                                     category = item
@@ -201,6 +217,13 @@ struct AddTransactionView: View {
                                 }
                                 .buttonStyle(PressableStyle())
                                 .accessibilityAddTraits(selected ? .isSelected : [])
+                            }
+                            if shownCategories.count < categories.count {
+                                Button("Все категории (\(categories.count))") { allCategories = true }
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Theme.accent)
+                                    .padding(.horizontal, 10)
+                                    .frame(minHeight: 40)
                             }
                         }
                     }
@@ -271,6 +294,13 @@ struct AddTransactionView: View {
                 if !categories.contains(category) { category = Self.defaultCategory(add, next) }
             }
             .onAppear { amountFocused = true }
+            .sheet(isPresented: $allCategories) {
+                CategoryList(categories: categories, selected: category) { picked in
+                    category = picked
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+                .presentationDetents([.medium, .large])
+            }
         }
     }
 
@@ -294,9 +324,56 @@ struct AddTransactionView: View {
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        section(title, trailing: { EmptyView() }, content: content)
+    }
+
+    private func section<Trailing: View, Content: View>(
+        _ title: String,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
+            HStack {
+                Text(title).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                trailing()
+            }
+            .frame(minHeight: 20)
             content()
+        }
+    }
+
+    /// Счетов много — строка с выбранным счётом (и сколько на нём), выбор — меню со всеми счетами.
+    private func accountMenu(_ accounts: [HomeModel.AccountChoice]) -> some View {
+        let selected = accounts.first { $0.id == accountId } ?? accounts[0]
+        return Menu {
+            Picker("Счёт", selection: Binding(
+                get: { accountId },
+                set: { id in
+                    accountId = id
+                    card = accounts.first { $0.id == id }?.lastCard
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            )) {
+                ForEach(accounts) { account in
+                    Label(account.funds(short: true).map { "\(account.name) · \($0.text)" } ?? account.name, systemImage: account.symbol)
+                        .tag(account.id)
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selected.symbol).foregroundStyle(Theme.accent)
+                Text(selected.name).lineLimit(1).foregroundStyle(Theme.text)
+                Spacer(minLength: 8)
+                if let funds = selected.funds(short: true) {
+                    Text(funds.text).monospacedDigit().lineLimit(1).foregroundStyle(Theme.muted)
+                }
+                Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(Theme.muted)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 48)
+            .background(Theme.fill, in: .rect(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -351,6 +428,45 @@ struct AddTransactionView: View {
                 }
             }
             ToastCenter.shared.show(result.message ?? "Добавлено", action: undo)
+        }
+    }
+}
+
+/// Все категории — списком с поиском (когда чипами видны только частые).
+private struct CategoryList: View {
+    let categories: [String]
+    let selected: String
+    let onPick: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var filtered: [String] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return needle.isEmpty ? categories : categories.filter { $0.lowercased().contains(needle) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(filtered, id: \.self) { item in
+                Button {
+                    onPick(item)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(item).foregroundStyle(Theme.text)
+                        Spacer()
+                        if item == selected { Image(systemName: "checkmark").foregroundStyle(Theme.accent) }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Найти категорию")
+            .navigationTitle("Категория")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                }
+            }
         }
     }
 }

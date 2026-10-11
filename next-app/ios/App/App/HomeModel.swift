@@ -243,6 +243,9 @@ struct HomeModel: Codable, Equatable, Sendable {
     struct Add: Codable, Equatable, Sendable {
         var expense: [String]
         var income: [String]
+        /// Частые категории — чипами сразу, остальные — в списке «Все категории».
+        var expenseTop: [String]?
+        var incomeTop: [String]?
         var lastExpense: String?
         var lastIncome: String?
         var picks: [Pick]

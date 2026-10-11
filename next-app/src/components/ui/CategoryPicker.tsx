@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { LIMITS } from "@/domain/schema";
 import { Icon } from "./Icon";
 
-/** Выбор категории чипами плюс ввод новой. Новая категория сохраняется вместе с операцией. */
+/**
+ * Выбор категории чипами плюс ввод новой. Новая категория сохраняется вместе с операцией. Когда категорий много,
+ * сначала видны только частые (frequent) и выбранная — остальные по «Все категории», с поиском.
+ */
 export function CategoryPicker({
   label,
   categories,
@@ -12,6 +15,7 @@ export function CategoryPicker({
   onChange,
   error,
   showValue,
+  frequent,
 }: {
   label: string;
   categories: string[];
@@ -20,7 +24,11 @@ export function CategoryPicker({
   error?: string | null;
   /** Показать выбранную категорию в подписи: чип может оказаться ниже края экрана, а выбор подставлен заранее. */
   showValue?: boolean;
+  /** Частые категории — их видно сразу; нет — все чипы. */
+  frequent?: string[];
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -28,7 +36,15 @@ export function CategoryPicker({
   const cancelledRef = useRef(false);
   // После Enter или Esc поле исчезает — возвращаем фокус на «Своя», чтобы он не терялся (и Esc снова закрывал окно).
   const restoreFocusRef = useRef(false);
-  const list = value && !categories.some((c) => c === value) ? [...categories, value] : categories;
+  const all = value && !categories.some((c) => c === value) ? [...categories, value] : categories;
+  // Свёрнуто: выбранная и частые. Развёрнуто: все, с поиском, когда их много.
+  const compact = Boolean(frequent?.length) && all.length > (frequent?.length ?? 0) + 2 && !showAll;
+  const needle = query.trim().toLocaleLowerCase("ru");
+  const list = compact
+    ? [...new Set([...(value ? [value] : []), ...(frequent ?? [])])].filter((c) => all.includes(c))
+    : needle
+      ? all.filter((c) => c.toLocaleLowerCase("ru").includes(needle))
+      : all;
 
   useEffect(() => {
     if (adding || !restoreFocusRef.current) return;
@@ -62,13 +78,30 @@ export function CategoryPicker({
         {label}
         {showValue && value && <span className="text-text"> · {value}</span>}
       </legend>
+      {showAll && all.length > 12 && (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Найти категорию"
+          aria-label="Найти категорию"
+          className="h-10 w-full rounded-full border border-border-strong bg-surface px-4 text-base outline-none focus:border-accent"
+        />
+      )}
       <div className="flex flex-wrap gap-2">
         {list.map((c) => (
           <button
             key={c}
             type="button"
             aria-pressed={c === value}
-            onClick={() => onChange(c)}
+            onClick={() => {
+              onChange(c);
+              // Выбрали из полного списка — сворачиваем: выбранная останется видна среди частых.
+              if (showAll && frequent?.length) {
+                setShowAll(false);
+                setQuery("");
+              }
+            }}
             className={`h-10 max-w-full truncate rounded-full border px-3.5 text-sm transition ${
               c === value ? "sheen border-accent-fill bg-accent-fill text-on-accent" : "glass-control"
             }`}
@@ -76,6 +109,27 @@ export function CategoryPicker({
             {c}
           </button>
         ))}
+        {compact && (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="inline-flex h-10 items-center gap-1 rounded-full px-3.5 text-sm font-medium text-accent hover:bg-fill"
+          >
+            Все категории ({all.length})
+          </button>
+        )}
+        {showAll && frequent?.length ? (
+          <button
+            type="button"
+            onClick={() => {
+              setShowAll(false);
+              setQuery("");
+            }}
+            className="inline-flex h-10 items-center rounded-full px-3.5 text-sm font-medium text-accent hover:bg-fill"
+          >
+            Свернуть
+          </button>
+        ) : null}
         {adding ? (
           <input
             autoFocus

@@ -39,6 +39,8 @@ import {
   payableAccounts,
 } from "./accounts";
 import { useBalancesPrivacy } from "@/client/privacy";
+import { BalancesEye } from "./BalancesEye";
+import { frequentCategories } from "./frequent";
 import { useDeleteTransaction, useDispatch } from "./hooks";
 import { quickPicks } from "./quickPicks";
 import { useUi } from "./overlays";
@@ -202,6 +204,8 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
   };
 
   const picks = useMemo(() => (editing || kind !== "expense" ? [] : quickPicks(state, today)), [editing, kind, state, today]);
+  // Сначала видны частые категории — остальные по «Все категории».
+  const frequent = useMemo(() => frequentCategories(state, categoryKind, categories), [state, categoryKind, categories]);
 
   // Пока человек сам не трогал переключатель, он следует настройкам и категории.
   const autoSaving =
@@ -412,6 +416,8 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
               accounts={accounts}
               value={from}
               amounts={chipAmounts}
+              compact={accounts.length > 4}
+              action={<BalancesEye />}
               onChange={(id) => {
                 setFrom(id);
                 if (id === to) setTo(firstOther(id));
@@ -423,6 +429,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
               accounts={accounts.filter((a) => a.id !== from)}
               value={to}
               amounts={chipAmounts}
+              compact={accounts.length > 4}
               onChange={(id) => {
                 setTo(id);
                 setErrors((e) => ({ ...e, accounts: undefined }));
@@ -453,6 +460,8 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
                 accounts={payableAccounts(state)}
                 value={accountId}
                 amounts={chipAmounts}
+                compact={accounts.length > 4}
+                action={<BalancesEye />}
                 onChange={chooseAccount}
               />
               {!masked && selectedAccount && (
@@ -514,6 +523,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
           <CategoryPicker
             label="Категория"
             showValue
+            frequent={frequent}
             categories={categories}
             value={category}
             onChange={pickCategory}
