@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DEVICE=${IOS_DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /available|connected/ {print $3; exit}')}
+DEVICE=${IOS_DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /available|connected/ && !/unavailable/ {print $3; exit}')}
 : "${DEVICE:?не найден iPhone — подключите телефон или задайте IOS_DEVICE}"
 DERIVED=${IOS_DERIVED:-${TMPDIR:-/tmp}/budget-ios-build}
 NOTICE=$(sed -n 's/^ *summary: "\(.*\)",$/\1/p' src/components/app/whatsNew/releases.ts | head -1)
