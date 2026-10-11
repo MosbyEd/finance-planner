@@ -82,7 +82,7 @@ function useAppleModel(): { model: AppleModel | null; loading: boolean } {
 
 // ---------- окно ----------
 
-export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
+export function AiChatSheet({ initialPrompt, threadId }: { initialPrompt?: string; threadId?: string }) {
   const snapshot = useSnapshot();
   const online = useOnline();
   const apple = useAppleModel();
@@ -126,6 +126,7 @@ export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
       key={snapshot.user.login}
       login={snapshot.user.login}
       initialPrompt={initialPrompt}
+      threadId={threadId}
       online={online}
       apple={appleModel === "device"}
       deepseek={snapshot.aiEnabled}
@@ -136,19 +137,26 @@ export function AiChatSheet({ initialPrompt }: { initialPrompt?: string }) {
 function Chat({
   login,
   initialPrompt,
+  threadId,
   online,
   apple,
   deepseek,
 }: {
   login: string;
   initialPrompt?: string;
+  /** Открыть этот чат (из уведомления или Dynamic Island). */
+  threadId?: string;
   online: boolean;
   /** Есть модель Apple на телефоне — отвечает на вопросы без интернета. */
   apple: boolean;
   /** Включён ли на сервере DeepSeek. */
   deepseek: boolean;
 }) {
-  const [store] = useState(() => getChatStore(login));
+  const [store] = useState(() => {
+    const chatStore = getChatStore(login);
+    if (threadId) chatStore.open(threadId);
+    return chatStore;
+  });
   const chats = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { state, sync, sessionExpired } = useSnapshot();
   const { close, open } = useUi();

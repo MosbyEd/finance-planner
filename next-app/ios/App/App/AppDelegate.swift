@@ -7,8 +7,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Фоновая сессия помощника: подключаемся к ней сразу, чтобы получить ответы, пришедшие без нас.
+        _ = AiRequests.shared.session
+        UpdateNotice.postIfRequested()
         return true
+    }
+
+    /// Система разбудила приложение: ответ помощника пришёл, пока оно было свёрнуто или выгружено.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        guard identifier == AiRequests.sessionId else {
+            completionHandler()
+            return
+        }
+        AiRequests.shared.backgroundCompletion = completionHandler
+        _ = AiRequests.shared.session
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

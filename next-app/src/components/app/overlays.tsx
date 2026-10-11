@@ -20,7 +20,10 @@ export type Overlay =
   | { kind: "transfer"; from?: string; to?: string; amount?: number; resolveBank?: string }
   | { kind: "explain" }
   | { kind: "planned"; templateId: string; month: MonthKey }
-  | { kind: "ai"; prompt?: string }
+  /** Помощник; threadId — открыть этот чат (из уведомления или Dynamic Island). */
+  | { kind: "ai"; prompt?: string; threadId?: string }
+  /** «Что нового» после обновления. */
+  | { kind: "whatsNew" }
   | { kind: "auth"; mode?: "login" | "register" }
   | { kind: "limit"; category?: string }
   /** Новые операции из СМС и Siri — подтвердить или поправить. */

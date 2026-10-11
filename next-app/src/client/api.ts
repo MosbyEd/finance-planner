@@ -65,16 +65,23 @@ async function request<T>(
     clearTimeout(timer);
   }
 
+  return interpret(response.status, text, schema);
+}
+
+/** Разбор ответа сервера: ошибка — ApiError с текстом сервера, неожиданный ответ — сетевая ошибка. */
+function interpret<T>(status: number, text: string, schema: z.ZodType<T>): T {
+  const ok = status >= 200 && status < 300;
   let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    if (response.ok) throw new ApiError(UNEXPECTED, 0);
+    if (ok) throw new ApiError(UNEXPECTED, 0);
   }
   const body = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
-  if (!response.ok) {
-    const message = typeof body.error === "string" ? body.error : `Ошибка сервера (${response.status}).`;
-    throw new ApiError(message, response.status, body);
+  if (!ok) {
+    const message =
+      typeof body.error === "string" ? body.error : status === 0 ? "Нет связи с сервером." : `Ошибка сервера (${status}).`;
+    throw new ApiError(message, status, body);
   }
   const parsed = schema.safeParse(data);
   if (!parsed.success) throw new ApiError(UNEXPECTED, 0);
@@ -140,6 +147,11 @@ export interface AiChatResponse {
   skipped: number;
   reasoning: string | null;
   model: string;
+}
+
+/** Ответ помощника, полученный фоновым запросом приложения (статус и тело как есть). */
+export function parseAiChatReply(status: number, body: string): AiChatResponse {
+  return interpret(status, body, aiChatSchema) as AiChatResponse;
 }
 
 export const api = {

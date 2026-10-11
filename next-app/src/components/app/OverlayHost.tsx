@@ -2,6 +2,7 @@
 
 import { AccountSheet, TransferSheet } from "./sheets/AccountSheets";
 import { AiChatSheet } from "./sheets/AiChatSheet";
+import { WhatsNewSheet } from "./sheets/WhatsNewSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
 import { LimitSheet } from "./sheets/LimitSheet";
@@ -42,7 +43,9 @@ export function OverlayHost() {
     case "planned":
       return <PlannedSheet templateId={overlay.templateId} month={overlay.month} />;
     case "ai":
-      return <AiChatSheet initialPrompt={overlay.prompt} />;
+      return <AiChatSheet initialPrompt={overlay.prompt} threadId={overlay.threadId} />;
+    case "whatsNew":
+      return <WhatsNewSheet />;
     case "auth":
       return <AuthSheet mode={overlay.mode ?? "login"} />;
     case "limit":

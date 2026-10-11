@@ -1,3 +1,4 @@
+import ActivityKit
 import SwiftUI
 import WidgetKit
 
@@ -7,6 +8,7 @@ import WidgetKit
 struct BudgetWidgets: WidgetBundle {
     var body: some Widget {
         TodayLimitWidget()
+        AiLiveActivity()
     }
 }
 
@@ -230,5 +232,151 @@ struct TodayLimitView: View {
     /// «12 345 ₽» → «12 345» для круглого виджета.
     private func compact(_ amount: String) -> String {
         amount.replacingOccurrences(of: "₽", with: "").trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\u{00a0}\u{202f}")))
+    }
+}
+
+// MARK: - Помощник в Dynamic Island
+
+/// Ответ помощника: пока думает — таймер и полоса ожидания (система двигает её сама, без обновлений),
+/// когда ответил — начало ответа. Нажатие открывает чат.
+struct AiLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: AiActivityAttributes.self) { context in
+            AiLockScreenView(context: context)
+                .activityBackgroundTint(Color.black.opacity(0.35))
+                .widgetURL(Self.link(context.attributes))
+        } dynamicIsland: { context in
+            let state = context.state
+            return DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label("Помощник", systemImage: "sparkles")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AiPalette.glow)
+                        .padding(.leading, 4)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    AiStatusText(state: state)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.trailing, 4)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(state.phase == .thinking ? "«\(state.detail)»" : state.detail)
+                            .font(.subheadline)
+                            .lineLimit(2)
+                            .foregroundStyle(.white.opacity(state.phase == .thinking ? 0.75 : 1))
+                        AiProgress(state: state, engine: context.attributes.engine)
+                    }
+                    .padding(.horizontal, 4)
+                }
+            } compactLeading: {
+                AiIcon(phase: state.phase)
+            } compactTrailing: {
+                AiStatusText(state: state)
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: 52)
+            } minimal: {
+                AiIcon(phase: state.phase)
+            }
+            .widgetURL(Self.link(context.attributes))
+            .keylineTint(AiPalette.glow)
+        }
+    }
+
+    static func link(_ attributes: AiActivityAttributes) -> URL? {
+        var components = URLComponents()
+        components.scheme = "budget"
+        components.host = "ai"
+        components.queryItems = [URLQueryItem(name: "thread", value: attributes.threadId)]
+        return components.url
+    }
+}
+
+enum AiPalette {
+    static let glow = Color(red: 0.62, green: 0.6, blue: 1)
+    static let ready = Color(red: 0.49, green: 0.94, blue: 0.72)
+    static let failed = Color(red: 1, green: 0.72, blue: 0.48)
+}
+
+struct AiIcon: View {
+    let phase: AiActivityAttributes.ContentState.Phase
+
+    var body: some View {
+        switch phase {
+        case .thinking:
+            Image(systemName: "sparkles")
+                .foregroundStyle(AiPalette.glow)
+                .symbolEffect(.pulse, options: .repeating)
+        case .ready:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(AiPalette.ready)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(AiPalette.failed)
+        }
+    }
+}
+
+/// Справа: сколько уже думает (таймер идёт сам) или «Готово».
+struct AiStatusText: View {
+    let state: AiActivityAttributes.ContentState
+
+    var body: some View {
+        switch state.phase {
+        case .thinking:
+            Text(timerInterval: state.startedAt...Date.distantFuture, countsDown: false)
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AiPalette.glow)
+        case .ready:
+            Text("Готово").foregroundStyle(AiPalette.ready)
+        case .failed:
+            Text("Ошибка").foregroundStyle(AiPalette.failed)
+        }
+    }
+}
+
+struct AiProgress: View {
+    let state: AiActivityAttributes.ContentState
+    let engine: String
+
+    var body: some View {
+        switch state.phase {
+        case .thinking:
+            ProgressView(timerInterval: state.waitInterval, countsDown: false) {
+                Text("\(engine) думает…").font(.caption).foregroundStyle(.white.opacity(0.7))
+            } currentValueLabel: {
+                EmptyView()
+            }
+            .tint(AiPalette.glow)
+        case .ready:
+            Text(state.hasProposal ? "Предлагает изменения — откройте, чтобы подтвердить" : "Нажмите, чтобы открыть ответ")
+                .font(.caption)
+                .foregroundStyle(AiPalette.ready)
+        case .failed:
+            Text("Нажмите, чтобы повторить").font(.caption).foregroundStyle(AiPalette.failed)
+        }
+    }
+}
+
+struct AiLockScreenView: View {
+    let context: ActivityViewContext<AiActivityAttributes>
+
+    var body: some View {
+        let state = context.state
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                AiIcon(phase: state.phase)
+                Text(state.phase == .thinking ? "Помощник думает" : state.phase == .ready ? "Ответ готов" : "Помощник не ответил")
+                    .font(.headline)
+                Spacer()
+                AiStatusText(state: state).font(.subheadline.weight(.semibold))
+            }
+            Text(state.phase == .thinking ? "«\(state.detail)»" : state.detail)
+                .font(.subheadline)
+                .lineLimit(3)
+                .foregroundStyle(.white.opacity(state.phase == .thinking ? 0.75 : 1))
+            AiProgress(state: state, engine: context.attributes.engine)
+        }
+        .foregroundStyle(.white)
+        .padding(16)
     }
 }

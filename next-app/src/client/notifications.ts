@@ -34,6 +34,17 @@ export function loadNotificationPrefs(): NotificationPrefs {
   };
 }
 
+/** Нажали на уведомление: extra — данные уведомления (у ответа помощника — {kind: "ai", threadId}). */
+export function onNotificationTap(handler: (extra: unknown) => void): () => void {
+  if (!isNativeApp()) return () => {};
+  const handle = LocalNotifications.addListener("localNotificationActionPerformed", (event) => {
+    if (event.actionId === "tap") handler(event.notification.extra);
+  });
+  return () => {
+    void handle.then((h) => h.remove()).catch(() => {});
+  };
+}
+
 export function saveNotificationPrefs(prefs: NotificationPrefs): void {
   storage.setJson(PREFS_KEY, prefs);
 }

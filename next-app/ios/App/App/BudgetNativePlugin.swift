@@ -25,6 +25,10 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stateMirror", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "smsInbox", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ackSmsInbox", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aiChatStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aiInbox", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aiAck", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aiChatVisible", returnType: CAPPluginReturnPromise),
     ]
 
     private var orb: SiriOrbView?
@@ -124,6 +128,61 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let ids = call.getArray("ids", String.self) ?? []
         Task {
             await LocalSms.shared.acknowledge(ids)
+            call.resolve()
+        }
+    }
+
+    // MARK: - Помощник в фоне
+
+    /// Вопрос помощнику фоновым запросом: ответ дойдёт, даже если свернуть приложение; пока ждём —
+    /// Live Activity. Ответ приходит событием aiReply и лежит в aiInbox, пока интерфейс его не заберёт.
+    @objc func aiChatStart(_ call: CAPPluginCall) {
+        guard let requestId = call.getString("requestId"), let threadId = call.getString("threadId"),
+              let body = call.getObject("body"), let data = try? JSONSerialization.data(withJSONObject: body)
+        else {
+            call.reject("Некорректный запрос")
+            return
+        }
+        let question = call.getString("question") ?? ""
+        let engine = call.getString("engine") ?? "DeepSeek"
+        let expected = call.getInt("expectedSeconds") ?? 10
+        DispatchQueue.main.async {
+            do {
+                try AiRequests.shared.start(
+                    requestId: requestId, threadId: threadId, question: question, engine: engine, expectedSeconds: expected, body: data
+                )
+                call.resolve()
+            } catch {
+                call.reject("Войдите в аккаунт, чтобы спросить помощника.")
+            }
+        }
+    }
+
+    @objc func aiInbox(_ call: CAPPluginCall) {
+        guard let account = BudgetStore.account else {
+            call.resolve(["done": [], "running": []])
+            return
+        }
+        Task {
+            let inbox = await AiRequests.shared.inbox(account: account)
+            call.resolve([
+                "done": inbox.done.map { ["requestId": $0.requestId, "threadId": $0.threadId, "status": $0.status, "body": $0.body] as [String: Any] },
+                "running": inbox.running.map {
+                    ["requestId": $0.requestId, "threadId": $0.threadId, "startedAt": $0.startedAt.timeIntervalSince1970 * 1000] as [String: Any]
+                },
+            ])
+        }
+    }
+
+    @objc func aiAck(_ call: CAPPluginCall) {
+        AiRequests.shared.acknowledge(call.getArray("ids", String.self) ?? [])
+        call.resolve()
+    }
+
+    @objc func aiChatVisible(_ call: CAPPluginCall) {
+        let visible = call.getBool("visible") ?? false
+        DispatchQueue.main.async {
+            AiRequests.shared.setChatVisible(visible)
             call.resolve()
         }
     }

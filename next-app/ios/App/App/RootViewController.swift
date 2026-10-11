@@ -114,8 +114,9 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
 
     // MARK: - Ссылки виджета
 
-    /// budget://add — окно «Новый расход», budget://home — Главная. При холодном запуске ждём интерфейс.
-    func open(link: String) {
+    /// budget://add — окно «Новый расход», budget://home — Главная, budget://ai?thread=… — чат помощника.
+    /// При холодном запуске ждём интерфейс.
+    func open(link: String, thread: String? = nil) {
         Task { @MainActor in
             for _ in 0..<40 where !HomeStore.shared.live {
                 try? await Task.sleep(for: .milliseconds(250))
@@ -123,6 +124,10 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
             switch link {
             case "add":
                 if presentedViewController == nil { presentAdd() }
+            case "ai":
+                var overlay: [String: JSONValue] = ["kind": .string("ai")]
+                if let thread { overlay["threadId"] = .string(thread) }
+                AppShell.shared.open(overlay)
             default:
                 if webTab != "home" || selectedTab?.identifier != "home" { AppShell.shared.setTab("home") }
             }

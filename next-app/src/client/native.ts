@@ -47,6 +47,14 @@ export interface NativeToast {
   actionLabel?: string;
 }
 
+/** Ответ помощника на фоновый запрос приложения: HTTP-статус (0 — нет связи) и тело ответа. */
+export interface NativeAiReply {
+  requestId: string;
+  threadId: string;
+  status: number;
+  body: string;
+}
+
 interface BudgetNativePlugin {
   shellInfo(): Promise<{ nativeHome: boolean }>;
   homeModel(options: { model: unknown }): Promise<void>;
@@ -66,6 +74,18 @@ interface BudgetNativePlugin {
   siriOrb(options: { active: boolean }): Promise<void>;
   setSession(options: { apiBase: string; token: string | null; account: string | null }): Promise<void>;
   setSummary(options: { date: string; text: string; expenseCategories: string[]; incomeCategories: string[] }): Promise<void>;
+  aiChatStart(options: {
+    requestId: string;
+    threadId: string;
+    question: string;
+    engine: string;
+    expectedSeconds: number;
+    body: unknown;
+  }): Promise<void>;
+  aiInbox(): Promise<{ done: NativeAiReply[]; running: { requestId: string; threadId: string; startedAt: number }[] }>;
+  aiAck(options: { ids: string[] }): Promise<void>;
+  aiChatVisible(options: { visible: boolean }): Promise<void>;
+  addListener(event: "aiReply", listener: (data: NativeAiReply) => void): Promise<PluginListenerHandle>;
   aiStatus(): Promise<AppleAiStatus>;
   aiRespond(options: { model: AppleModel; instructions: string; prompt: string }): Promise<AppleAiReply>;
 }
@@ -229,4 +249,49 @@ export async function nativeSmsInbox(account: string): Promise<{ id: string; ops
 export function nativeAckSmsInbox(ids: string[]): void {
   if (!ids.length) return;
   plugin.ackSmsInbox({ ids }).catch(() => {});
+}
+
+// ---------- помощник в фоне ----------
+
+/**
+ * Вопрос помощнику фоновым запросом приложения (ответ дойдёт и в свёрнутое приложение, пока ждём —
+ * Dynamic Island). false — в браузере или в старой сборке без этого: спрашиваем обычным запросом.
+ */
+export async function nativeAiChatStart(options: Parameters<BudgetNativePlugin["aiChatStart"]>[0]): Promise<boolean> {
+  if (!isNativeApp()) return false;
+  try {
+    await plugin.aiChatStart(options);
+    return true;
+  } catch (error) {
+    // Метода нет (старая сборка) — спросим обычным запросом; иначе (не вошли) — ошибка как есть.
+    if (error instanceof Error && /not implemented|unimplemented/i.test(error.message)) return false;
+    throw error;
+  }
+}
+
+export async function nativeAiInbox(): Promise<{ done: NativeAiReply[]; running: { requestId: string; threadId: string; startedAt: number }[] } | null> {
+  if (!isNativeApp()) return null;
+  try {
+    return await plugin.aiInbox();
+  } catch {
+    return null;
+  }
+}
+
+export function nativeAiAck(ids: string[]): void {
+  if (!ids.length || !isNativeApp()) return;
+  plugin.aiAck({ ids }).catch(() => {});
+}
+
+export function nativeAiChatVisible(visible: boolean): void {
+  if (!isNativeApp()) return;
+  plugin.aiChatVisible({ visible }).catch(() => {});
+}
+
+export function onNativeAiReply(handler: (reply: NativeAiReply) => void): () => void {
+  if (!isNativeApp()) return () => {};
+  const handle = plugin.addListener("aiReply", handler);
+  return () => {
+    void handle.then((h) => h.remove()).catch(() => {});
+  };
 }

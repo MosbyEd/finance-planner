@@ -596,3 +596,45 @@
   pointer-events: none;
   animation: siri-sheen 1.4s ease-out forwards;
 }
+
+/* «Что нового»: карточки выплывают по очереди, снимок экрана медленно прокручивается, как живой. */
+@keyframes whats-new-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes whats-new-pan {
+  0%,
+  12% {
+    transform: translateY(0);
+  }
+  88%,
+  100% {
+    transform: translateY(calc(-100% + 18rem));
+  }
+}
+@keyframes whats-new-pulse {
+  50% {
+    opacity: 0.45;
+    transform: scale(0.88);
+  }
+}
+.whats-new-rise {
+  animation: whats-new-rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--wn-delay, 0ms);
+}
+.whats-new-shot img {
+  animation: whats-new-pan 14s ease-in-out 1.2s infinite alternate;
+}
+.whats-new-pulse {
+  display: inline-flex;
+  animation: whats-new-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-rise,
+  .whats-new-shot img,
+  .whats-new-pulse {
+    animation: none;
+  }
+}

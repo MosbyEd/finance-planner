@@ -19,9 +19,14 @@ export function AboutSection() {
         <p className="text-sm text-muted">
           Все суммы хранятся в копейках целыми числами, поэтому расчёты точные — без ошибок округления.
         </p>
-        <Button variant="soft" icon="info" onClick={() => open({ kind: "explain" })}>
-          Как посчитан лимит сегодня
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="soft" icon="sparkles" onClick={() => open({ kind: "whatsNew" })}>
+            Что нового
+          </Button>
+          <Button variant="soft" icon="info" onClick={() => open({ kind: "explain" })}>
+            Как посчитан лимит сегодня
+          </Button>
+        </div>
         <p className="text-sm text-muted">Версия {APP_VERSION}</p>
       </div>
     </SectionCard>

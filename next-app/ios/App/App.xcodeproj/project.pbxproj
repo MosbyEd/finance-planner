@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		021051AC686C37550E6565AB /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */; };
 		044DA29F7542F3B06FA73E39 /* SmsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 983AB7229CF9E2546AB949C9 /* SmsEngine.swift */; };
+		09C0E9096E9AB6BCD87092E0 /* AiActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */; };
 		0C0650F960CB904E2DBFE576 /* LocalSms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CAE5D5C3E112E52D7DA1235 /* LocalSms.swift */; };
 		0DE8777B1FBE0867E8518646 /* BudgetWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4799331368D164CAE12ED554 /* BudgetWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
@@ -23,9 +24,12 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		5196A028580B34A74F952BBD /* BudgetWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA830F8C116E0FFD1178E20 /* BudgetWidget.swift */; };
+		642E97826F76A77D516FED38 /* AiRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D6BF5E939B40CB6BA6BB593 /* AiRequests.swift */; };
 		650C3749ECD0C2440B160FA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 334B1B02A204B7E174D799AE /* Theme.swift */; };
 		70ED7CD1B5E2005D5EEF7E6A /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DA5F05393A2D44F8489DAB /* ToastCenter.swift */; };
+		7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */; };
 		AA810F8D15C92F6047E65F18 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DF6152F9F5E000FA5538617 /* Foundation.framework */; };
 		B0D6E0022FF0000100A1B2C3 /* BudgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0012FF0000100A1B2C3 /* BudgetStore.swift */; };
 		B0D6E0042FF0000100A1B2C3 /* BudgetNativePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E0032FF0000100A1B2C3 /* BudgetNativePlugin.swift */; };
@@ -65,12 +69,14 @@
 
 /* Begin PBXFileReference section */
 		0CAE5D5C3E112E52D7DA1235 /* LocalSms.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LocalSms.swift; sourceTree = "<group>"; };
+		1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AiActivity.swift; sourceTree = "<group>"; };
 		1DCA8C23E87B5B50E8A8FBB9 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		1DF6152F9F5E000FA5538617 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		334B1B02A204B7E174D799AE /* Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4799331368D164CAE12ED554 /* BudgetWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4AA830F8C116E0FFD1178E20 /* BudgetWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BudgetWidget.swift; sourceTree = "<group>"; };
+		4D6BF5E939B40CB6BA6BB593 /* AiRequests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AiRequests.swift; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -88,6 +94,7 @@
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		983AB7229CF9E2546AB949C9 /* SmsEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SmsEngine.swift; sourceTree = "<group>"; };
+		9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateNotice.swift; sourceTree = "<group>"; };
 		9F51C0C8567B79CB7B06B26C /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		A045312969732F31ED4B8F30 /* BudgetWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = BudgetWidget.entitlements; sourceTree = "<group>"; };
 		A069B7F3E0F2B16473FE86C4 /* App.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
@@ -170,6 +177,9 @@
 				65D9871EF204022ED518291E /* Бюджет СМС.shortcut */,
 				983AB7229CF9E2546AB949C9 /* SmsEngine.swift */,
 				0CAE5D5C3E112E52D7DA1235 /* LocalSms.swift */,
+				1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */,
+				4D6BF5E939B40CB6BA6BB593 /* AiRequests.swift */,
+				9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -313,6 +323,7 @@
 			files = (
 				5196A028580B34A74F952BBD /* BudgetWidget.swift in Sources */,
 				3DCA238646210F616325015F /* WidgetSnapshot.swift in Sources */,
+				09C0E9096E9AB6BCD87092E0 /* AiActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -338,6 +349,9 @@
 				EB8EE50E6952DBF240187936 /* AddTransactionView.swift in Sources */,
 				044DA29F7542F3B06FA73E39 /* SmsEngine.swift in Sources */,
 				0C0650F960CB904E2DBFE576 /* LocalSms.swift in Sources */,
+				A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */,
+				642E97826F76A77D516FED38 /* AiRequests.swift in Sources */,
+				7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

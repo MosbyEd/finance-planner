@@ -1,11 +1,20 @@
 "use client";
 
 import { z } from "zod";
-import { isActionRequest, type AiProposal } from "@/domain/ai";
-import { isValidIsoDate, todayLocal, type IsoDate } from "@/domain/dates";
+import { isActionRequest, pickAiMode, type AiProposal } from "@/domain/ai";
+import { isValidIsoDate, todayLocal } from "@/domain/dates";
 import type { State } from "@/domain/schema";
-import { ApiError, api, type AiChatMessage } from "@/client/api";
+import { ApiError, api, parseAiChatReply, type AiChatMessage, type AiChatResponse } from "@/client/api";
 import { AppleAiError, askApple } from "@/client/appleAi";
+import {
+  nativeAiAck,
+  nativeAiChatStart,
+  nativeAiChatVisible,
+  nativeAiInbox,
+  onNativeAiReply,
+  type NativeAiReply,
+} from "@/client/native";
+import { isNativeApp } from "@/client/runtime";
 import { newId } from "@/client/react";
 
 /**
@@ -37,12 +46,15 @@ export interface AssistantMessage {
   status: ProposalStatus;
   engine?: AiEngine;
   at?: number;
+  /** Номер фонового запроса приложения: по нему ответ не применится дважды. */
+  requestId?: string;
 }
 
 export interface ErrorMessage {
   id: string;
   role: "error";
   content: string;
+  requestId?: string;
 }
 
 export type ChatMessage = UserMessage | AssistantMessage | ErrorMessage;
@@ -61,8 +73,8 @@ export interface ChatStoreSnapshot {
   threads: ChatThread[];
   /** Открытый чат; null — новый, ещё без сообщений. */
   currentId: string | null;
-  /** Вопрос, на который ждём ответа. */
-  pending: { threadId: string; since: number } | null;
+  /** Вопрос, на который ждём ответа; requestId — фоновый запрос приложения. */
+  pending: { threadId: string; since: number; requestId?: string } | null;
   /** Чат, чей вопрос ждёт интернета (просьба что-то изменить, а связи нет). */
   waiting: string | null;
 }
@@ -141,8 +153,9 @@ const storedMessageSchema = z.discriminatedUnion("role", [
     status: z.enum(["pending", "applied", "dismissed"]),
     engine: z.enum(["fast", "reasoning", "apple"]).optional(),
     at: z.number().optional(),
+    requestId: z.string().optional(),
   }),
-  z.object({ id: z.string(), role: z.literal("error"), content: z.string() }),
+  z.object({ id: z.string(), role: z.literal("error"), content: z.string(), requestId: z.string().optional() }),
 ]);
 
 const storedThreadSchema = z.object({
@@ -190,7 +203,15 @@ function legacyThread(login: string): ChatThread | null {
   }
 }
 
-function load(login: string): Pick<ChatStoreSnapshot, "threads" | "currentId"> {
+/** Вопрос без ответа (приложение закрыли, пока ждали) — предлагаем отправить снова. */
+function markLost(messages: ChatMessage[]): ChatMessage[] {
+  return messages.at(-1)?.role === "user"
+    ? [...messages, { id: newId(), role: "error", content: "Ответ не пришёл: приложение было закрыто." }]
+    : messages;
+}
+
+/** lost — сразу отметить вопросы без ответа (в браузере); в приложении сначала спросим фоновые запросы. */
+function load(login: string, lost: boolean): Pick<ChatStoreSnapshot, "threads" | "currentId"> {
   let threads: ChatThread[] = [];
   let currentId: string | null = null;
   try {
@@ -201,11 +222,7 @@ function load(login: string): Pick<ChatStoreSnapshot, "threads" | "currentId"> {
         const thread = storedThreadSchema.safeParse(item);
         if (!thread.success) continue;
         const messages = readMessages(thread.data.messages);
-        // Приложение закрыли, пока ждали ответа, — предлагаем отправить вопрос снова.
-        if (messages.at(-1)?.role === "user") {
-          messages.push({ id: newId(), role: "error", content: "Ответ не пришёл: приложение было закрыто." });
-        }
-        threads.push({ ...thread.data, messages });
+        threads.push({ ...thread.data, messages: lost ? markLost(messages) : messages });
       }
       currentId = parsed.data.currentId;
     }
@@ -300,10 +317,64 @@ export class ChatStore {
   /** Сколько окон чата открыто сейчас: ответ в открытый чат не требует уведомления. */
   private visible = 0;
 
+  private stopNative: (() => void) | null = null;
+
   constructor(private readonly login: string) {
-    this.snapshot = { ...load(login), pending: null, waiting: null };
+    const native = isNativeApp();
+    this.snapshot = { ...load(login, !native), pending: null, waiting: null };
     if (typeof window !== "undefined") window.addEventListener("online", this.onOnline);
+    if (native) {
+      this.stopNative = onNativeAiReply(this.onNativeReply);
+      void this.syncNative();
+    }
   }
+
+  /** Ответы фоновых запросов, пришедшие без нас, и вопросы, которые ещё в пути. */
+  private async syncNative(): Promise<void> {
+    const inbox = await nativeAiInbox();
+    const running = inbox?.running.find((r) => this.snapshot.threads.some((t) => t.id === r.threadId));
+    if (running && !this.snapshot.pending) {
+      this.update({ pending: { threadId: running.threadId, since: running.startedAt, requestId: running.requestId } });
+    }
+    for (const reply of inbox?.done ?? []) this.onNativeReply(reply);
+    // Остальные вопросы без ответа потерялись.
+    const waitingIds = new Set([...(inbox?.running ?? []).map((r) => r.threadId)]);
+    let changed = false;
+    const threads = this.snapshot.threads.map((t) => {
+      const messages = waitingIds.has(t.id) ? t.messages : markLost(t.messages);
+      if (messages === t.messages) return t;
+      changed = true;
+      return { ...t, messages };
+    });
+    if (changed) this.update({ threads });
+  }
+
+  private onNativeReply = (reply: NativeAiReply): void => {
+    nativeAiAck([reply.requestId]);
+    const thread = this.snapshot.threads.find((t) => t.id === reply.threadId);
+    // Чат удалили или ответ уже записан.
+    if (!thread || thread.messages.some((m) => (m.role === "assistant" || m.role === "error") && m.requestId === reply.requestId)) {
+      if (this.snapshot.pending?.requestId === reply.requestId) this.update({ pending: null });
+      return;
+    }
+    let message: AssistantMessage | ErrorMessage;
+    try {
+      message = { ...fromServer(parseAiChatReply(reply.status, reply.body)), requestId: reply.requestId };
+    } catch (error) {
+      message = {
+        id: newId(),
+        role: "error",
+        content: error instanceof ApiError ? error.message : "Не удалось получить ответ. Попробуйте ещё раз.",
+        requestId: reply.requestId,
+      };
+    }
+    // Вопрос без ответа уже отмечен ошибкой «не пришёл» — заменяем её ответом.
+    const last = thread.messages.at(-1);
+    const messages = last?.role === "error" && !last.requestId ? thread.messages.slice(0, -1) : thread.messages;
+    if (this.snapshot.pending?.requestId === reply.requestId) this.snapshot = { ...this.snapshot, pending: null };
+    this.patchThread(thread.id, (t) => ({ ...t, updatedAt: Date.now(), messages: [...messages, message].slice(-MAX_MESSAGES) }));
+    for (const listener of this.replyListeners) listener(thread.id, message);
+  };
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -329,6 +400,7 @@ export class ChatStore {
   /** Окно чата открылось (true) или закрылось. Открыли после долгого перерыва — начинаем новый чат. */
   setVisible(open: boolean): void {
     this.visible = Math.max(0, this.visible + (open ? 1 : -1));
+    nativeAiChatVisible(this.visible > 0);
     if (!open) return;
     const current = this.current();
     if (current && !this.snapshot.pending && Date.now() - current.updatedAt > SESSION_GAP_MS) this.update({ currentId: null });
@@ -382,6 +454,7 @@ export class ChatStore {
 
   dispose(): void {
     if (typeof window !== "undefined") window.removeEventListener("online", this.onOnline);
+    this.stopNative?.();
   }
 
   send(text: string): void {
@@ -459,9 +532,21 @@ export class ChatStore {
         // Изменения от модели на телефоне не принимаем: она собирает их ненадёжно.
         reply = assistant(response.text, null, null, 0, "apple");
       } else {
-        const response = await api.aiChat(history, "auto", today);
-        const engine: AiEngine = /reason/i.test(response.model) ? "reasoning" : "fast";
-        reply = assistant(response.text, response.reasoning?.trim() || null, response.proposal, response.skipped, engine);
+        // В приложении — фоновым запросом: ответ дойдёт и в свёрнутое приложение, пока ждём — Dynamic Island.
+        const requestId = newId();
+        const mode = pickAiMode(question);
+        this.update({ pending: { threadId, since: Date.now(), requestId } });
+        const started = await nativeAiChatStart({
+          requestId,
+          threadId,
+          question,
+          engine: ENGINE_LABEL[mode],
+          expectedSeconds: mode === "reasoning" ? 30 : 8,
+          body: { messages: history, mode: "auto", today },
+        });
+        // Ответ придёт событием (onNativeReply).
+        if (started) return;
+        reply = fromServer(await api.aiChat(history, "auto", today));
       }
     } catch (error) {
       reply = {
@@ -477,6 +562,11 @@ export class ChatStore {
     this.patchThread(threadId, (t) => ({ ...t, updatedAt: Date.now(), messages: [...t.messages, reply].slice(-MAX_MESSAGES) }));
     for (const listener of this.replyListeners) listener(threadId, reply);
   }
+}
+
+function fromServer(response: AiChatResponse): AssistantMessage {
+  const engine: AiEngine = /reason/i.test(response.model) ? "reasoning" : "fast";
+  return assistant(response.text, response.reasoning?.trim() || null, response.proposal, response.skipped, engine);
 }
 
 function assistant(
@@ -519,4 +609,3 @@ export const ENGINE_LABEL: Record<AiEngine, string> = {
   apple: "Модель на iPhone · без интернета",
 };
 
-export type { IsoDate };

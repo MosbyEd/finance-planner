@@ -10,7 +10,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window = UIWindow(windowScene: windowScene)
         window?.rootViewController = RootViewController()
         window?.makeKeyAndVisible()
-        // Открыли из виджета (budget://add, budget://home).
+        // Открыли из виджета (budget://add, budget://home) или из Dynamic Island (budget://ai?thread=…).
         if let url = connectionOptions.urlContexts.first?.url { openBudgetURL(url) }
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
@@ -34,7 +34,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     private func openBudgetURL(_ url: URL) {
         guard url.scheme == "budget", let root = window?.rootViewController as? RootViewController else { return }
-        root.open(link: url.host() ?? "")
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        root.open(link: url.host() ?? "", thread: query.first { $0.name == "thread" }?.value)
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {

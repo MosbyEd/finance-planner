@@ -6,7 +6,7 @@ import { FinanceStore } from "@/client/store";
 import { StoreProvider, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
 import { pickAppleModel } from "@/client/appleAi";
-import { syncNotifications } from "@/client/notifications";
+import { onNotificationTap, syncNotifications } from "@/client/notifications";
 import { isNativeApp } from "@/client/runtime";
 import { registerServiceWorker } from "@/client/sw";
 import { IconButton } from "../ui/Button";
@@ -20,7 +20,8 @@ import { Plans } from "../screens/Plans";
 import { Settings } from "../screens/Settings";
 import { useDispatch } from "./hooks";
 import { OverlayHost } from "./OverlayHost";
-import { forgetAiChat } from "./ai/chatStore";
+import { forgetAiChat, getChatStore } from "./ai/chatStore";
+import { useWhatsNewPrompt } from "./sheets/WhatsNewSheet";
 import { UiProvider, useUi, type Tab } from "./overlays";
 import { useNativeHome, useNativeShell } from "./native/useNativeHome";
 import { useNativeBridge } from "./useNativeBridge";
@@ -68,6 +69,34 @@ function Shell() {
   const { tab, setTab, open } = useUi();
 
   useEffect(() => store.onSignOut(forgetAiChat), [store]);
+
+  // Нажали на уведомление: ответ помощника — открыть его чат, «Бюджет обновлён» — «Что нового».
+  useEffect(
+    () =>
+      onNotificationTap((extra) => {
+        const data = extra && typeof extra === "object" ? (extra as { kind?: unknown; threadId?: unknown }) : {};
+        if (data.kind === "ai") open({ kind: "ai", threadId: typeof data.threadId === "string" ? data.threadId : undefined });
+        else if (data.kind === "whatsNew") open({ kind: "whatsNew" });
+      }),
+    [open],
+  );
+
+  // Переписка с помощником: в приложении — сразу забрать ответы, пришедшие в фоне; в браузере (там нет
+  // уведомлений системы) — подсказать, что ответ готов, если чат закрыт.
+  const login = snapshot.user?.login;
+  useEffect(() => {
+    if (!login) return;
+    const chat = getChatStore(login);
+    if (isNativeApp()) return;
+    return chat.onReply((threadId, message) => {
+      if (chat.isVisible()) return;
+      toast(message.role === "error" ? "Помощник не ответил" : "Ответ помощника готов", {
+        action: { label: "Открыть", onClick: () => open({ kind: "ai", threadId }) },
+      });
+    });
+  }, [login, toast, open]);
+
+  useWhatsNewPrompt(snapshot.phase === "ready");
 
   useEffect(() => {
     store.setNotifier((message, kind) => toast(message, { kind }));
