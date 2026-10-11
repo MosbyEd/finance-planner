@@ -26,7 +26,11 @@ export function useWhatsNewPrompt(ready: boolean): void {
 
 export function WhatsNewSheet() {
   const { close } = useUi();
-  const [shown, setShown] = useState(1);
+  // Сразу все непросмотренные обновления (если пропустили несколько), остальные — по кнопке.
+  const [shown, setShown] = useState(() => {
+    const seen = RELEASES.findIndex((r) => r.id === storage.get(SEEN_KEY));
+    return Math.max(1, seen === -1 ? RELEASES.length : seen);
+  });
   // Просмотрено — когда закрыли сами; перекрыло другое окно — покажем снова, когда оно закроется.
   const done = () => {
     storage.set(SEEN_KEY, LATEST_RELEASE.id);
