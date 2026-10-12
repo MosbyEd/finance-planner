@@ -5,7 +5,7 @@ import { monthKeyOf } from "@/domain/dates";
 import { monthMetrics } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { activeAccounts, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
-import { purchaseSavingAmount } from "@/domain/savings";
+import { pendingSavings, purchaseSavingAmount } from "@/domain/savings";
 import type { Settings } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
@@ -25,6 +25,20 @@ const ROUNDING = [
   { value: 5_000, label: "50 ₽" },
   { value: 10_000, label: "100 ₽" },
 ];
+
+/** «Переводить, когда накопится» — как правило автонакоплений в банке. */
+const MIN_TRANSFER = [
+  { value: 0, label: "Сразу" },
+  { value: 5_000, label: "50 ₽" },
+  { value: 10_000, label: "100 ₽" },
+  { value: 50_000, label: "500 ₽" },
+  { value: 100_000, label: "1 000 ₽" },
+];
+
+function minTransferOptions(current: number): { value: string; label: string }[] {
+  const list = MIN_TRANSFER.some((o) => o.value === current) ? MIN_TRANSFER : [...MIN_TRANSFER, { value: current, label: formatMoney(current) }];
+  return list.map((o) => ({ value: String(o.value), label: o.label }));
+}
 
 const MAX_SALARY_CATEGORIES = 20;
 const MAX_EXCLUDED = 50;
@@ -46,6 +60,9 @@ interface Form {
   salaryTarget: string;
   purchaseTarget: string;
   rolloverTarget: string;
+  /** Переводить, когда накопится (копейки; 0 — сразу): у доходов и покупок — свой порог. */
+  salaryMin: number;
+  purchaseMin: number;
 }
 
 type ErrorKey = "rate" | "salaryPercent" | "salaryCategories" | "purchasePercent" | "cap" | "excluded";
@@ -65,6 +82,8 @@ const ERRORS_BY_FIELD: Record<keyof Form, ErrorKey[]> = {
   salaryTarget: [],
   purchaseTarget: [],
   rolloverTarget: [],
+  salaryMin: [],
+  purchaseMin: [],
 };
 
 function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
@@ -81,6 +100,8 @@ function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
     cap: s.purchaseSaving.cap,
     roundTo: s.purchaseSaving.roundTo,
     excluded: s.purchaseSaving.excludedCategories,
+    salaryMin: s.salarySaving.minTransfer ?? 0,
+    purchaseMin: s.purchaseSaving.minTransfer ?? 0,
   };
 }
 
@@ -97,6 +118,7 @@ function previewSettings(form: Form, base: Settings): Settings {
       percent: parseIntInRange(form.salaryPercent, 1, 90) ?? base.salarySaving.percent,
       categories: form.salaryCategories,
       ...(form.salaryTarget !== SAVINGS_ACCOUNT_ID ? { toAccountId: form.salaryTarget } : {}),
+      ...(form.salaryMin > 0 ? { minTransfer: form.salaryMin } : {}),
     },
     purchaseSaving: {
       enabled: form.purchaseEnabled,
@@ -105,6 +127,7 @@ function previewSettings(form: Form, base: Settings): Settings {
       roundTo: form.roundTo,
       excludedCategories: form.excluded,
       ...(form.purchaseTarget !== SAVINGS_ACCOUNT_ID ? { toAccountId: form.purchaseTarget } : {}),
+      ...(form.purchaseMin > 0 ? { minTransfer: form.purchaseMin } : {}),
     },
     ...(form.rolloverTarget !== SAVINGS_ACCOUNT_ID ? { rolloverAccountId: form.rolloverTarget } : {}),
   };
@@ -271,6 +294,11 @@ export function SavingsSection() {
                   onChange={(id) => patch({ salaryTarget: id })}
                 />
               )}
+              <MinTransfer
+                value={form.salaryMin}
+                onChange={(v) => patch({ salaryMin: v })}
+                pending={pendingSavings(state, "income")}
+              />
               <ChipGroup label="С каких доходов откладывать" error={errors.salaryCategories}>
                 {incomeOptions.map((c) => (
                   <ToggleChip
@@ -336,6 +364,11 @@ export function SavingsSection() {
                   ? `Разница до ближайших ${formatMoney(form.roundTo)} тоже уходит в сбережения.`
                   : "Откладывается только процент."}
               </p>
+              <MinTransfer
+                value={form.purchaseMin}
+                onChange={(v) => patch({ purchaseMin: v })}
+                pending={pendingSavings(state, "expense")}
+              />
               <ChipGroup
                 label="Не откладывать с покупок в категориях"
                 hint="Обычно это крупные обязательные платежи: аренда, кредит, коммуналка."
@@ -381,5 +414,37 @@ export function SavingsSection() {
         </div>
       </form>
     </SectionCard>
+  );
+}
+
+/**
+ * «Переводить, когда накопится»: пока отчисления этого вида не наберут порог, деньги остаются на счёте
+ * операции — как в банке «переводить на накопительный, когда накопится хотя бы 100 ₽».
+ */
+function MinTransfer({
+  value,
+  onChange,
+  pending,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  pending: { total: Kopecks; threshold: Kopecks; count: number };
+}) {
+  return (
+    <div className="space-y-2">
+      <ChoiceChips
+        label="Переводить в сбережения, когда накопится"
+        value={String(value)}
+        options={minTransferOptions(value)}
+        onChange={(v) => onChange(Number(v))}
+      />
+      <p className="text-xs text-muted">
+        {value > 0
+          ? `Отчисления копятся и переводятся разом, когда наберётся ${formatMoney(value, { whole: true })}. До этого деньги остаются на счёте.`
+          : "Каждое отчисление переводится сразу."}
+        {pending.total > 0 &&
+          ` Сейчас накоплено ${formatMoney(pending.total)}${pending.threshold > 0 ? ` из ${formatMoney(pending.threshold, { whole: true })}` : ""}.`}
+      </p>
+    </div>
   );
 }

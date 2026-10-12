@@ -11,6 +11,7 @@ import {
 } from "@/domain/metrics";
 import { formatMoney } from "@/domain/money";
 import type { Account, State, Transaction } from "@/domain/schema";
+import { autoSavingAmount } from "@/domain/savings";
 import { plural } from "@/domain/text";
 import { accountBalances, accountCards, activeAccounts, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
@@ -157,8 +158,8 @@ export interface AddModel {
   mandatoryCategories: string[];
   /** Правила автоотчислений (src/domain/savings.ts) — окно показывает, сколько уйдёт в сбережения. */
   saving: {
-    purchase: { enabled: boolean; percent: number; cap: number; roundTo: number; excluded: string[] };
-    salary: { enabled: boolean; percent: number; categories: string[] };
+    purchase: { enabled: boolean; percent: number; cap: number; roundTo: number; excluded: string[]; minTransfer: number };
+    salary: { enabled: boolean; percent: number; categories: string[]; minTransfer: number };
   };
   /** Счета для перевода — все свои, с накопительными (меньше двух — перевода нет). */
   transferAccounts: AddModel["accounts"];
@@ -392,7 +393,7 @@ const TX_META: Record<Transaction["type"], { symbol: string; tint: Tone }> = {
   transfer: { symbol: "arrow.left.arrow.right", tint: "accent" },
 };
 
-function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: number): RecentModel {
+function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: number, pendingSaving = 0): RecentModel {
   const loanAdjustment = tx.type === "adjustment" && tx.loanId !== undefined;
   const meta = loanAdjustment ? { symbol: "person.2", tint: "muted" as Tone } : TX_META[tx.type];
   const effect = balanceEffect(tx);
@@ -418,7 +419,12 @@ function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: nu
     amountTone,
     symbol: meta.symbol,
     tint: meta.tint,
-    autoSaving: autoSaving !== 0 ? formatMoney(autoSaving, { sign: true }) : null,
+    autoSaving:
+      autoSaving !== 0
+        ? formatMoney(autoSaving, { sign: true })
+        : pendingSaving > 0
+          ? `${formatMoney(pendingSaving, { sign: true })} копится`
+          : null,
     command: { type: "open", overlay: { kind: "tx", txId: tx.id } },
   };
 }
@@ -480,11 +486,13 @@ export function buildHomeModel(input: HomeInput): HomeModel {
         cap: state.settings.purchaseSaving.cap,
         roundTo: state.settings.purchaseSaving.roundTo,
         excluded: state.settings.purchaseSaving.excludedCategories,
+        minTransfer: state.settings.purchaseSaving.minTransfer ?? 0,
       },
       salary: {
         enabled: state.settings.salarySaving.enabled,
         percent: state.settings.salarySaving.percent,
         categories: state.settings.salarySaving.categories,
+        minTransfer: state.settings.salarySaving.minTransfer ?? 0,
       },
     },
     lastExpenseAccount: lastAccountId(state, "expense"),
@@ -542,8 +550,10 @@ export function buildHomeModel(input: HomeInput): HomeModel {
   const ratio = f.budget > 0 ? used / f.budget : 1;
 
   const autoSavings = new Map<string, number>();
+  const pendingAutoSavings = new Map<string, number>();
   for (const t of state.transactions) {
     if (t.linkedTo) autoSavings.set(t.linkedTo, (autoSavings.get(t.linkedTo) ?? 0) + t.amount);
+    else if (t.savingPending) pendingAutoSavings.set(t.id, autoSavingAmount(t, state.settings));
   }
   // Сначала разворачиваем: при стабильной сортировке по дате внутри дня сверху окажутся добавленные позже.
   const recent = [...state.transactions]
@@ -611,6 +621,6 @@ export function buildHomeModel(input: HomeInput): HomeModel {
               ? { type: "open", overlay: { kind: "transfer", to: e.accountId, amount: -e.amount } }
               : null,
       })),
-    recent: recent.map((tx) => recentRow(state, tx, today, autoSavings.get(tx.id) ?? 0)),
+    recent: recent.map((tx) => recentRow(state, tx, today, autoSavings.get(tx.id) ?? 0, pendingAutoSavings.get(tx.id) ?? 0)),
   };
 }

@@ -249,11 +249,14 @@ struct HomeModel: Codable, Equatable, Sendable {
             var cap: Int
             var roundTo: Int
             var excluded: [String]
+            /// Переводить, когда накопится (0 — сразу).
+            var minTransfer: Int?
         }
         struct Salary: Codable, Equatable, Sendable {
             var enabled: Bool
             var percent: Int
             var categories: [String]
+            var minTransfer: Int?
         }
         var purchase: Purchase
         var salary: Salary
@@ -262,6 +265,9 @@ struct HomeModel: Codable, Equatable, Sendable {
         private static func percent(_ kopecks: Int, _ percent: Int) -> Int {
             Int((Double(kopecks * percent) / 100 / 100).rounded()) * 100
         }
+
+        /// С какой суммы переводятся накопленные отчисления этого вида (0 — сразу).
+        func threshold(expense: Bool) -> Int { (expense ? purchase.minTransfer : salary.minTransfer) ?? 0 }
 
         /// Сколько уйдёт в сбережения с операции (0 — отчисления нет).
         func amount(expense: Bool, amount: Int, category: String) -> Int {

@@ -32,7 +32,7 @@ import {
 } from "./metrics";
 import { getOwn, withKey, withoutKey } from "./records";
 import { dueOccurrences, occurrenceTxId, skippedMonths, type Occurrence } from "./recurring";
-import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount } from "./savings";
+import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount, savingThreshold } from "./savings";
 import {
   LIMITS,
   accountSchema,
@@ -480,18 +480,79 @@ function findLinkedSaving(state: State, source: Transaction): Transaction | unde
   return found && found.linkedTo !== source.id ? null : found;
 }
 
+/** Ставит или снимает у операции отметку «отчисление ещё копится». */
+function markSavingPending(state: State, id: string, pending: boolean): State {
+  return {
+    ...state,
+    transactions: state.transactions.map((t) => {
+      if (t.id !== id || Boolean(t.savingPending) === pending) return t;
+      const next = { ...t };
+      if (pending) next.savingPending = true;
+      else delete next.savingPending;
+      return next;
+    }),
+  };
+}
+
 /** Приводит автоотчисление, привязанное к операции, в соответствие с ней (по текущим настройкам). */
 function syncLinkedSaving(state: State, source: Transaction): State {
   const existing = findLinkedSaving(state, source);
   const desired = autoSavingAmount(source, state.settings);
   if (desired <= 0) {
-    return existing ? { ...state, transactions: state.transactions.filter((t) => t !== existing) } : state;
+    const next = existing ? { ...state, transactions: state.transactions.filter((t) => t !== existing) } : state;
+    return markSavingPending(next, source.id, false);
   }
   if (existing === null) throw new DomainError("Не удалось создать автоотчисление: такой id уже занят.");
+  // Отчисление ещё не переведено и задан порог «переводить от N ₽» — копится вместе с остальными этого вида.
+  if (!existing && savingThreshold(state.settings, source.type) > 0) {
+    return settleAutoSavings(markSavingPending(state, source.id, true), source.type);
+  }
   const others = existing ? state.transactions.filter((t) => t !== existing) : state.transactions;
+  return markSavingPending(
+    {
+      ...state,
+      transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source), linkedSavingTarget(state, source))],
+    },
+    source.id,
+    false,
+  );
+}
+
+/**
+ * Накопленные автоотчисления одного вида (с покупок или с доходов) переводятся разом, когда их сумма дошла
+ * до порога из настроек — как в банке «переводить, когда накопится 100 ₽». До этого деньги остаются на счёте
+ * операции и в сбережения не засчитываются. Каждое отчисление по-прежнему привязано к своей операции.
+ */
+function settleAutoSavings(state: State, type: Transaction["type"]): State {
+  if (type !== "income" && type !== "expense") return state;
+  const pending = state.transactions.filter((t) => t.savingPending && t.type === type);
+  if (!pending.length) return state;
+  const amounts = pending.map((t) => autoSavingAmount(t, state.settings));
+  // Отчисления, которых по нынешним настройкам нет (выключили, категория-исключение), больше не копятся.
+  const stale = new Set(pending.filter((_, i) => amounts[i] <= 0).map((t) => t.id));
+  const total = amounts.reduce((sum, a) => sum + Math.max(0, a), 0);
+  const settle = total > 0 && total >= savingThreshold(state.settings, type);
+  if (!settle && !stale.size) return state;
+  const done = settle ? new Set(pending.map((t) => t.id)) : stale;
+  const created = settle
+    ? pending.flatMap((t, i) =>
+        amounts[i] > 0 && findLinkedSaving(state, t) === undefined
+          ? [buildLinkedSaving(t, amounts[i], linkedSavingSource(state, t), linkedSavingTarget(state, t))]
+          : [],
+      )
+    : [];
+  if (created.length) assertTxCapacity(state, created.length);
   return {
     ...state,
-    transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source), linkedSavingTarget(state, source))],
+    transactions: [
+      ...state.transactions.map((t) => {
+        if (!done.has(t.id)) return t;
+        const next = { ...t };
+        delete next.savingPending;
+        return next;
+      }),
+      ...created,
+    ],
   };
 }
 
@@ -619,7 +680,10 @@ function materialize(state: State, today: IsoDate): State {
     created.push(tx);
     const saving = autoSavingAmount(tx, state.settings);
     const savingId = linkedSavingId(id);
-    if (saving > 0 && !existing.has(savingId)) {
+    if (saving > 0 && savingThreshold(state.settings, tx.type) > 0) {
+      // Порог «переводить от N ₽» — отчисление копится (см. settleAutoSavings).
+      tx.savingPending = true;
+    } else if (saving > 0 && !existing.has(savingId)) {
       existing.add(savingId);
       created.push(buildLinkedSaving(tx, saving, linkedSavingSource(state, tx), linkedSavingTarget(state, tx)));
     }
@@ -627,7 +691,8 @@ function materialize(state: State, today: IsoDate): State {
   // Все начисления упёрлись в занятые id — состояние не меняется (повторная синхронизация — тот же объект).
   if (!created.length) return state;
   assertTxCapacity(state, created.length);
-  return { ...state, transactions: [...state.transactions, ...created] };
+  const next = { ...state, transactions: [...state.transactions, ...created] };
+  return created.some((t) => t.savingPending) ? settleAutoSavings(settleAutoSavings(next, "income"), "expense") : next;
 }
 
 /** Сравнение значений без учёта порядка ключей объектов. */
@@ -1386,7 +1451,9 @@ export function applyAction(state: State, action: Action): State {
           history = undefined; // без даты новая норма действует для всех месяцев
         }
       }
-      return { ...state, settings: history ? { ...next, savingsRateHistory: history } : next };
+      const updated = { ...state, settings: history ? { ...next, savingsRateHistory: history } : next };
+      // Порог перевода снизили или убрали — накопленное может уже набраться.
+      return settleAutoSavings(settleAutoSavings(updated, "income"), "expense");
     }
 
     case "profile.update":

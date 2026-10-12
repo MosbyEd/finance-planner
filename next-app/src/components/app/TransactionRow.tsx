@@ -3,6 +3,7 @@
 import type { Transaction } from "@/domain/schema";
 import { balanceEffect } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
+import { autoSavingAmount } from "@/domain/savings";
 import { useSnapshot } from "@/client/react";
 import { Money } from "../ui/controls";
 import { transactionAccountLabel } from "./accounts";
@@ -67,6 +68,8 @@ export function TransactionRow({
 }) {
   const { state } = useSnapshot();
   const autoSaving = tx.linkedTo ? 0 : (autoSavingsBySource(state.transactions).get(tx.id) ?? 0);
+  // Отчисление ещё копится (порог «переводить от N ₽» не набран) — показываем, сколько отложится.
+  const pendingSaving = tx.savingPending ? autoSavingAmount(tx, state.settings) : 0;
   const loanAdjustment = isLoanAdjustment(tx);
   const meta: { icon: IconName; tint: string } = loanAdjustment ? LOAN_ADJUSTMENT_META : TYPE_META[tx.type];
   const effect = balanceEffect(tx);
@@ -110,6 +113,13 @@ export function TransactionRow({
             <Icon name="piggy" size={14} className="shrink-0" />
             <span className="tabular-nums">{formatMoney(autoSaving, { sign: true })}</span>
             <span className="sr-only sm:not-sr-only">{autoSaving > 0 ? "в копилку" : "из копилки"}</span>
+          </span>
+        )}
+        {autoSaving === 0 && pendingSaving > 0 && (
+          <span className="inline-flex items-center gap-1 whitespace-nowrap text-[13px] text-muted">
+            <Icon name="piggy" size={14} className="shrink-0" />
+            <span className="tabular-nums">{formatMoney(pendingSaving, { sign: true })}</span>
+            <span>копится</span>
           </span>
         )}
       </span>

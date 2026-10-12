@@ -5,7 +5,7 @@ import { addDays, addMonths, formatDay, isValidIsoDate, monthKeyOf, type IsoDate
 import { loanOpening } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
-import { autoSavingAmount, autoSavingByDefault } from "@/domain/savings";
+import { autoSavingAmount, autoSavingByDefault, savingThreshold } from "@/domain/savings";
 import { suggestCategory } from "@/domain/sms";
 import type { State, Transaction } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
@@ -589,7 +589,9 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
             description={
               autoSavingPreview > 0
                 ? autoSaving
-                  ? `${formatMoney(autoSavingPreview)} уйдёт в сбережения`
+                  ? savingThreshold(state.settings, kind) > 0
+                    ? `${formatMoney(autoSavingPreview)} отложится — переведём, когда накопится ${formatMoney(savingThreshold(state.settings, kind), { whole: true })}`
+                    : `${formatMoney(autoSavingPreview)} уйдёт в сбережения`
                   : `Можно отложить ${formatMoney(autoSavingPreview)}`
                 : "По текущим настройкам отчисления нет"
             }

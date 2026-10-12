@@ -286,7 +286,11 @@ struct AddTransactionView: View {
                                 if savingPreview > 0 {
                                     option(
                                         "Отложить в сбережения",
-                                        autoSaving ? "\(Money.whole(savingPreview)) уйдёт в сбережения" : "Можно отложить \(Money.whole(savingPreview))",
+                                        !autoSaving
+                                            ? "Можно отложить \(Money.whole(savingPreview))"
+                                            : (add.saving?.threshold(expense: kind == .expense) ?? 0) > 0
+                                                ? "\(Money.whole(savingPreview)) отложится — переведём, когда накопится \(Money.whole(add.saving?.threshold(expense: kind == .expense) ?? 0))"
+                                                : "\(Money.whole(savingPreview)) уйдёт в сбережения",
                                         isOn: Binding(get: { autoSaving }, set: { autoSavingChoice = $0 })
                                     )
                                 }

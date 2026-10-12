@@ -60,6 +60,11 @@ export const transactionSchema = z
     mandatory: z.boolean().optional(),
     /** Делать ли автоотчисление в сбережения с этой операции. */
     autoSaving: z.boolean().optional(),
+    /**
+     * Автоотчисление ещё не переведено: копится, пока по этому виду не наберётся порог из настроек
+     * (minTransfer). Ведёт только редьюсер.
+     */
+    savingPending: z.literal(true).optional(),
     /** Операция создана из шаблона: шаблон и месяц, за который она начислена. */
     templateId: idSchema.optional(),
     occurrenceMonth: monthKeySchema.optional(),
@@ -266,6 +271,8 @@ export const settingsSchema = z.object({
     categories: z.array(categoryNameSchema).max(20),
     /** На какой накопительный счёт откладывать. Нет — «Сбережения». */
     toAccountId: idSchema.optional(),
+    /** Переводить, когда накопится не меньше (как правило банка «от 100 ₽»). Нет или 0 — сразу. */
+    minTransfer: nonNegativeKopecksSchema.max(10_000_000).optional(),
   }),
   purchaseSaving: z.object({
     enabled: z.boolean(),
@@ -276,6 +283,8 @@ export const settingsSchema = z.object({
     excludedCategories: z.array(categoryNameSchema).max(50),
     /** На какой накопительный счёт откладывать. Нет — «Сбережения». */
     toAccountId: idSchema.optional(),
+    /** Переводить, когда накопится не меньше (как правило банка «от 100 ₽»). Нет или 0 — сразу. */
+    minTransfer: nonNegativeKopecksSchema.max(10_000_000).optional(),
   }),
   /** Куда откладывать остаток гибкого бюджета прошлого месяца. Нет — «Сбережения». */
   rolloverAccountId: idSchema.optional(),

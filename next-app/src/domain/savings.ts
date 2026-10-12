@@ -35,6 +35,28 @@ export function autoSavingAmount(tx: TxLike & Pick<Transaction, "autoSaving">, s
   return 0;
 }
 
+/** С какой суммы переводить накопленные автоотчисления этого вида: с доходов или с покупок. 0 — сразу. */
+export function savingThreshold(settings: Settings, type: Transaction["type"]): Kopecks {
+  return (type === "income" ? settings.salarySaving.minTransfer : settings.purchaseSaving.minTransfer) ?? 0;
+}
+
+/** Накоплено и ещё не переведено: сумма отложенных отчислений этого вида и порог перевода. */
+export function pendingSavings(
+  state: { transactions: Transaction[]; settings: Settings },
+  type: "income" | "expense",
+): { total: Kopecks; threshold: Kopecks; count: number } {
+  let total = 0;
+  let count = 0;
+  for (const t of state.transactions) {
+    if (!t.savingPending || t.type !== type) continue;
+    const amount = autoSavingAmount(t, state.settings);
+    if (amount <= 0) continue;
+    total += amount;
+    count += 1;
+  }
+  return { total, threshold: savingThreshold(state.settings, type), count };
+}
+
 export function linkedSavingId(txId: string): string {
   return `${txId}.s`;
 }
