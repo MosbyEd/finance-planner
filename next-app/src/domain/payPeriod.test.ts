@@ -55,3 +55,13 @@ describe("бюджет от зарплаты до зарплаты", () => {
     expect(budgetPeriod(paid, "2026-11-08").current).toMatchObject({ start: "2026-11-08", end: "2026-11-24" });
   });
 });
+
+describe("зарплата и аванс по названию", () => {
+  it("регулярный доход «Аванс» с категорией «Переводы» тоже делит период", () => {
+    const s = withPay();
+    s.templates = s.templates.map((t) => (t.id === "advance" ? { ...t, category: "Переводы" } : t));
+    const p = budgetPeriod(s, "2026-10-12");
+    expect(p.kind).toBe("pay");
+    expect(p.next).toMatchObject({ date: "2026-10-25", title: "Аванс" });
+  });
+});

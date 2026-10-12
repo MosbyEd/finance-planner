@@ -521,6 +521,12 @@ export interface SafeToSpend {
 
 /** Доходы, которые делят время на периоды бюджета: регулярные «Зарплата» и «Аванс». */
 export const PAY_CATEGORIES = ["Зарплата", "Аванс"];
+const PAY_TITLE = /зарплат|аванс|оклад|заработн/i;
+
+/** Зарплата или аванс — по категории или по названию («Аванс» с категорией «Доход» тоже). */
+export function isPayIncome(item: { category: string; title: string }): boolean {
+  return PAY_CATEGORIES.includes(item.category) || PAY_TITLE.test(item.title);
+}
 
 /** Поступление зарплаты или аванса — граница периода. */
 export interface PayEvent {
@@ -534,7 +540,7 @@ export interface PayEvent {
 
 /** Поступления зарплаты и аванса около сегодняшнего дня: пришедшие — по факту, будущие — по плану. */
 export function payEvents(state: State, today: IsoDate): PayEvent[] {
-  const templates = state.templates.filter((t) => t.active && t.kind === "income" && PAY_CATEGORIES.includes(t.category));
+  const templates = state.templates.filter((t) => t.active && t.kind === "income" && isPayIncome(t));
   if (!templates.length) return [];
   const ids = new Set(templates.map((t) => t.id));
   const from = addDays(today, -62);
@@ -543,7 +549,7 @@ export function payEvents(state: State, today: IsoDate): PayEvent[] {
   for (const tx of state.transactions) {
     if (tx.type !== "income" || tx.date < from || tx.date > to) continue;
     // Пришла раньше срока — период начинается в день поступления.
-    if (tx.templateId ? ids.has(tx.templateId) : PAY_CATEGORIES.includes(tx.category)) {
+    if (tx.templateId ? ids.has(tx.templateId) : isPayIncome(tx)) {
       events.push({ date: tx.date, title: tx.title || tx.category, category: tx.category, amount: tx.amount, received: true });
     }
   }
@@ -637,8 +643,8 @@ export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
 
 /** «до аванса», «после зарплаты»: родительный падеж поступления. */
 export function payEventName(event: Pick<PayEvent, "category" | "title">): string {
-  if (event.category === "Аванс") return "аванса";
-  if (event.category === "Зарплата") return "зарплаты";
+  if (event.category === "Аванс" || /аванс/i.test(event.title)) return "аванса";
+  if (event.category === "Зарплата" || /зарплат|оклад|заработн/i.test(event.title)) return "зарплаты";
   return `«${event.title}»`;
 }
 

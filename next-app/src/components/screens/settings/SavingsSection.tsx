@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { monthKeyOf } from "@/domain/dates";
-import { monthMetrics, PAY_CATEGORIES } from "@/domain/metrics";
+import { isPayIncome, monthMetrics } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { accountCards, activeAccounts, cardLabel, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
 import { pendingSavings, purchaseSavingAmount } from "@/domain/savings";
@@ -200,7 +200,7 @@ export function SavingsSection() {
   useRowSummary(dirty ? UNSAVED_SUMMARY : null);
   const preview = previewSettings(form, saved);
 
-  const hasPayTemplates = state.templates.some((t) => t.active && t.kind === "income" && PAY_CATEGORIES.includes(t.category));
+  const hasPayTemplates = state.templates.some((t) => t.active && t.kind === "income" && isPayIncome(t));
   const monthIncome = useMemo(() => monthMetrics(state, monthKeyOf(today), today).income.plan, [state, today]);
 
   const incomeOptions = withSelected(state.categories.income, form.salaryCategories);
@@ -271,7 +271,7 @@ export function SavingsSection() {
               ? "Гибкий бюджет и лимит на день — на календарный месяц, с 1-го по последнее число."
               : hasPayTemplates
                 ? "Гибкий бюджет и лимит на день — от поступления зарплаты или аванса до следующего. Сколько будет в день после следующего поступления — на Главной."
-                : "Нужен регулярный доход с категорией «Зарплата» или «Аванс» (вкладка «Регулярные»). Пока его нет, считаем по календарному месяцу."}
+                : "Нужен регулярный доход «Зарплата» или «Аванс» (вкладка «Регулярные»). Пока его нет, считаем по календарному месяцу."}
           </p>
         </div>
 
