@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { Share } from "@capacitor/share";
 import { ApiError, api, type SmsKeyStatus } from "@/client/api";
 import { useSnapshot, useToday } from "@/client/react";
-import { prepareSmsImport } from "@/domain/smsImport";
 import { useDispatch } from "../../app/hooks";
+import { smsTextImport } from "../../app/smsText";
 import { nativeAddSmsShortcut, nativeOpenShortcuts, nativeOpenShortcutsApp } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
@@ -131,7 +131,7 @@ function AppActionSetup() {
               value={APP_ACTION_PROMPT}
               aria-label="Задание для Siri"
               onFocus={(e) => e.currentTarget.select()}
-              className={`${controlClass} h-auto py-3 text-sm`}
+              className={`${controlClass} h-auto py-3 text-base sm:text-sm`}
             />
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" onClick={() => void copy()}>
@@ -296,7 +296,7 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
             value={siriPrompt(url, fresh)}
             aria-label="Задание для Siri"
             onFocus={(e) => e.currentTarget.select()}
-            className={`${controlClass} h-auto py-3 text-sm`}
+            className={`${controlClass} h-auto py-3 text-base sm:text-sm`}
           />
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => void copy(siriPrompt(url, fresh), "Задание для Siri скопировано")}>
@@ -358,15 +358,13 @@ function PasteSms() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const add = () => {
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const prepared = prepareSmsImport(state, text, { day: today, time });
-    if (!prepared.ops.length) {
-      toast(prepared.message, prepared.status === "duplicate" ? undefined : { kind: "error" });
+    const result = smsTextImport(state, text, today);
+    if (!result.actions.length) {
+      toast(result.message, { kind: "error" });
       return;
     }
-    if (dispatch(prepared.ops.map((o) => o.action))) {
-      toast(prepared.message);
+    if (dispatch(result.actions)) {
+      toast(result.message);
       setText("");
     }
   };
@@ -383,7 +381,7 @@ function PasteSms() {
           onChange={(e) => setText(e.target.value)}
           aria-label="Текст СМС"
           placeholder="Например: СЧЁТ5804 12:00 Покупка 500р LENTA Баланс: 9 500р"
-          className={`${controlClass} h-auto py-3 text-sm`}
+          className={`${controlClass} h-auto py-3 text-base sm:text-sm`}
         />
         <Button onClick={add} disabled={!text.trim()}>
           Добавить

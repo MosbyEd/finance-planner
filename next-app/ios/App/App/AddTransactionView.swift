@@ -12,6 +12,8 @@ struct AddTransactionView: View {
     private var balancesHidden: Bool { HomeStore.shared.model?.balancesHidden ?? false }
     @Environment(\.dismiss) private var dismiss
     @State private var allCategories = false
+    /// «Из СМС»: вставить текст сообщения банка.
+    @State private var smsPaste = false
 
     @State private var kind: Kind
     @State private var amountText = ""
@@ -342,6 +344,10 @@ struct AddTransactionView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .close) { dismiss() }
                 }
+                // Операция из текста СМС банка — так же, как автоматизация «Команд».
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Из СМС") { smsPaste = true }
+                }
                 // Над клавиатурой: убрать её и сразу добавить — большая кнопка внизу в это время спрятана.
                 ToolbarItemGroup(placement: .keyboard) {
                     Button("Готово") { focus = nil }
@@ -378,6 +384,10 @@ struct AddTransactionView: View {
                 switchKind(from: previous, to: next)
             }
             .onAppear { focus = .amount }
+            .sheet(isPresented: $smsPaste) {
+                SmsPasteView { result in finish(result) }
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $allCategories) {
                 CategoryList(categories: categories, selected: category) { picked in
                     category = picked
@@ -588,14 +598,114 @@ struct AddTransactionView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
             }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            dismiss()
-            let undo = result.txId.map { id in
-                ToastCenter.Action(label: "Отменить") {
-                    Task { await AppShell.shared.perform(.command("undo", ["txId": .string(id)])) }
+            finish(result)
+        }
+    }
+
+    /// Добавлено — закрыть окно и показать уведомление с «Отменить».
+    private func finish(_ result: CommandResult) {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        dismiss()
+        let undo = result.txId.map { id in
+            ToastCenter.Action(label: "Отменить") {
+                Task { await AppShell.shared.perform(.command("undo", ["txId": .string(id)])) }
+            }
+        }
+        ToastCenter.shared.show(result.message ?? "Добавлено", action: undo)
+    }
+}
+
+/// «Из СМС»: текст сообщения банка — вставить кнопкой или вручную; разбор — тот же, что у автоматизации.
+private struct SmsPasteView: View {
+    let onAdded: (CommandResult) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Вставьте текст СМС банка: сумма, магазин, категория и счёт подставятся сами, а остаток сверится с банком.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $text)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 140)
+                            .padding(10)
+                        if text.isEmpty {
+                            Text("Текст СМС")
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 18)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .background(Theme.fill, in: .rect(cornerRadius: 16, style: .continuous))
+                    // Системная кнопка «Вставить» — без запроса разрешения на буфер обмена.
+                    PasteButton(payloadType: String.self) { strings in
+                        Task { @MainActor in
+                            if let pasted = strings.first { text = pasted }
+                            error = nil
+                        }
+                    }
+                    .buttonBorderShape(.capsule)
+                    if let error {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.negative)
+                    }
+                }
+                .padding(20)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle("Операция из СМС")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
                 }
             }
-            ToastCenter.shared.show(result.message ?? "Добавлено", action: undo)
+            .safeAreaInset(edge: .bottom) {
+                if hasText || busy {
+                    Button(action: add) {
+                        Group {
+                            if busy { ProgressView() } else { Text("Добавить").font(.body.weight(.semibold)) }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(Theme.action)
+                    .disabled(busy)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: hasText)
+        }
+        .presentationBackground(Theme.bg)
+    }
+
+    private func add() {
+        guard hasText, !busy else { return }
+        busy = true
+        error = nil
+        Task {
+            let result = await AppShell.shared.send(.command("sms", ["text": .string(text)]))
+            busy = false
+            guard result.ok else {
+                error = result.error
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                return
+            }
+            onAdded(result)
         }
     }
 }

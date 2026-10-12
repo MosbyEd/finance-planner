@@ -6,6 +6,7 @@ import { applyActions } from "@/domain/actions";
 import { accountBalance } from "@/domain/accounts";
 import { bankResolveActions, transferAction, transferMessage } from "../accounts";
 import { commandSchema } from "./commands";
+import { smsTextImport } from "../smsText";
 import { buildHomeModel, type HomeModel } from "./homeModel";
 
 const today = "2026-10-10";
@@ -182,5 +183,21 @@ describe("перевод из окна «+»", () => {
     expect(add.mandatoryCategories.length).toBeGreaterThan(0);
     const draft = { kind: "expense", amount: 50_000, category: "Аренда", title: "", date: today, mandatory: true, autoSaving: false, repeat: true };
     expect(commandSchema.safeParse({ type: "add", draft }).success).toBe(true);
+  });
+});
+
+describe("операция из текста СМС (окно «+» → «Из СМС»)", () => {
+  it("тот же разбор, что у автоматизации: покупка добавляется, повтор той же СМС — нет", () => {
+    const s = applyActions(base(), [{ type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 }]);
+    const text = "СЧЁТ5804 12:00 Покупка 500р LENTA Баланс: 4 500р";
+    expect(commandSchema.safeParse({ type: "sms", text }).success).toBe(true);
+    const first = smsTextImport(s, text, today, new Date(2026, 9, 10, 12, 30));
+    expect(first.txId).toMatch(/^sms-/);
+    const next = applyActions(s, first.actions);
+    expect(next.transactions.find((t) => t.id === first.txId)).toMatchObject({ type: "expense", amount: 50_000, title: "LENTA" });
+    const again = smsTextImport(next, text, today, new Date(2026, 9, 10, 12, 31));
+    expect(again.actions).toEqual([]);
+    expect(again.message).toBe("Эта операция уже добавлена.");
+    expect(smsTextImport(s, "Привет!", today).actions).toEqual([]);
   });
 });

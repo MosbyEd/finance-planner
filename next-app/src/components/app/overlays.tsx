@@ -28,7 +28,9 @@ export type Overlay =
   | { kind: "auth"; mode?: "login" | "register" }
   | { kind: "limit"; category?: string }
   /** Новые операции из СМС и Siri — подтвердить или поправить. */
-  | { kind: "review" };
+  | { kind: "review" }
+  /** Операция из вставленного текста СМС (с окна «+»). */
+  | { kind: "sms" };
 
 export type Tab = "home" | "history" | "plans" | "goals" | "analytics" | "settings";
 

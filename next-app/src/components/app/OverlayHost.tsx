@@ -7,6 +7,7 @@ import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
 import { LimitSheet } from "./sheets/LimitSheet";
 import { ReviewSheet } from "./sheets/ReviewSheet";
+import { SmsPasteSheet } from "./sheets/SmsPasteSheet";
 import { LoanPaymentSheet, LoanSheet } from "./sheets/LoanSheets";
 import { BalanceSheet, ExplainSheet, PlannedSheet, SavingsSheet } from "./sheets/MoneySheets";
 import { TemplateSheet } from "./sheets/TemplateSheet";
@@ -57,5 +58,7 @@ export function OverlayHost() {
       return <LimitSheet key={overlay.category ?? "new"} category={overlay.category} />;
     case "review":
       return <ReviewSheet />;
+    case "sms":
+      return <SmsPasteSheet />;
   }
 }

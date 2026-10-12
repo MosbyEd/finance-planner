@@ -12,6 +12,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Поле с мелким шрифтом в фокусе — iOS увеличивает страницу, и она начинает листаться вбок. Увеличение
+  // жестом в Safari остаётся (его iOS не отключает).
+  maximumScale: 1,
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f4f4f1" },

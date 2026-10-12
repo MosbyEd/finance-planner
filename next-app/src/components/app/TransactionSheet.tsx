@@ -104,7 +104,7 @@ function movementOf(tx: Transaction): { from: string; to: string } {
  */
 export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxPreset }) {
   const { state } = useSnapshot();
-  const { close } = useUi();
+  const { close, open } = useUi();
   const today = useToday();
   const dispatch = useDispatch();
   const deleteTx = useDeleteTransaction();
@@ -356,6 +356,14 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
       onClose={close}
       dirty={dirty}
       tall
+      // Новую операцию можно взять из текста СМС банка — так же, как автоматизация «Команд».
+      actions={
+        editing ? undefined : (
+          <Button variant="ghost" size="sm" icon="compose" onClick={() => open({ kind: "sms" })}>
+            Из СМС
+          </Button>
+        )
+      }
       title={
         editing
           ? "Операция"

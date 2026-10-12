@@ -17,6 +17,8 @@ export type NativeCommand =
   | { type: "add"; draft: AddDraft }
   /** Перевод между своими счетами из того же окна «+». */
   | { type: "transfer"; draft: TransferDraft }
+  /** Операция из вставленного текста СМС (окно «+» → «Из СМС»). */
+  | { type: "sms"; text: string }
   | { type: "undo"; txId: string }
   | { type: "refresh" }
   | { type: "toastAction"; id: number }
@@ -75,6 +77,7 @@ const OVERLAY_KINDS = [
   "account",
   "transfer",
   "whatsNew",
+  "sms",
 ] as const satisfies readonly Overlay["kind"][];
 
 const isoDate = z.string().refine((v) => isValidIsoDate(v), "Некорректная дата") as unknown as z.ZodType<IsoDate>;
@@ -118,6 +121,7 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
       date: isoDate,
     }),
   }),
+  z.object({ type: z.literal("sms"), text: z.string().trim().min(1).max(2000) }),
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("toastAction"), id: z.number().int() }),

@@ -13,6 +13,7 @@ import { runToastAction, setToastSink, useToast } from "../../ui/feedback";
 import { useUi } from "../overlays";
 import { quickPicks } from "../quickPicks";
 import { bankResolveActions, transferAction, transferMessage } from "../accounts";
+import { smsTextImport } from "../smsText";
 import { BALANCE_CONFIRMED_KEY } from "../sheets/MoneySheets";
 import { commandSchema, type CommandResult, type NativeCommand } from "./commands";
 import { SKIP_MANDATORY_KEY, buildHomeModel, quickKey } from "./homeModel";
@@ -199,6 +200,13 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           const result = store.dispatch(action);
           if (!result.ok) return result;
           return { ok: true, txId: id, message: transferMessage(state, from, to, amount) };
+        }
+        case "sms": {
+          const imported = smsTextImport(state, command.text, day);
+          if (!imported.actions.length) return { ok: false, error: imported.message };
+          const result = store.dispatch(imported.actions);
+          if (!result.ok) return result;
+          return { ok: true, message: imported.message, ...(imported.txId ? { txId: imported.txId } : {}) };
         }
         case "undo": {
           const result = store.dispatch({ type: "tx.delete", id: command.txId });
