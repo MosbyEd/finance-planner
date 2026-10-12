@@ -127,7 +127,8 @@ describe("накопительные счета и переводы", () => {
     );
     expect(accountBalance(s, "dep")).toBe(200_000);
     expect(savingsTotal(s)).toBe(200_000);
-    expect(monthMetrics(s, "2026-10", "2026-10-10").savings.fact).toBe(200_000);
+    // Переложили уже имевшиеся деньги — в сбережениях они есть, но «отложено» месяца это не меняет.
+    expect(monthMetrics(s, "2026-10", "2026-10-10").savings.fact).toBe(0);
     expect(() =>
       applyActions(s, [{ type: "savings.move", id: "s2", date: "2026-10-03", amount: -100_000, note: "" }]),
     ).toThrow(/Нельзя снять больше, чем есть на счёте «Сбережения» \(0/);
@@ -231,7 +232,8 @@ describe("счета регулярных платежей", () => {
     );
     expect(s.transactions.find((t) => t.templateId === "save")).toMatchObject({ type: "saving", toAccountId: "dep", amount: 500_000 });
     expect(accountBalance(s, "dep")).toBe(500_000);
-    expect(monthMetrics(s, "2026-10", "2026-10-25").savings.fact).toBe(500_000);
+    // Счёт не привязан к цели — это перевод, а не «отложено» месяца.
+    expect(monthMetrics(s, "2026-10", "2026-10-25").savings.fact).toBe(0);
     expect(s.transactions.find((t) => t.templateId === "ipo")).toMatchObject({ type: "expense", mandatory: true, loanId: "mortgage" });
     expect(loanRemaining(s, s.loans[0])).toBe(100_000_000 - 4_504_400);
   });
@@ -323,9 +325,16 @@ describe("цель со своим счётом", () => {
 });
 
 describe("регулярный перевод на накопительный", () => {
-  it("это сбережения: покрывает норму заранее, сверх нормы — урезает гибкий бюджет сразу, а не в день перевода", () => {
+  it("на счёт цели — это сбережения: покрывает норму заранее, сверх нормы — урезает гибкий бюджет сразу", () => {
     const savingsAcc: Account = { id: "alfa", name: "Накопительный", kind: "savings", spending: false };
-    const s0 = run(base(), { type: "account.add", account: savingsAcc });
+    const s0 = run(
+      base(),
+      { type: "account.add", account: savingsAcc },
+      {
+        type: "goal.add",
+        goal: { id: "flat", name: "Квартира", targetAmount: 100_000_000, initialAmount: 0, dueDate: null, note: "", createdAt: "2026-01-01", accountId: "alfa" },
+      },
+    );
     s0.settings.savingsRatePercent = 10;
     s0.templates = [
       template({ kind: "income", amount: 10_000_000, dayOfMonth: 5, startDate: "2026-10-01" }),
@@ -337,6 +346,10 @@ describe("регулярный перевод на накопительный", 
     expect(m.savings).toMatchObject({ target: 1_000_000, planned: 2_500_000 });
     expect(m.mandatory.plan).toBe(0);
     expect(m.flexible.extraSavings).toBe(1_500_000);
+
+    // Без цели тот же перевод — просто перекладывание денег: бюджет месяца не урезает.
+    const plain = run(s, { type: "goal.delete", id: "flat" });
+    expect(monthMetrics(plain, "2026-10", "2026-10-11").savings.planned).toBe(0);
   });
 });
 

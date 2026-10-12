@@ -61,16 +61,29 @@ describe("метрики месяца", () => {
     expect(m.daily.availableToday).toBe(264_700);
   });
 
-  it("сбережения сверх цели уменьшают гибкий бюджет", () => {
+  it("пополнение цели сверх нормы уменьшает гибкий бюджет", () => {
     const s = base();
     s.transactions.push(
       tx({ type: "income", amount: 10_000_000, date: "2026-03-01" }),
-      tx({ type: "saving", amount: 2_000_000, date: "2026-03-02" }),
+      tx({ type: "saving", amount: 2_000_000, date: "2026-03-02", goalId: "trip" }),
     );
     const m = monthMetrics(s, "2026-03", "2026-03-15");
     expect(m.flexible.budget).toBe(8_500_000);
     expect(m.flexible.extraSavings).toBe(500_000);
     expect(m.flexible.left).toBe(8_000_000);
+  });
+
+  it("перевод уже имевшихся денег на накопительный — не «отложено» месяца и бюджет не урезает", () => {
+    const s = base();
+    s.transactions.push(
+      tx({ type: "income", amount: 10_000_000, date: "2026-03-01" }),
+      tx({ type: "saving", amount: 23_000_000, date: "2026-03-02" }),
+      // Отчисление с зарплаты — отложено.
+      tx({ type: "saving", amount: 1_500_000, date: "2026-03-01", linkedTo: "salary" }),
+    );
+    const m = monthMetrics(s, "2026-03", "2026-03-15");
+    expect(m.savings.fact).toBe(1_500_000);
+    expect(m.flexible.extraSavings).toBe(0);
   });
 
   it("прошлый месяц — всё факт, будущий — всё план", () => {

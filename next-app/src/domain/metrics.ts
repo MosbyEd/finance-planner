@@ -16,9 +16,9 @@ import { plannedOccurrences } from "./recurring";
 import { salarySavingAmount } from "./savings";
 import {
   MAIN_ACCOUNT_ID,
+  SAVINGS_ACCOUNT_ID,
   accountBalances,
   creditDebts,
-  findAccount,
   savingsAccountIds,
   savingsTarget,
   spendingAccountIds,
@@ -201,6 +201,27 @@ export function monthStatus(month: MonthKey, today: IsoDate): MonthStatus {
   return "current";
 }
 
+/** Собственные счета целей: всё, что на них, — деньги цели. */
+function goalAccountIds(state: State): Set<string> {
+  const ids = new Set<string>();
+  for (const goal of state.goals) {
+    const account = dedicatedGoalAccount(state, goal);
+    if (account) ids.add(account);
+  }
+  return ids;
+}
+
+/**
+ * Что засчитывается в «Отложено» месяца: пополнения целей (и их собственных счетов) и автоотчисления с доходов
+ * и покупок. Обычный перевод на накопительный счёт — перекладывание уже имевшихся денег, а не сбережения
+ * из доходов месяца: он не урезает гибкий бюджет. Перенос остатка прошлого месяца — тоже не сбережения этого.
+ */
+export function countsAsMonthSaving(tx: Transaction, goalAccounts: Set<string>): boolean {
+  if (tx.type !== "saving" || tx.rolloverOf) return false;
+  if (tx.goalId || tx.linkedTo) return true;
+  return goalAccounts.has(tx.toAccountId ?? SAVINGS_ACCOUNT_ID);
+}
+
 export function monthMetrics(state: State, month: MonthKey, today: IsoDate): MonthMetrics {
   const status = monthStatus(month, today);
   const first = firstDayOfMonth(month);
@@ -216,6 +237,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   let flexibleToday = 0;
   let flexibleReserved = 0;
   let savingsFact = 0;
+  const goalAccounts = goalAccountIds(state);
 
   for (const tx of state.transactions) {
     if (tx.date < first || tx.date > last) continue;
@@ -233,8 +255,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
       } else {
         flexibleReserved += tx.amount;
       }
-    } else if (tx.type === "saving" && isFact && !tx.rolloverOf) {
-      // Перенос остатка прошлого месяца — не сбережения этого: он не урезает гибкий бюджет месяца.
+    } else if (tx.type === "saving" && isFact && countsAsMonthSaving(tx, goalAccounts)) {
       savingsFact += tx.amount;
     }
   }
@@ -244,7 +265,7 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   for (const occ of plannedOccurrences(state, cutoff, last)) {
     if (occ.kind === "income") incomeFuture += occ.amount;
     else if (occurrenceIsExpense(state, occ)) mandatoryFuture += occ.amount;
-    else if (occ.goalId || (occ.toAccountId && findAccount(state, occ.toAccountId)?.kind === "savings")) savingsPlanned += occ.amount;
+    else if (occ.goalId || (occ.toAccountId && goalAccounts.has(occ.toAccountId))) savingsPlanned += occ.amount;
   }
 
   const incomePlan = incomeFact + incomeFuture;

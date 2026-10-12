@@ -323,6 +323,8 @@ export function ExplainSheet() {
           <p className="pt-1 text-sm text-muted">
             Делим на {days(m.daysLeft)} до конца месяца, включая сегодня.
             {!hasIncome && " Без доходов в плане этот расчёт не учитывается."}
+            {m.flexible.extraSavings > 0 &&
+              " «Отложено» — пополнения целей и автоотчисления с доходов и покупок; переводы на накопительные счета без цели сюда не входят."}
           </p>
         </section>
 
