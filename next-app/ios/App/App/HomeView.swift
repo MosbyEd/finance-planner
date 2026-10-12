@@ -357,8 +357,30 @@ private struct BalancePrompt: View {
 private struct AttentionCard: View {
     let rows: [HomeModel.Attention]
 
+    /// Что закрывается крестиком: расхождения с банком («Оставить» — ничего не применять).
+    private var dismissals: [JSONValue] { rows.compactMap(\.dismiss) }
+
     var body: some View {
         HomeCard(title: "Требует внимания") {
+            // Крестик в углу карточки, на уровне заголовка: закрыли — значит, применять не нужно.
+            if !dismissals.isEmpty {
+                Button {
+                    Task { for command in dismissals { await AppShell.shared.perform(command) } }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 30, height: 30)
+                        .background(Theme.fill, in: .circle)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, -10)
+                .padding(.trailing, -8)
+                .accessibilityLabel("Скрыть, ничего не меняя")
+            }
+        } content: {
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider().overlay(Theme.separator) }
@@ -415,25 +437,6 @@ private struct AttentionRow: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
-            }
-            // Закрыли — значит, применять не нужно (как «Оставить»).
-            if let dismiss = row.dismiss {
-                Button {
-                    Task { await AppShell.shared.perform(dismiss) }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 30, height: 30)
-                        .background(Theme.fill, in: .circle)
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Скрыть, ничего не меняя")
-                .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.top, -6)
-                .padding(.trailing, -8)
             }
         }
         .frame(minHeight: 48)

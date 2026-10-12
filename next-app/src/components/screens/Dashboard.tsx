@@ -67,7 +67,6 @@ function AttentionRow({
   text,
   onClick,
   actions,
-  onDismiss,
 }: {
   icon: IconName;
   tone: "accent" | "positive" | "warning" | "negative";
@@ -76,8 +75,6 @@ function AttentionRow({
   /** Вся строка — кнопка (тогда справа шеврон). */
   onClick?: () => void;
   actions?: ReactNode;
-  /** Крестик в углу — скрыть, ничего не меняя. */
-  onDismiss?: () => void;
 }) {
   const circle = {
     accent: "bg-accent-soft text-accent",
@@ -108,12 +105,7 @@ function AttentionRow({
           {body}
         </button>
       ) : (
-        <div className="flex min-h-12 items-center gap-3 py-1.5">
-          {body}
-          {onDismiss && (
-            <IconButton icon="close" label="Скрыть, ничего не меняя" variant="secondary" size={32} onClick={onDismiss} className="-mr-1 self-start" />
-          )}
-        </div>
+        <div className="flex min-h-12 items-center gap-3 py-1.5">{body}</div>
       )}
       {actions && <div className="mt-1 flex flex-wrap gap-2 pl-12">{actions}</div>}
     </li>
@@ -208,8 +200,6 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
             </Button>
           </>
         }
-        // Закрыли — значит, применять не нужно (как «Оставить»).
-        onDismiss={() => resolve(false)}
       />,
     );
   }
@@ -271,8 +261,19 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
     );
   }
   if (!rows.length) return null;
+  // Крестик в углу карточки, на уровне заголовка: закрыли — значит, расхождения с банком применять не нужно.
+  const mismatches = bankMismatches(state, today);
+  const dismiss = () =>
+    dispatch(mismatches.flatMap((m) => bankResolveActions(state, m.account.id, false, today, newId())));
   return (
-    <Card title="Требует внимания">
+    <Card
+      title="Требует внимания"
+      action={
+        mismatches.length > 0 && (
+          <IconButton icon="close" label="Скрыть, ничего не меняя" variant="secondary" size={32} onClick={dismiss} className="-my-1" />
+        )
+      }
+    >
       <ul className="divide-y divide-separator">{rows}</ul>
     </Card>
   );
