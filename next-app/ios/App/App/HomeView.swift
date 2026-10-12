@@ -416,6 +416,25 @@ private struct AttentionRow: View {
                     .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }
+            // Закрыли — значит, применять не нужно (как «Оставить»).
+            if let dismiss = row.dismiss {
+                Button {
+                    Task { await AppShell.shared.perform(dismiss) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 30, height: 30)
+                        .background(Theme.fill, in: .circle)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Скрыть, ничего не меняя")
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, -6)
+                .padding(.trailing, -8)
+            }
         }
         .frame(minHeight: 48)
         .contentShape(.rect)

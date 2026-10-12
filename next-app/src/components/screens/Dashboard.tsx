@@ -34,7 +34,7 @@ import {
 import { useBalancesPrivacy } from "@/client/privacy";
 import { BalancesEye } from "../app/BalancesEye";
 import { TransactionRow, transactionCategoryLabel } from "../app/TransactionRow";
-import { Button } from "../ui/Button";
+import { Button, IconButton } from "../ui/Button";
 import { Card, Money, Progress } from "../ui/controls";
 import { useToast } from "../ui/feedback";
 import { Icon, type IconName } from "../ui/Icon";
@@ -67,6 +67,7 @@ function AttentionRow({
   text,
   onClick,
   actions,
+  onDismiss,
 }: {
   icon: IconName;
   tone: "accent" | "positive" | "warning" | "negative";
@@ -75,6 +76,8 @@ function AttentionRow({
   /** Вся строка — кнопка (тогда справа шеврон). */
   onClick?: () => void;
   actions?: ReactNode;
+  /** Крестик в углу — скрыть, ничего не меняя. */
+  onDismiss?: () => void;
 }) {
   const circle = {
     accent: "bg-accent-soft text-accent",
@@ -105,7 +108,12 @@ function AttentionRow({
           {body}
         </button>
       ) : (
-        <div className="flex min-h-12 items-center gap-3 py-1.5">{body}</div>
+        <div className="flex min-h-12 items-center gap-3 py-1.5">
+          {body}
+          {onDismiss && (
+            <IconButton icon="close" label="Скрыть, ничего не меняя" variant="secondary" size={32} onClick={onDismiss} className="-mr-1 self-start" />
+          )}
+        </div>
       )}
       {actions && <div className="mt-1 flex flex-wrap gap-2 pl-12">{actions}</div>}
     </li>
@@ -198,11 +206,10 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
             <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(m))}>
               Перевод
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => resolve(false)}>
-              Оставить
-            </Button>
           </>
         }
+        // Закрыли — значит, применять не нужно (как «Оставить»).
+        onDismiss={() => resolve(false)}
       />,
     );
   }

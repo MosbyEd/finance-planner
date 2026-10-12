@@ -119,6 +119,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var text: String?
         var command: JSONValue?
         var actions: [Action]
+        /// Крестик в углу — скрыть, ничего не меняя.
+        var dismiss: JSONValue?
     }
 
     struct Step: Codable, Equatable, Sendable {
