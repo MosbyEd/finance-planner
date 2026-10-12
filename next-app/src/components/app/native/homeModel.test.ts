@@ -65,7 +65,8 @@ describe("модель нативной Главной", () => {
     expect(m.today.amount).not.toMatch(/,/);
     expect(m.today.detail).toMatch(/^Лимит на день .* · потрачено 321 ₽$/);
     expect(m.tiles?.balance).toBe("49 360 ₽");
-    expect(m.month?.title).toBe("Октябрь 2026");
+    // Зарплата 25-го — бюджет от зарплаты до зарплаты, карточка — до следующего поступления.
+    expect(m.month?.title).toBe("До зарплаты 25 октября");
     expect(m.recent.map((r) => r.id)).toEqual(["cof", "cof2", "in"]);
     expect(m.recent[0]).toMatchObject({ title: "Кофе", subtitle: "Сегодня · Кафе", amount: "−320,50 ₽", amountTone: "default" });
     expect(m.recent[2]).toMatchObject({ amountTone: "positive", command: { type: "open", overlay: { kind: "tx", txId: "in" } } });
