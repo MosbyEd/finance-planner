@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { Share } from "@capacitor/share";
 import { ApiError, api, type SmsKeyStatus } from "@/client/api";
-import { useSnapshot } from "@/client/react";
+import { useSnapshot, useToday } from "@/client/react";
+import { prepareSmsImport } from "@/domain/smsImport";
+import { useDispatch } from "../../app/hooks";
 import { nativeAddSmsShortcut, nativeOpenShortcuts, nativeOpenShortcutsApp } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
@@ -166,6 +168,7 @@ function AppActionSetup() {
         <Disclosure label="Другой способ — через адрес сервера и ключ" open={keyWay} onToggle={() => setKeyWay((v) => !v)}>
           <SmsImport embedded />
         </Disclosure>
+        <PasteSms />
       </div>
     </SectionCard>
   );
@@ -337,7 +340,55 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
           )}
         </div>
       )}
+      {!embedded && <PasteSms />}
     </div>
   );
   return embedded ? body : <SectionCard title="Операции из СМС">{body}</SectionCard>;
+}
+
+/**
+ * СМС не добавилась сама (автоматизация не сработала или раньше была ошибка) — вставить текст и добавить так же,
+ * как автоматизация: с той же категорией, сверкой остатков и защитой от повтора.
+ */
+function PasteSms() {
+  const { state } = useSnapshot();
+  const today = useToday();
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const add = () => {
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const prepared = prepareSmsImport(state, text, { day: today, time });
+    if (!prepared.ops.length) {
+      toast(prepared.message, prepared.status === "duplicate" ? undefined : { kind: "error" });
+      return;
+    }
+    if (dispatch(prepared.ops.map((o) => o.action))) {
+      toast(prepared.message);
+      setText("");
+    }
+  };
+  return (
+    <Disclosure label="Добавить СМС вручную" open={open} onToggle={() => setOpen((v) => !v)}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          Если СМС не добавилась сама, вставьте её текст — обработаем так же, как автоматизация, вместе со сверкой
+          остатков.
+        </p>
+        <textarea
+          rows={4}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label="Текст СМС"
+          placeholder="Например: СЧЁТ5804 12:00 Покупка 500р LENTA Баланс: 9 500р"
+          className={`${controlClass} h-auto py-3 text-sm`}
+        />
+        <Button onClick={add} disabled={!text.trim()}>
+          Добавить
+        </Button>
+      </div>
+    </Disclosure>
+  );
 }

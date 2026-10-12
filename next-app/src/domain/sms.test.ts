@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { accountBalance, findAccount } from "./accounts";
 import { applyActions } from "./actions";
 import { savingsTotal } from "./metrics";
 import { parseSberSms, planSmsImport, smsAccountKeys, smsBalances, smsDate } from "./sms";
@@ -220,10 +221,11 @@ describe("операции из СМС", () => {
     expect(s.transactions.find((t) => t.id === "sms-2")).toMatchObject({ type: "income", amount: 35_890 });
   });
 
-  it("снятие с накопительного больше, чем есть в приложении, — ошибка редьюсера", () => {
+  it("снятие с накопительного больше, чем есть в приложении, — остаток выравнивается до суммы снятия", () => {
     const text = "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р";
     const actions = plan(stateWith(), text).actions;
-    expect(() => applyActions(stateWith(), actions)).toThrow(/Нельзя снять больше/);
+    expect(actions[0]).toMatchObject({ type: "balance.set", accountId: "savings", actual: 950_132 });
+    expect(savingsTotal(applyActions(stateWith(), actions))).toBe(0);
   });
 });
 
@@ -457,7 +459,9 @@ describe("счета в СМС", () => {
 
   it("накопительный счёт по цифрам: снятие с него и пополнение его", () => {
     const withdraw = plan(accounts(), "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р");
-    expect(withdraw.actions[0]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });
+    // На счёте в приложении пусто — сначала остаток выравнивается по банку, потом снятие.
+    expect(ops(withdraw.actions).map((a) => a.type)).toEqual(["balance.set", "savings.move"]);
+    expect(withdraw.actions[1]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });
     const deposit = plan(accounts(), "СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150");
     expect(deposit.actions[0]).toMatchObject({ type: "savings.move", amount: 100_000, toAccountId: "dep" });
   });
@@ -554,5 +558,56 @@ describe("СМС и регулярные переводы на свои счет
     expect(result.summary.replace(/\s/g, " ")).toBe("Кредитка 4 800 ₽ — регулярный (по плану 5 000 ₽)");
     const after = applyActions(s, result.actions);
     expect(after.transactions.find((t) => t.templateId === "repay")).toMatchObject({ type: "transfer", amount: 480_000, toAccountId: "cc" });
+  });
+});
+
+describe("снятие с накопительного и сверка остатков (СМС «Перевод … на СЧЁТ5804»)", () => {
+  const sms = "Накопительный счет *3150 10:52 Перевод 482.57р на СЧЁТ5804. Баланс счёта *3150: 0р, баланс *5804: 1592.92р";
+  const ctx = { idBase: "sms-w", date: "2026-10-12", sms };
+  const withAccounts = (mainKeys: string[]) =>
+    stateWith({
+      accounts: [
+        { id: "main", name: "Сбербанк", kind: "debit", spending: true, smsKeys: mainKeys },
+        { id: "savings", name: "Сбережения", kind: "savings", spending: false, smsKeys: [] },
+        { id: "dep", name: "Автонакопления", kind: "savings", spending: false, smsKeys: ["3150"] },
+      ],
+      transactions: [tx({ id: "start", type: "adjustment", amount: 100_000, date: "2026-10-01", category: "" })],
+    });
+
+  it("в приложении на накопительном меньше — остаток выравнивается по банку, перевод и сверка проходят", () => {
+    const s = withAccounts(["5804"]);
+    const plan = planSmsImport(s, parseSberSms(sms)!, ctx);
+    expect(plan.actions[0]).toMatchObject({ type: "balance.set", accountId: "dep", actual: 48_257 });
+    const next = applyActions(s, plan.actions);
+    expect(accountBalance(next, "dep", "2026-10-12")).toBe(0);
+    expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000 + 48_257);
+    // В банке на основном 1 592,92 ₽, в приложении 1 482,57 ₽ — расхождение запомнено, приложение предложит поправить.
+    expect(findAccount(next, "main")?.bank).toMatchObject({ amount: 159_292, delta: 159_292 - 148_257 });
+    expect(plan.summary).toMatch(/остаток выровнен по банку/i);
+  });
+
+  it("у основного цифры не указаны — неизвестный СЧЁТ5804 сверяется с ним, как и операции по нему", () => {
+    const next = applyActions(withAccounts([]), planSmsImport(withAccounts([]), parseSberSms(sms)!, ctx).actions);
+    expect(findAccount(next, "main")?.bank?.amount).toBe(159_292);
+  });
+
+  it("у основного другие цифры — остаток *5804 не сверяется, уведомление подсказывает добавить цифры", () => {
+    const plan = planSmsImport(withAccounts(["7759"]), parseSberSms(sms)!, ctx);
+    expect(plan.summary).toMatch(/остаток \*5804 не сверен/i);
+  });
+});
+
+describe("сверка: накопительный без цифр в приложении", () => {
+  it("остаток накопительного *3150 не сравнивается с основным — подсказка добавить цифры", () => {
+    const sms = "Накопительный счет *3150 10:52 Перевод 482.57р на СЧЁТ5804. Баланс счёта *3150: 0р, баланс *5804: 1592.92р";
+    const s = applyActions(stateWith(), [
+      { type: "balance.set", id: "start", date: "2026-10-01", actual: 100_000 },
+      { type: "savings.move", id: "put", date: "2026-10-02", amount: 50_000, note: "" },
+    ]);
+    const plan = planSmsImport(s, parseSberSms(sms)!, { idBase: "sms-n", date: "2026-10-12", sms });
+    const checks = plan.actions.filter((a) => a.type === "account.bank");
+    // Основной сверяется по *5804 (у него цифр нет), накопительный *3150 — нет.
+    expect(checks).toEqual([expect.objectContaining({ accountId: "main", amount: 159_292 })]);
+    expect(plan.summary).toMatch(/остаток \*3150 не сверен/i);
   });
 });

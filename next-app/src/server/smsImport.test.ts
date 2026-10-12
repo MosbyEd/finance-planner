@@ -141,10 +141,10 @@ describe("операции из СМС", () => {
     expect((await sendSms(fresh, JSON.stringify({ text: PURCHASE }))).status).toBe(200);
   });
 
-  it("операцию, которую нельзя применить, не добавляет и объясняет почему", async () => {
+  it("снятие с накопительного больше, чем есть в приложении, добавляет и выравнивает остаток по банку", async () => {
     const key = await newKey(await signUp());
     const res = await sendSms(key, JSON.stringify({ text: "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р" }));
-    expect(await res.json()).toMatchObject({ status: "failed", message: expect.stringMatching(/^Не добавлено: Нельзя снять больше/) });
+    expect(await res.json()).toMatchObject({ status: "added", message: expect.stringMatching(/остаток выровнен по банку/) });
   });
 });
 

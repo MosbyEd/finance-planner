@@ -691,24 +691,51 @@ export function smsBalances(raw: string): { key: string | null; amount: Kopecks 
   return result;
 }
 
+/** Цифры накопительных счетов в СМС: «Накопительный счет *3150». */
+function savingsKeysIn(sms: string): Set<string> {
+  return new Set([...normalizeSms(sms).matchAll(/Накопительн\S*\s+сч[её]т\S*\s*\*\s?(\d{4})/giu)].map((m) => m[1]));
+}
+
+/**
+ * Счёт для цифр из СМС. Цифры, которых нет ни у одного счёта, — основной, пока у него самого цифр нет (туда же
+ * записываются и операции по таким цифрам). Но не цифры накопительного: его остаток с основным не сравнить.
+ */
+function balanceAccount(state: State, key: string | null, savingsKeys: Set<string>): Account | undefined {
+  const known = accountForKey(state, key);
+  if (known) return known;
+  if (key && savingsKeys.has(key)) return undefined;
+  const main = findAccount(state, MAIN_ACCOUNT_ID);
+  return main && !main.archived && !accountKeys(main).length ? main : undefined;
+}
+
 /**
  * Сверка остатка по СМС: после операции сравниваем «Баланс» из СМС с остатком счёта в приложении и запоминаем
  * расхождение — приложение предложит поправить. У кредитки в СМС доступный лимит, а не долг — её не сверяем.
- * Баланс без цифр счёта относится к счёту этой СМС; неизвестные цифры (счёт не заведён) — к основному, пока
- * у счетов не указаны цифры вовсе.
+ * Баланс без цифр счёта относится к счёту этой СМС. unmatched — цифры, остаток по которым сверить не с чем
+ * (у счёта в приложении их не указали): уведомление подскажет, где их добавить.
  */
-function bankBalanceActions(state: State, actions: Action[], ctx: { date: IsoDate; sms: string }): Action[] {
+function bankBalanceActions(
+  state: State,
+  actions: Action[],
+  ctx: { date: IsoDate; sms: string },
+): { actions: Action[]; unmatched: string[] } {
+  const none = { actions: [], unmatched: [] };
   const balances = smsBalances(ctx.sms);
-  if (!balances.length) return [];
+  if (!balances.length) return none;
   let after: State;
   try {
     after = applyActions(state, actions);
   } catch {
-    return [];
+    return none;
   }
   const keys = smsAccountKeys(ctx.sms);
-  const anyKeys = accountsOf(state).some((a) => accountKeys(a).length > 0);
-  const byKey = (key: string | null) => accountForKey(state, key) ?? (anyKeys ? undefined : findAccount(state, MAIN_ACCOUNT_ID));
+  const savingsKeys = savingsKeysIn(ctx.sms);
+  const unmatched: string[] = [];
+  const byKey = (key: string | null) => {
+    const account = balanceAccount(state, key, savingsKeys);
+    if (!account && key && !unmatched.includes(key)) unmatched.push(key);
+    return account;
+  };
   // Накопительные счета без цифр из СМС (в том числе «Сбережения» по умолчанию с «копилкой») — конверты внутри
   // основного счёта: в банке эти деньги лежат на нём же.
   const envelopes = accountsOf(state).filter((a) => a.kind === "savings" && !accountKeys(a).length && !a.spending && !a.archived);
@@ -724,7 +751,44 @@ function bankBalanceActions(state: State, actions: Action[], ctx: { date: IsoDat
     const delta = balance.amount - appBalance(account.id);
     result.push({ type: "account.bank", accountId: account.id, amount: balance.amount, delta, date: ctx.date });
   }
-  return result;
+  return { actions: result, unmatched };
+}
+
+/**
+ * Снятие с накопительного больше, чем на нём в приложении: банк знает лучше (туда могли прийти автонакопления
+ * банка или проценты без СМС). Раньше такая СМС отклонялась целиком — без перевода и без сверки остатков.
+ * Теперь перед снятием остаток счёта выравнивается: по «Балансу» из СМС (сколько осталось после снятия) или,
+ * если его нет, ровно до суммы снятия.
+ */
+function savingsShortfallActions(state: State, actions: Action[], ctx: { idBase: string; date: IsoDate; sms: string }): Action[] {
+  try {
+    applyActions(state, actions);
+    return [];
+  } catch {
+    // Не прошло — смотрим, не в нехватке ли на накопительном дело.
+  }
+  const withdrawals = new Map<string, Kopecks>();
+  const take = (id: string, amount: Kopecks) => withdrawals.set(id, (withdrawals.get(id) ?? 0) + amount);
+  for (const a of actions) {
+    if (a.type === "savings.move" && a.amount < 0) take(a.toAccountId ?? SAVINGS_ACCOUNT_ID, -a.amount);
+    else if (a.type === "transfer.add" && findAccount(state, a.from)?.kind === "savings") take(a.from, a.amount);
+  }
+  const balances = smsBalances(ctx.sms);
+  const keys = smsAccountKeys(ctx.sms);
+  const fixes: Action[] = [];
+  for (const [accountId, amount] of withdrawals) {
+    if (accountBalance(state, accountId, ctx.date) >= amount) continue;
+    const reported = balances.find((b) => accountForKey(state, b.key ?? keys.source)?.id === accountId);
+    const before = reported && reported.amount >= 0 ? reported.amount + amount : amount;
+    fixes.push({ type: "balance.set", id: `${ctx.idBase}.fix${fixes.length || ""}`, date: ctx.date, actual: before, accountId });
+  }
+  if (!fixes.length) return [];
+  try {
+    applyActions(state, [...fixes, ...actions]);
+    return fixes;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -735,8 +799,21 @@ function bankBalanceActions(state: State, actions: Action[], ctx: { date: IsoDat
 export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
   const plan = planOperation(state, op, ctx);
   if (plan.skip?.status === "ignored") return plan;
-  const bank = bankBalanceActions(state, plan.actions, ctx);
-  return bank.length ? { ...plan, actions: [...plan.actions, ...bank] } : plan;
+  const fixes = savingsShortfallActions(state, plan.actions, ctx);
+  const actions = [...fixes, ...plan.actions];
+  const bank = bankBalanceActions(state, actions, ctx);
+  const notes = [
+    ...fixes.map((f) => {
+      const name = f.type === "balance.set" ? (findAccount(state, f.accountId ?? MAIN_ACCOUNT_ID)?.name ?? "") : "";
+      return `на «${name}» в приложении было меньше — остаток выровнен по банку`;
+    }),
+    ...bank.unmatched.map((key) => `остаток *${key} не сверен: укажите эти цифры у счёта (Настройки → Счета)`),
+  ];
+  return {
+    ...plan,
+    actions: [...actions, ...bank.actions],
+    ...(notes.length && plan.summary ? { summary: `${plan.summary}. ${notes.join("; ")[0].toUpperCase()}${notes.join("; ").slice(1)}.` } : {}),
+  };
 }
 
 function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
