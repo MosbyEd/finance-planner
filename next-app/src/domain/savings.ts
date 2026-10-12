@@ -3,12 +3,23 @@ import { SAVINGS_CATEGORY } from "./defaults";
 import { percentOf, type Kopecks } from "./money";
 import { LIMITS, type Settings, type Transaction } from "./schema";
 
-type TxLike = Pick<Transaction, "type" | "amount" | "category">;
+/** Счёт и карта операции — для «с каких карт откладывать». */
+type Source = Partial<Pick<Transaction, "accountId" | "card">>;
+type TxLike = Pick<Transaction, "type" | "amount" | "category"> & Source;
+
+/** Покупка со счёта или карты, с которых автоотчисления выключены. Нет счёта — основной. */
+export function purchaseSourceExcluded(settings: Settings, source: Source = {}): boolean {
+  const ps = settings.purchaseSaving;
+  return (
+    Boolean(ps.excludedAccounts?.includes(source.accountId ?? MAIN_ACCOUNT_ID)) ||
+    Boolean(source.card && ps.excludedCards?.includes(source.card))
+  );
+}
 
 /** Отчисление с покупки: процент (с потолком) плюс округление суммы покупки вверх. */
-export function purchaseSavingAmount(amount: Kopecks, category: string, settings: Settings): Kopecks {
+export function purchaseSavingAmount(amount: Kopecks, category: string, settings: Settings, source: Source = {}): Kopecks {
   const ps = settings.purchaseSaving;
-  if (!ps.enabled || amount <= 0 || ps.excludedCategories.includes(category)) return 0;
+  if (!ps.enabled || amount <= 0 || ps.excludedCategories.includes(category) || purchaseSourceExcluded(settings, source)) return 0;
   const percentPart = Math.min(percentOf(amount, ps.percent), ps.cap);
   const roundPart = ps.roundTo > 0 ? Math.ceil(amount / ps.roundTo) * ps.roundTo - amount : 0;
   return percentPart + roundPart;
@@ -23,14 +34,14 @@ export function salarySavingAmount(amount: Kopecks, category: string, settings: 
 
 /** Включать ли автоотчисление по умолчанию для новой операции. */
 export function autoSavingByDefault(tx: TxLike, settings: Settings): boolean {
-  if (tx.type === "expense") return purchaseSavingAmount(tx.amount || 1, tx.category, settings) > 0;
+  if (tx.type === "expense") return purchaseSavingAmount(tx.amount || 1, tx.category, settings, tx) > 0;
   if (tx.type === "income") return salarySavingAmount(tx.amount || 100, tx.category, settings) > 0;
   return false;
 }
 
 export function autoSavingAmount(tx: TxLike & Pick<Transaction, "autoSaving">, settings: Settings): Kopecks {
   if (!tx.autoSaving) return 0;
-  if (tx.type === "expense") return purchaseSavingAmount(tx.amount, tx.category, settings);
+  if (tx.type === "expense") return purchaseSavingAmount(tx.amount, tx.category, settings, tx);
   if (tx.type === "income") return salarySavingAmount(tx.amount, tx.category, settings);
   return 0;
 }

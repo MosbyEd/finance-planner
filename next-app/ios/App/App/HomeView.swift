@@ -171,6 +171,7 @@ struct ActionButton: View {
         } label: {
             Text(action.label)
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 36)
                 .foregroundStyle(action.primary ? .white : Theme.text)
@@ -227,7 +228,7 @@ private struct TodayCard: View {
                     .background(.black.opacity(0.15), in: .rect(cornerRadius: 16, style: .continuous))
                     .padding(.top, 8)
             }
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 CardButton(title: "Расход", symbol: "plus") {
                     AppShell.shared.root?.presentAdd(kind: .expense)
                 }
@@ -317,6 +318,7 @@ private struct CardButton: View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 40)
                 .background(.white.opacity(0.16), in: .capsule)
@@ -383,7 +385,8 @@ private struct AttentionRow: View {
                 content(chevron: false)
             }
             if !row.actions.isEmpty {
-                HStack(spacing: 8) {
+                // Не влезают в ряд — переносятся на следующую строку, а не ломают подписи («Поправит / ь»).
+                FlowLayout(spacing: 8) {
                     ForEach(row.actions, id: \.label) { ActionButton(action: $0) }
                 }
                 .padding(.leading, 48)
@@ -454,7 +457,7 @@ private struct OnboardingCard: View {
                         if step.done {
                             Text(step.doneText).font(.footnote).foregroundStyle(Theme.muted)
                         } else {
-                            HStack(spacing: 8) {
+                            FlowLayout(spacing: 8) {
                                 ForEach(step.actions, id: \.label) { ActionButton(action: $0) }
                             }
                         }

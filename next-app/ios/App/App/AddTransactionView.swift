@@ -118,11 +118,20 @@ struct AddTransactionView: View {
         repeatMonthly || (mandatoryChoice ?? (add.mandatoryCategories ?? []).contains(category))
     }
     /// Сколько уйдёт в сбережения с этой операции (0 — отчисления нет, переключатель не показываем).
+    /// Счёт и карта покупки — отчисление бывает только с выбранных в настройках карт.
+    private var savingAccount: String { payable.count > 1 ? accountId : "main" }
     private var savingPreview: Int {
-        add.saving?.amount(expense: kind == .expense, amount: amount ?? 0, category: category) ?? 0
+        add.saving?.amount(expense: kind == .expense, amount: amount ?? 0, category: category, accountId: savingAccount, card: card) ?? 0
     }
     private var autoSaving: Bool {
-        autoSavingChoice ?? ((add.saving?.amount(expense: kind == .expense, amount: amount ?? (kind == .expense ? 1 : 100), category: category) ?? 0) > 0)
+        autoSavingChoice
+            ?? ((add.saving?.amount(
+                expense: kind == .expense,
+                amount: amount ?? (kind == .expense ? 1 : 100),
+                category: category,
+                accountId: savingAccount,
+                card: card
+            ) ?? 0) > 0)
     }
     private var repeatDay: Int { Calendar.current.component(.day, from: date) }
     /// Между датой операции и сегодня были ещё платёжные дни — задним числом они не появятся.

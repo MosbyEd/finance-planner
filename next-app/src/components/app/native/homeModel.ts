@@ -158,7 +158,17 @@ export interface AddModel {
   mandatoryCategories: string[];
   /** Правила автоотчислений (src/domain/savings.ts) — окно показывает, сколько уйдёт в сбережения. */
   saving: {
-    purchase: { enabled: boolean; percent: number; cap: number; roundTo: number; excluded: string[]; minTransfer: number };
+    purchase: {
+      enabled: boolean;
+      percent: number;
+      cap: number;
+      roundTo: number;
+      excluded: string[];
+      minTransfer: number;
+      /** С покупок по этим счетам и картам не откладывать. */
+      excludedAccounts: string[];
+      excludedCards: string[];
+    };
     salary: { enabled: boolean; percent: number; categories: string[]; minTransfer: number };
   };
   /** Счета для перевода — все свои, с накопительными (меньше двух — перевода нет). */
@@ -487,6 +497,8 @@ export function buildHomeModel(input: HomeInput): HomeModel {
         roundTo: state.settings.purchaseSaving.roundTo,
         excluded: state.settings.purchaseSaving.excludedCategories,
         minTransfer: state.settings.purchaseSaving.minTransfer ?? 0,
+        excludedAccounts: state.settings.purchaseSaving.excludedAccounts ?? [],
+        excludedCards: state.settings.purchaseSaving.excludedCards ?? [],
       },
       salary: {
         enabled: state.settings.salarySaving.enabled,

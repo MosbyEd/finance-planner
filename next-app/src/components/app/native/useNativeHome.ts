@@ -165,9 +165,10 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
         case "add": {
           const { kind, amount, title, date, accountId, card, repeat } = command.draft;
           const category = command.draft.category.trim();
+          const source = { ...(accountId ? { accountId } : {}), ...(card ? { card } : {}) };
           const autoSaving =
-            autoSavingAmount({ type: kind, amount, category, autoSaving: true }, state.settings) > 0 &&
-            (command.draft.autoSaving ?? autoSavingByDefault({ type: kind, amount, category }, state.settings));
+            autoSavingAmount({ type: kind, amount, category, ...source, autoSaving: true }, state.settings) > 0 &&
+            (command.draft.autoSaving ?? autoSavingByDefault({ type: kind, amount, category, ...source }, state.settings));
           // Регулярный расход всегда обязательный.
           const mandatory = kind === "expense" && (Boolean(repeat) || (command.draft.mandatory ?? isMandatoryCategory(state, category)));
           const id = newId();

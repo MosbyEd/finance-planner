@@ -944,7 +944,11 @@ function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; da
 
   // «Копилка с покупок» — только с покупок картой: переводы, платежи (банку, за услуги) и снятие наличных не покупки.
   const notPurchase = op.kind === "expense" && op.via !== "purchase";
-  const autoSaving = !notPurchase && autoSavingByDefault({ type: op.kind, amount: op.amount, category }, state.settings);
+  // Цифры из СМС — карта этого счёта (а не номер самого счёта): у операции видно, какой картой платили.
+  const card = source && keys.source && accountCards(source).some((c) => c.digits === keys.source) ? keys.source : undefined;
+  const autoSaving =
+    !notPurchase &&
+    autoSavingByDefault({ type: op.kind, amount: op.amount, category, ...onAccount(source), ...(card ? { card } : {}) }, state.settings);
   return {
     actions: [
       {
@@ -961,8 +965,7 @@ function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; da
           autoSaving,
           review: true,
           ...onAccount(source),
-          // Цифры из СМС — карта этого счёта (а не номер самого счёта): у операции видно, какой картой платили.
-          ...(source && keys.source && accountCards(source).some((c) => c.digits === keys.source) ? { card: keys.source } : {}),
+          ...(card ? { card } : {}),
         },
       },
     ],

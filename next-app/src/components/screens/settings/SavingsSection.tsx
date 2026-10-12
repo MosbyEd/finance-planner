@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import { monthKeyOf } from "@/domain/dates";
 import { monthMetrics } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
-import { activeAccounts, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
+import { accountCards, activeAccounts, cardLabel, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
 import { pendingSavings, purchaseSavingAmount } from "@/domain/savings";
-import type { Settings } from "@/domain/schema";
+import type { Account, Settings } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
 import { useLeaveGuard } from "../../app/overlays";
@@ -63,6 +63,9 @@ interface Form {
   /** Переводить, когда накопится (копейки; 0 — сразу): у доходов и покупок — свой порог. */
   salaryMin: number;
   purchaseMin: number;
+  /** С покупок по этим счетам и картам не откладывать. */
+  excludedAccounts: string[];
+  excludedCards: string[];
 }
 
 type ErrorKey = "rate" | "salaryPercent" | "salaryCategories" | "purchasePercent" | "cap" | "excluded";
@@ -84,6 +87,8 @@ const ERRORS_BY_FIELD: Record<keyof Form, ErrorKey[]> = {
   rolloverTarget: [],
   salaryMin: [],
   purchaseMin: [],
+  excludedAccounts: [],
+  excludedCards: [],
 };
 
 function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
@@ -102,6 +107,8 @@ function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
     excluded: s.purchaseSaving.excludedCategories,
     salaryMin: s.salarySaving.minTransfer ?? 0,
     purchaseMin: s.purchaseSaving.minTransfer ?? 0,
+    excludedAccounts: s.purchaseSaving.excludedAccounts ?? [],
+    excludedCards: s.purchaseSaving.excludedCards ?? [],
   };
 }
 
@@ -128,6 +135,8 @@ function previewSettings(form: Form, base: Settings): Settings {
       excludedCategories: form.excluded,
       ...(form.purchaseTarget !== SAVINGS_ACCOUNT_ID ? { toAccountId: form.purchaseTarget } : {}),
       ...(form.purchaseMin > 0 ? { minTransfer: form.purchaseMin } : {}),
+      ...(form.excludedAccounts.length ? { excludedAccounts: form.excludedAccounts } : {}),
+      ...(form.excludedCards.length ? { excludedCards: form.excludedCards } : {}),
     },
     ...(form.rolloverTarget !== SAVINGS_ACCOUNT_ID ? { rolloverAccountId: form.rolloverTarget } : {}),
   };
@@ -369,6 +378,12 @@ export function SavingsSection() {
                 onChange={(v) => patch({ purchaseMin: v })}
                 pending={pendingSavings(state, "expense")}
               />
+              <PurchaseSources
+                accounts={activeAccounts(state).filter((a) => a.kind !== "savings")}
+                excludedAccounts={form.excludedAccounts}
+                excludedCards={form.excludedCards}
+                onChange={(next) => patch(next)}
+              />
               <ChipGroup
                 label="Не откладывать с покупок в категориях"
                 hint="Обычно это крупные обязательные платежи: аренда, кредит, коммуналка."
@@ -446,5 +461,79 @@ function MinTransfer({
           ` Сейчас накоплено ${formatMoney(pending.total)}${pending.threshold > 0 ? ` из ${formatMoney(pending.threshold, { whole: true })}` : ""}.`}
       </p>
     </div>
+  );
+}
+
+/**
+ * «С каких карт откладывать» — как «копилка» в банке, которая включается для отдельных карт. Счёт с одной картой —
+ * одним выбором; у счёта с несколькими картами можно выключить отдельную карту. Новые счета и карты — включены.
+ */
+function PurchaseSources({
+  accounts,
+  excludedAccounts,
+  excludedCards,
+  onChange,
+}: {
+  accounts: Account[];
+  excludedAccounts: string[];
+  excludedCards: string[];
+  onChange: (next: { excludedAccounts: string[]; excludedCards: string[] }) => void;
+}) {
+  // Выбирать есть из чего: несколько счетов или у счёта несколько карт.
+  if (accounts.length < 2 && !accounts.some((a) => accountCards(a).length > 1)) return null;
+  const without = (list: string[], items: string[]) => list.filter((x) => !items.includes(x));
+  const chips: { key: string; label: string; pressed: boolean; toggle: () => void }[] = [];
+  for (const account of accounts) {
+    const cards = accountCards(account);
+    const accountOn = !excludedAccounts.includes(account.id);
+    if (cards.length <= 1) {
+      const digits = cards[0]?.digits;
+      chips.push({
+        key: account.id,
+        label: digits ? `${account.name} ${cardLabel(account, digits)}` : account.name,
+        pressed: accountOn && !(digits && excludedCards.includes(digits)),
+        toggle: () =>
+          accountOn && !(digits && excludedCards.includes(digits))
+            ? onChange({ excludedAccounts: [...excludedAccounts, account.id], excludedCards })
+            : onChange({ excludedAccounts: without(excludedAccounts, [account.id]), excludedCards: without(excludedCards, digits ? [digits] : []) }),
+      });
+      continue;
+    }
+    chips.push({
+      key: account.id,
+      label: account.name,
+      pressed: accountOn,
+      toggle: () =>
+        accountOn
+          ? onChange({ excludedAccounts: [...excludedAccounts, account.id], excludedCards })
+          : onChange({ excludedAccounts: without(excludedAccounts, [account.id]), excludedCards }),
+    });
+    // Карты счёта — только когда сам счёт включён.
+    if (!accountOn) continue;
+    for (const card of cards) {
+      const on = !excludedCards.includes(card.digits);
+      chips.push({
+        key: `${account.id}:${card.digits}`,
+        label: `${account.name} ${cardLabel(account, card.digits)}`,
+        pressed: on,
+        toggle: () =>
+          onChange({ excludedAccounts, excludedCards: on ? [...excludedCards, card.digits] : without(excludedCards, [card.digits]) }),
+      });
+    }
+  }
+  const noneOn = chips.every((c) => !c.pressed);
+  return (
+    <ChipGroup
+      label="С каких карт откладывать"
+      hint={
+        noneOn
+          ? "Ни одна карта не выбрана — с покупок ничего не откладывается."
+          : "Только с покупок по выбранным картам и счетам — как «копилка» в банке. Новые карты и счета включаются сами."
+      }
+    >
+      {chips.map((c) => (
+        <ToggleChip key={c.key} label={c.label} pressed={c.pressed} onToggle={c.toggle} />
+      ))}
+    </ChipGroup>
   );
 }

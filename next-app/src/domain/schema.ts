@@ -281,6 +281,9 @@ export const settingsSchema = z.object({
     /** Округление покупки вверх до кратного (0 — без округления). */
     roundTo: nonNegativeKopecksSchema.max(1_000_000),
     excludedCategories: z.array(categoryNameSchema).max(50),
+    /** С покупок по этим счетам и картам не откладывать (как «копилка» в банке — только для выбранных карт). */
+    excludedAccounts: z.array(idSchema).max(50).optional(),
+    excludedCards: z.array(z.string().regex(/^\d{4}$/)).max(50).optional(),
     /** На какой накопительный счёт откладывать. Нет — «Сбережения». */
     toAccountId: idSchema.optional(),
     /** Переводить, когда накопится не меньше (как правило банка «от 100 ₽»). Нет или 0 — сразу. */

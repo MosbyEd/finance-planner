@@ -216,9 +216,11 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
       ? autoSavingChoice
       : kind === "transfer"
         ? false
-        : autoSavingByDefault({ type: kind, amount: amount ?? 0, category }, state.settings);
+        : autoSavingByDefault({ type: kind, amount: amount ?? 0, category, accountId, ...(cardValue ? { card: cardValue } : {}) }, state.settings);
   const autoSavingPreview =
-    kind === "transfer" ? 0 : autoSavingAmount({ type: kind, amount: amount ?? 0, category, autoSaving: true }, state.settings);
+    kind === "transfer"
+      ? 0
+      : autoSavingAmount({ type: kind, amount: amount ?? 0, category, accountId, ...(cardValue ? { card: cardValue } : {}), autoSaving: true }, state.settings);
   const autoSavingAvailable = kind !== "transfer" && (autoSavingPreview > 0 || (editing && Boolean(existing?.autoSaving)));
 
   /** Смена типа: сумма, дата, описание и счёт остаются. */

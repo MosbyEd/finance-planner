@@ -251,6 +251,9 @@ struct HomeModel: Codable, Equatable, Sendable {
             var excluded: [String]
             /// Переводить, когда накопится (0 — сразу).
             var minTransfer: Int?
+            /// С покупок по этим счетам и картам не откладывать.
+            var excludedAccounts: [String]?
+            var excludedCards: [String]?
         }
         struct Salary: Codable, Equatable, Sendable {
             var enabled: Bool
@@ -269,11 +272,13 @@ struct HomeModel: Codable, Equatable, Sendable {
         /// С какой суммы переводятся накопленные отчисления этого вида (0 — сразу).
         func threshold(expense: Bool) -> Int { (expense ? purchase.minTransfer : salary.minTransfer) ?? 0 }
 
-        /// Сколько уйдёт в сбережения с операции (0 — отчисления нет).
-        func amount(expense: Bool, amount: Int, category: String) -> Int {
+        /// Сколько уйдёт в сбережения с операции (0 — отчисления нет). accountId и card — откуда покупка.
+        func amount(expense: Bool, amount: Int, category: String, accountId: String = "main", card: String? = nil) -> Int {
             guard amount > 0 else { return 0 }
             if expense {
                 guard purchase.enabled, !purchase.excluded.contains(category) else { return 0 }
+                if (purchase.excludedAccounts ?? []).contains(accountId) { return 0 }
+                if let card, (purchase.excludedCards ?? []).contains(card) { return 0 }
                 let percentPart = min(Self.percent(amount, purchase.percent), purchase.cap)
                 let roundPart = purchase.roundTo > 0 ? (amount + purchase.roundTo - 1) / purchase.roundTo * purchase.roundTo - amount : 0
                 return percentPart + roundPart

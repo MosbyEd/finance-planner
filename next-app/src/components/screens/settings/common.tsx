@@ -30,12 +30,13 @@ export function ToggleChip({ label, pressed, onToggle }: { label: string; presse
       type="button"
       aria-pressed={pressed}
       onClick={onToggle}
-      className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
+      className={`inline-flex h-10 max-w-full items-center gap-1.5 rounded-full border px-3.5 text-sm transition ${
         pressed ? "border-accent bg-accent-soft text-accent" : "glass-control text-text"
       }`}
     >
-      {pressed && <Icon name="check" size={14} />}
-      {label}
+      {pressed && <Icon name="check" size={14} className="shrink-0" />}
+      {/* Длинное название (счёт и карта) — многоточием, а не за край экрана. */}
+      <span className="truncate">{label}</span>
     </button>
   );
 }

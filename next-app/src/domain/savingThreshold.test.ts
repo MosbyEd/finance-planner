@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { accountBalance } from "./accounts";
 import { savingsTotal } from "./metrics";
-import { pendingSavings } from "./savings";
+import { pendingSavings, purchaseSourceExcluded } from "./savings";
 import type { State } from "./schema";
 import { addTx, run, stateWith } from "./test-utils";
 
@@ -64,5 +64,23 @@ describe("автоотчисления — переводить, когда на
     expect(linked(next).map((t) => [t.linkedTo, t.amount])).toEqual([["pay", 100_000]]);
     expect(pendingSavings(next, "expense").total).toBe(4_000);
     expect(pendingSavings(next, "income").total).toBe(0);
+  });
+});
+
+describe("автоотчисления — с каких карт", () => {
+  it("с выключенного счёта и выключенной карты не откладывается, с остальных — как раньше", () => {
+    const s = base(0);
+    s.settings.purchaseSaving.excludedAccounts = ["cash"];
+    s.settings.purchaseSaving.excludedCards = ["1234"];
+    const next = run(
+      s,
+      { type: "account.add", account: { id: "cash", name: "Наличные", kind: "cash", spending: true } },
+      addTx({ id: "byCash", type: "expense", amount: 6_000, date: "2026-10-02", accountId: "cash", autoSaving: true }),
+      addTx({ id: "byCard", type: "expense", amount: 6_000, date: "2026-10-02", card: "1234", autoSaving: true }),
+      addTx({ id: "byOther", type: "expense", amount: 6_000, date: "2026-10-02", card: "7759", autoSaving: true }),
+    );
+    expect(linked(next).map((t) => t.linkedTo)).toEqual(["byOther"]);
+    expect(purchaseSourceExcluded(s.settings, { accountId: "cash" })).toBe(true);
+    expect(purchaseSourceExcluded(s.settings, {})).toBe(false);
   });
 });
