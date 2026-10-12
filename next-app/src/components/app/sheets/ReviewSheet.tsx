@@ -98,6 +98,7 @@ export function ReviewSheet() {
               }}
               onDelete={() => void remove(tx)}
               onDetach={tx.templateId ? () => detach(tx) : undefined}
+              onOwnMoney={tx.type === "income" && !tx.templateId ? () => dispatch({ type: "tx.ownMoney", id: tx.id, own: true }) : undefined}
             />
           ))}
         </ul>
@@ -127,6 +128,7 @@ function ReviewRow({
   onEdit,
   onDelete,
   onDetach,
+  onOwnMoney,
 }: {
   tx: Transaction;
   state: State;
@@ -136,11 +138,14 @@ function ReviewRow({
   onDelete: () => void;
   /** Только у начислений регулярного платежа. */
   onDetach?: () => void;
+  /** Только у доходов: зачисление своих денег — не доход. */
+  onOwnMoney?: () => void;
 }) {
   const selectId = useId();
-  const signed = tx.type === "income" ? tx.amount : -Math.abs(tx.amount);
-  const kind =
-    tx.type === "saving"
+  const signed = tx.type === "income" || tx.ownMoney ? tx.amount : -Math.abs(tx.amount);
+  const kind = tx.ownMoney
+    ? "свои деньги, не доход"
+    : tx.type === "saving"
       ? tx.amount > 0
         ? "в сбережения"
         : "из сбережений"
@@ -192,6 +197,11 @@ function ReviewRow({
       {onDetach && (
         <button type="button" onClick={onDetach} className="self-start text-sm font-medium text-accent">
           Это не регулярный платёж
+        </button>
+      )}
+      {onOwnMoney && (
+        <button type="button" onClick={onOwnMoney} className="self-start text-sm font-medium text-accent">
+          Это мои деньги с другого счёта, а не доход
         </button>
       )}
     </li>

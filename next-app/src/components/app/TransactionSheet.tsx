@@ -625,6 +625,24 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
           />
         )}
 
+        {/* Зачисление своих денег (с другого своего счёта, из другого банка) — не доход: бюджет месяца не раздувает. */}
+        {existing && existingKind === "income" && kind === "income" && !existing.templateId && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!dispatch({ type: "tx.ownMoney", id: existing.id, own: true })) return;
+              close();
+              const category = existing.category;
+              toast("Теперь это свои деньги, а не доход — бюджет месяца пересчитан", {
+                action: { label: "Отменить", onClick: () => dispatch({ type: "tx.ownMoney", id: existing.id, own: false, category }) },
+              });
+            }}
+            className="text-left text-sm font-medium text-accent"
+          >
+            Это мои деньги с другого счёта, а не доход
+          </button>
+        )}
+
         {template && (
           <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
             Создано по {template.kind === "income" ? "регулярному доходу" : "регулярному платежу"} «{template.title}».
@@ -666,11 +684,12 @@ function ReadOnlyTransaction({ tx }: { tx: Transaction }) {
   const loan = tx.loanId ? state.loans.find((l) => l.id === tx.loanId) : undefined;
   const isLoan = Boolean(tx.loanId);
   const isLoanOpening = Boolean(loan && loanOpening(state, loan)?.id === tx.id);
+  const dispatch = useDispatch();
   return (
     <Sheet
       open
       onClose={close}
-      title={isLoan ? "Долг" : tx.type === "saving" ? "Сбережения" : "Корректировка"}
+      title={isLoan ? "Долг" : tx.type === "saving" ? "Сбережения" : tx.ownMoney ? "Свои деньги" : "Корректировка"}
       footer={
         isLoanOpening ? undefined : (
           <Button
@@ -718,6 +737,21 @@ function ReadOnlyTransaction({ tx }: { tx: Transaction }) {
               ? `Деньги, полученные или отданные в долг «${loan?.name ?? (tx.title || tx.category)}». Сумма меняется вместе с долгом в его карточке на вкладке «Цели» → «Долги».`
               : `Платёж по долгу «${loan?.name ?? (tx.title || tx.category)}». Если он записан по ошибке — удалите его, остаток долга пересчитается.`}
           </p>
+        ) : tx.ownMoney ? (
+          <div className="space-y-3">
+            <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
+              Свои деньги с другого счёта, а не доход: на счёте они есть, а в доходы и бюджет месяца не входят.
+            </p>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                if (dispatch({ type: "tx.ownMoney", id: tx.id, own: false })) close();
+              }}
+            >
+              Это всё-таки доход
+            </Button>
+          </div>
         ) : tx.type === "adjustment" && (
           <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-muted">
             Корректировка выравнивает расчётный остаток с реальным. Её нельзя изменить — только удалить и задать остаток

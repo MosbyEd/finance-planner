@@ -84,6 +84,7 @@ export function TransactionRow({
   if (tx.type === "expense" && tx.mandatory) tags.push("обязательный");
   if (tx.templateId) tags.push("регулярный");
   if (tx.linkedTo) tags.push("автоматически");
+  if (tx.ownMoney) tags.push("свои деньги, не доход");
   const secondary = subtitle ? [subtitle, accountLabel, savingNote].filter(Boolean).join(" · ") : tags.join(" · ");
 
   const content = (

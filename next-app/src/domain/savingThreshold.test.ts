@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountBalance } from "./accounts";
-import { savingsTotal } from "./metrics";
+import { monthMetrics, savingsTotal } from "./metrics";
 import { pendingSavings, purchaseSourceExcluded } from "./savings";
 import type { State } from "./schema";
 import { addTx, run, stateWith } from "./test-utils";
@@ -82,5 +82,23 @@ describe("автоотчисления — с каких карт", () => {
     expect(linked(next).map((t) => t.linkedTo)).toEqual(["byOther"]);
     expect(purchaseSourceExcluded(s.settings, { accountId: "cash" })).toBe(true);
     expect(purchaseSourceExcluded(s.settings, {})).toBe(false);
+  });
+});
+
+describe("свои деньги, а не доход", () => {
+  it("доход становится корректировкой: деньги на счёте остаются, из доходов месяца и отчислений уходит; обратно — доход", () => {
+    const s = base(0);
+    s.settings.salarySaving = { enabled: true, percent: 10, categories: ["Переводы"] };
+    let next = run(s, addTx({ id: "in", type: "income", amount: 23_000_000, date: "2026-10-03", category: "Переводы", autoSaving: true }));
+    const balance = accountBalance(next, "main", "2026-10-03");
+    expect(linked(next)).toHaveLength(1);
+    next = run(next, { type: "tx.ownMoney", id: "in", own: true });
+    expect(next.transactions.find((t) => t.id === "in")).toMatchObject({ type: "adjustment", ownMoney: true, amount: 23_000_000 });
+    expect(linked(next)).toEqual([]);
+    // Отчисление ушло вместе с «доходом» — на счёте ровно то, что пришло.
+    expect(accountBalance(next, "main", "2026-10-03")).toBe(balance + 2_300_000);
+    expect(monthMetrics(next, "2026-10", "2026-10-10").income.fact).toBe(0);
+    const back = run(next, { type: "tx.ownMoney", id: "in", own: false });
+    expect(back.transactions.find((t) => t.id === "in")).toMatchObject({ type: "income", category: "Переводы" });
   });
 });

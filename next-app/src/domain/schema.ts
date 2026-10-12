@@ -65,6 +65,11 @@ export const transactionSchema = z
      * (minTransfer). Ведёт только редьюсер.
      */
     savingPending: z.literal(true).optional(),
+    /**
+     * Свои деньги, а не доход (пришли с другого своего счёта или из другого банка): корректировка остатка,
+     * отмеченная пользователем из дохода. Деньги на счёте есть, в доходы и бюджет месяца не входят.
+     */
+    ownMoney: z.literal(true).optional(),
     /** Операция создана из шаблона: шаблон и месяц, за который она начислена. */
     templateId: idSchema.optional(),
     occurrenceMonth: monthKeySchema.optional(),

@@ -6,6 +6,7 @@ import {
   defaultSettings,
   LOAN_PAYMENT_CATEGORY,
   LOAN_RETURN_CATEGORY,
+  OTHER_CATEGORY,
   SAVINGS_CATEGORY,
 } from "./defaults";
 import {
@@ -128,6 +129,11 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tx.add"), tx: txInputSchema }),
   z.object({ type: z.literal("tx.update"), id: idSchema, patch: txPatchSchema }),
   z.object({ type: z.literal("tx.delete"), id: idSchema }),
+  /**
+   * Зачисление — свои деньги, а не доход (own: true): доход становится корректировкой остатка — деньги на счёте
+   * остаются, в доходы и бюджет месяца не входят. own: false — обратно в доход с категорией category.
+   */
+  z.object({ type: z.literal("tx.ownMoney"), id: idSchema, own: z.boolean(), category: categoryNameSchema.optional() }),
   /**
    * Операция — движение между своими счетами (исправление операции из СМС или правка перевода): на её место
    * с тем же id — перевод, пополнение или снятие сбережений, как в окне перевода.
@@ -888,6 +894,46 @@ export function applyAction(state: State, action: Action): State {
           return reviewed;
         }),
       };
+    }
+
+    case "tx.ownMoney": {
+      const current = findTx(state, action.id);
+      if (action.own) {
+        if (current.type !== "income") throw new DomainError("Отметить «не доход» можно только доход.");
+        if (current.templateId) throw new DomainError("Это регулярный доход — измените или удалите его в «Регулярных».");
+        const linked = findLinkedSaving(state, current);
+        const own: Transaction = {
+          id: current.id,
+          type: "adjustment",
+          amount: current.amount,
+          date: current.date,
+          category: ADJUSTMENT_CATEGORY,
+          title: clipTitle(current.title || current.category || "Свои деньги"),
+          note: current.note,
+          ownMoney: true,
+          ...(current.accountId ? { accountId: current.accountId } : {}),
+        };
+        return {
+          ...state,
+          // Отчисление с «дохода» тоже уходит: откладывать было не с чего.
+          transactions: state.transactions.filter((t) => t !== linked).map((t) => (t === current ? own : t)),
+        };
+      }
+      if (current.type !== "adjustment" || !current.ownMoney) throw new DomainError("Это не зачисление своих денег.");
+      const category = action.category ?? (state.categories.income.includes("Переводы") ? "Переводы" : (state.categories.income[0] ?? OTHER_CATEGORY));
+      const income: Transaction = {
+        id: current.id,
+        type: "income",
+        amount: current.amount,
+        date: current.date,
+        category,
+        title: current.title,
+        note: current.note,
+        autoSaving: false,
+        ...(current.accountId ? { accountId: current.accountId } : {}),
+      };
+      const next = ensureCategory(state, "income", category);
+      return { ...next, transactions: next.transactions.map((t) => (t.id === current.id ? income : t)) };
     }
 
     case "tx.delete": {
