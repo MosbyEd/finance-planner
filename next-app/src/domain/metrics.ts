@@ -222,6 +222,63 @@ export function countsAsMonthSaving(tx: Transaction, goalAccounts: Set<string>):
   return goalAccounts.has(tx.toAccountId ?? SAVINGS_ACCOUNT_ID);
 }
 
+/** Суммы за отрезок дат: что не позже cutoff — факт, позже — план (операции с будущей датой и регулярные). */
+interface WindowTotals {
+  incomeFact: Kopecks;
+  incomeFuture: Kopecks;
+  mandatoryFact: Kopecks;
+  mandatoryFuture: Kopecks;
+  flexibleSpent: Kopecks;
+  flexibleToday: Kopecks;
+  flexibleReserved: Kopecks;
+  savingsFact: Kopecks;
+  /** Регулярные пополнения целей, которые ещё впереди, — тоже сбережения отрезка. */
+  savingsPlanned: Kopecks;
+}
+
+function windowTotals(state: State, first: IsoDate, last: IsoDate, cutoff: IsoDate, today: IsoDate): WindowTotals {
+  const totals: WindowTotals = {
+    incomeFact: 0,
+    incomeFuture: 0,
+    mandatoryFact: 0,
+    mandatoryFuture: 0,
+    flexibleSpent: 0,
+    flexibleToday: 0,
+    flexibleReserved: 0,
+    savingsFact: 0,
+    savingsPlanned: 0,
+  };
+  const goalAccounts = goalAccountIds(state);
+  for (const tx of state.transactions) {
+    if (tx.date < first || tx.date > last) continue;
+    const isFact = tx.date <= cutoff;
+    if (tx.type === "income") {
+      if (isFact) totals.incomeFact += tx.amount;
+      else totals.incomeFuture += tx.amount;
+    } else if (tx.type === "expense" && tx.mandatory) {
+      if (isFact) totals.mandatoryFact += tx.amount;
+      else totals.mandatoryFuture += tx.amount;
+    } else if (tx.type === "expense") {
+      if (isFact) {
+        totals.flexibleSpent += tx.amount;
+        if (tx.date === today) totals.flexibleToday += tx.amount;
+      } else {
+        totals.flexibleReserved += tx.amount;
+      }
+    } else if (tx.type === "saving" && isFact && countsAsMonthSaving(tx, goalAccounts)) {
+      totals.savingsFact += tx.amount;
+    }
+  }
+  // Регулярные — только внутри отрезка: у отрезка в будущем — с его первого дня.
+  const after = cutoff < first ? addDays(first, -1) : cutoff;
+  for (const occ of plannedOccurrences(state, after, last)) {
+    if (occ.kind === "income") totals.incomeFuture += occ.amount;
+    else if (occurrenceIsExpense(state, occ)) totals.mandatoryFuture += occ.amount;
+    else if (occ.goalId || (occ.toAccountId && goalAccounts.has(occ.toAccountId))) totals.savingsPlanned += occ.amount;
+  }
+  return totals;
+}
+
 export function monthMetrics(state: State, month: MonthKey, today: IsoDate): MonthMetrics {
   const status = monthStatus(month, today);
   const first = firstDayOfMonth(month);
@@ -229,44 +286,17 @@ export function monthMetrics(state: State, month: MonthKey, today: IsoDate): Mon
   // Всё, что не позже cutoff, — факт; позже — план.
   const cutoff = status === "past" ? last : status === "future" ? addDays(first, -1) : today;
 
-  let incomeFact = 0;
-  let incomeFuture = 0;
-  let mandatoryFact = 0;
-  let mandatoryFuture = 0;
-  let flexibleSpent = 0;
-  let flexibleToday = 0;
-  let flexibleReserved = 0;
-  let savingsFact = 0;
-  const goalAccounts = goalAccountIds(state);
-
-  for (const tx of state.transactions) {
-    if (tx.date < first || tx.date > last) continue;
-    const isFact = tx.date <= cutoff;
-    if (tx.type === "income") {
-      if (isFact) incomeFact += tx.amount;
-      else incomeFuture += tx.amount;
-    } else if (tx.type === "expense" && tx.mandatory) {
-      if (isFact) mandatoryFact += tx.amount;
-      else mandatoryFuture += tx.amount;
-    } else if (tx.type === "expense") {
-      if (isFact) {
-        flexibleSpent += tx.amount;
-        if (tx.date === today) flexibleToday += tx.amount;
-      } else {
-        flexibleReserved += tx.amount;
-      }
-    } else if (tx.type === "saving" && isFact && countsAsMonthSaving(tx, goalAccounts)) {
-      savingsFact += tx.amount;
-    }
-  }
-
-  // Регулярные переводы на накопительные, которые ещё впереди в этом месяце, — тоже сбережения месяца.
-  let savingsPlanned = 0;
-  for (const occ of plannedOccurrences(state, cutoff, last)) {
-    if (occ.kind === "income") incomeFuture += occ.amount;
-    else if (occurrenceIsExpense(state, occ)) mandatoryFuture += occ.amount;
-    else if (occ.goalId || (occ.toAccountId && goalAccounts.has(occ.toAccountId))) savingsPlanned += occ.amount;
-  }
+  const {
+    incomeFact,
+    incomeFuture,
+    mandatoryFact,
+    mandatoryFuture,
+    flexibleSpent,
+    flexibleToday,
+    flexibleReserved,
+    savingsFact,
+    savingsPlanned,
+  } = windowTotals(state, first, last, cutoff, today);
 
   const incomePlan = incomeFact + incomeFuture;
   const mandatoryPlan = mandatoryFact + mandatoryFuture;
@@ -483,6 +513,133 @@ export interface SafeToSpend {
   status: SafeToSpendStatus;
   /** Первый день, когда прогноз остатка уходит в минус (кассовый разрыв). */
   gapDate: IsoDate | null;
+  /** Период бюджета (от зарплаты до зарплаты или месяц) — по нему budgetPerDay. */
+  period: BudgetPeriod;
+}
+
+// ---------- период бюджета: от зарплаты до зарплаты ----------
+
+/** Доходы, которые делят время на периоды бюджета: регулярные «Зарплата» и «Аванс». */
+export const PAY_CATEGORIES = ["Зарплата", "Аванс"];
+
+/** Поступление зарплаты или аванса — граница периода. */
+export interface PayEvent {
+  date: IsoDate;
+  title: string;
+  category: string;
+  amount: Kopecks;
+  /** Уже пришло (операция есть), а не только по плану. */
+  received: boolean;
+}
+
+/** Поступления зарплаты и аванса около сегодняшнего дня: пришедшие — по факту, будущие — по плану. */
+export function payEvents(state: State, today: IsoDate): PayEvent[] {
+  const templates = state.templates.filter((t) => t.active && t.kind === "income" && PAY_CATEGORIES.includes(t.category));
+  if (!templates.length) return [];
+  const ids = new Set(templates.map((t) => t.id));
+  const from = addDays(today, -62);
+  const to = addDays(today, 100);
+  const events: PayEvent[] = [];
+  for (const tx of state.transactions) {
+    if (tx.type !== "income" || tx.date < from || tx.date > to) continue;
+    // Пришла раньше срока — период начинается в день поступления.
+    if (tx.templateId ? ids.has(tx.templateId) : PAY_CATEGORIES.includes(tx.category)) {
+      events.push({ date: tx.date, title: tx.title || tx.category, category: tx.category, amount: tx.amount, received: true });
+    }
+  }
+  for (const occ of plannedOccurrences(state, from, to)) {
+    if (ids.has(occ.templateId)) {
+      events.push({ date: occ.date, title: occ.title, category: occ.category, amount: occ.amount, received: false });
+    }
+  }
+  return events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Бюджет за отрезок дат — как у месяца: доходы − обязательные − норма сбережений, минус уже потраченное. */
+export interface PeriodBudget {
+  start: IsoDate;
+  end: IsoDate;
+  days: number;
+  /** Дней до конца отрезка, включая сегодня (у будущего — все). */
+  daysLeft: number;
+  income: { fact: Kopecks; plan: Kopecks };
+  mandatory: { fact: Kopecks; plan: Kopecks };
+  savings: { fact: Kopecks; target: Kopecks; planned: Kopecks };
+  flexible: { budget: Kopecks; spent: Kopecks; spentToday: Kopecks; reserved: Kopecks; extraSavings: Kopecks; left: Kopecks };
+  /** Сколько можно тратить в день: (бюджет − потрачено до сегодня − запланировано − отложено сверх нормы) / дней. */
+  perDay: Kopecks;
+}
+
+export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: IsoDate): PeriodBudget {
+  const cutoff = today < start ? addDays(start, -1) : today > end ? end : today;
+  const w = windowTotals(state, start, end, cutoff, today);
+  const incomePlan = w.incomeFact + w.incomeFuture;
+  const mandatoryPlan = w.mandatoryFact + w.mandatoryFuture;
+  const target = percentOf(incomePlan, savingsRateFor(state.settings, monthKeyOf(start)));
+  const budget = incomePlan - mandatoryPlan - target;
+  const extraSavings = Math.max(0, w.savingsFact + w.savingsPlanned - target);
+  const days = diffDays(start, end) + 1;
+  const daysLeft = today < start ? days : today > end ? 0 : diffDays(today, end) + 1;
+  const spentBeforeToday = w.flexibleSpent - w.flexibleToday;
+  return {
+    start,
+    end,
+    days,
+    daysLeft,
+    income: { fact: w.incomeFact, plan: incomePlan },
+    mandatory: { fact: w.mandatoryFact, plan: mandatoryPlan },
+    savings: { fact: w.savingsFact, target, planned: w.savingsPlanned },
+    flexible: {
+      budget,
+      spent: w.flexibleSpent,
+      spentToday: w.flexibleToday,
+      reserved: w.flexibleReserved,
+      extraSavings,
+      left: budget - w.flexibleSpent - w.flexibleReserved - extraSavings,
+    },
+    perDay: daysLeft > 0 ? floorToRubles((budget - spentBeforeToday - w.flexibleReserved - extraSavings) / daysLeft) : 0,
+  };
+}
+
+export interface BudgetPeriod {
+  /** pay — от зарплаты до зарплаты; month — календарный месяц (выбран или нет регулярной зарплаты). */
+  kind: "pay" | "month";
+  current: PeriodBudget;
+  /** Поступление, которым текущий период закончится («до аванса 25 окт.»). */
+  next: PayEvent | null;
+  /** Следующий период — с этого поступления до следующего: сколько будет в день после него. */
+  after: PeriodBudget | null;
+}
+
+/** Текущий период бюджета: от последней зарплаты или аванса до дня перед следующим (или календарный месяц). */
+export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
+  const month = monthKeyOf(today);
+  const asMonth: BudgetPeriod = {
+    kind: "month",
+    current: periodBudget(state, firstDayOfMonth(month), lastDayOfMonth(month), today),
+    next: null,
+    after: null,
+  };
+  if (state.settings.budgetPeriod === "month") return asMonth;
+  // Одно поступление в день — граница.
+  const events = payEvents(state, today).filter((e, i, list) => i === 0 || list[i - 1].date !== e.date);
+  const start = events.filter((e) => e.date <= today).at(-1);
+  const next = events.find((e) => e.date > today);
+  if (!start || !next || diffDays(start.date, today) > 45) return asMonth;
+  const following = events.find((e) => e.date > next.date);
+  return {
+    kind: "pay",
+    current: periodBudget(state, start.date, addDays(next.date, -1), today),
+    next,
+    after: following ? periodBudget(state, next.date, addDays(following.date, -1), today) : null,
+  };
+}
+
+/** «до аванса», «после зарплаты»: родительный падеж поступления. */
+export function payEventName(event: Pick<PayEvent, "category" | "title">): string {
+  if (event.category === "Аванс") return "аванса";
+  if (event.category === "Зарплата") return "зарплаты";
+  return `«${event.title}»`;
 }
 
 /**
@@ -494,8 +651,9 @@ export interface SafeToSpend {
  */
 export function safeToSpend(state: State, today: IsoDate): SafeToSpend {
   const month = monthKeyOf(today);
-  const metrics = monthMetrics(state, month, today);
-  const spentToday = metrics.flexible.spentToday;
+  // Бюджет — за период от зарплаты до зарплаты (или за месяц, если так выбрано или регулярной зарплаты нет).
+  const period = budgetPeriod(state, today);
+  const spentToday = period.current.flexible.spentToday;
 
   const events = upcomingEvents(state, today, addDays(today, 62));
   const nextIncome = events.find((e) => e.type === "income");
@@ -521,8 +679,8 @@ export function safeToSpend(state: State, today: IsoDate): SafeToSpend {
   const cashNow = balanceAt(state, today) + spentTodayCash;
   const cashAvailable = cashNow - plannedOut;
   const cashPerDay = floorToRubles(cashAvailable / daysUntil);
-  const budgetPerDay = metrics.daily.availableToday;
-  const usesBudget = metrics.income.plan > 0;
+  const budgetPerDay = period.current.perDay;
+  const usesBudget = period.current.income.plan > 0;
 
   const recommended = Math.max(0, usesBudget ? Math.min(budgetPerDay, cashPerDay) : cashPerDay);
   const leftToday = recommended - spentToday;
@@ -551,6 +709,7 @@ export function safeToSpend(state: State, today: IsoDate): SafeToSpend {
     plannedOut,
     status,
     gapDate,
+    period,
   };
 }
 

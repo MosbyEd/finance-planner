@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { formatDay, formatMonthIn, monthKeyOf, type MonthKey } from "@/domain/dates";
+import { formatDay, formatMonthIn, type MonthKey } from "@/domain/dates";
 import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "@/domain/accounts";
-import { balanceAt, goalsReservedOn, monthMetrics, safeToSpend, savingsTotal } from "@/domain/metrics";
+import { balanceAt, goalsReservedOn, payEventName, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
 import { plural } from "@/domain/text";
@@ -260,8 +260,10 @@ export function ExplainSheet() {
   const { close, open } = useUi();
   const today = useToday();
   const sts = safeToSpend(state, today);
-  const m = monthMetrics(state, monthKeyOf(today), today);
-  // Без доходов в плане этого месяца лимит считается только по деньгам на счёте (как в safeToSpend).
+  // Бюджет — за период от зарплаты до зарплаты (или за месяц); показываем его же, а не календарный месяц.
+  const { kind, current: m, next, after } = sts.period;
+  const until = next ? `до ${payEventName(next)} ${formatDay(next.date)}` : "до конца месяца";
+  // Без доходов в плане периода лимит считается только по деньгам на счёте (как в safeToSpend).
   const hasIncome = sts.usesBudget;
   const budgetBinding = hasIncome && sts.budgetPerDay <= sts.cashPerDay;
   const raw = hasIncome ? Math.min(sts.budgetPerDay, sts.cashPerDay) : sts.cashPerDay;
@@ -293,8 +295,8 @@ export function ExplainSheet() {
       <div className="space-y-4 text-[15px]">
         <p>
           {hasIncome
-            ? "Берём меньшее из двух чисел — так денег хватит и на план месяца, и на платежи до следующего дохода."
-            : "В этом месяце доходов в плане нет — считаем только по деньгам на счёте."}
+            ? `Берём меньшее из двух чисел — так денег хватит и на план ${kind === "pay" ? "периода" : "месяца"}, и на платежи до следующего дохода.`
+            : `${kind === "pay" ? "В этом периоде" : "В этом месяце"} доходов в плане нет — считаем только по деньгам на счёте.`}
         </p>
         <p className="rounded-2xl bg-surface-2 px-4 py-3">
           Лимит на сегодня: <span className="font-semibold tabular-nums">{formatMoney(sts.recommended)}</span>
@@ -310,9 +312,16 @@ export function ExplainSheet() {
         </p>
 
         <section className={`rounded-2xl p-4 ${budgetBinding ? "bg-accent-soft" : "bg-surface-2"}`}>
-          <h3 className="font-semibold">По бюджету месяца: {formatMoney(sts.budgetPerDay)} в день</h3>
+          <h3 className="font-semibold">
+            По бюджету {kind === "pay" ? until : "месяца"}: {formatMoney(sts.budgetPerDay)} в день
+          </h3>
+          {kind === "pay" && (
+            <p className="mt-1 text-sm text-muted">
+              Период — с {formatDay(m.start)} {until}: от зарплаты до зарплаты.
+            </p>
+          )}
           <dl className="mt-2 space-y-1 text-sm">
-            <Row label="Доходы за месяц (с плановыми)" value={m.income.plan} />
+            <Row label={kind === "pay" ? "Доходы периода (с плановыми)" : "Доходы за месяц (с плановыми)"} value={m.income.plan} />
             <Row label="− Обязательные расходы" value={m.mandatory.plan} />
             <Row label={`− Норма сбережений (${state.settings.savingsRatePercent}%)`} value={m.savings.target} />
             <Row label="= Гибкий бюджет" value={m.flexible.budget} strong />
@@ -321,11 +330,24 @@ export function ExplainSheet() {
             {m.flexible.extraSavings > 0 && <Row label="− Отложено сверх нормы" value={m.flexible.extraSavings} />}
           </dl>
           <p className="pt-1 text-sm text-muted">
-            Делим на {days(m.daysLeft)} до конца месяца, включая сегодня.
+            Делим на {days(m.daysLeft)} {until}, включая сегодня.
             {!hasIncome && " Без доходов в плане этот расчёт не учитывается."}
             {m.flexible.extraSavings > 0 &&
               " «Отложено» — пополнения целей и автоотчисления с доходов и покупок; переводы на накопительные счета без цели сюда не входят."}
           </p>
+          {after && next && (
+            <p className="mt-2 border-t border-border pt-2 text-sm">
+              После {payEventName(next)} {formatDay(next.date)}:{" "}
+              <span className="font-semibold tabular-nums">≈ {formatMoney(Math.max(0, after.perDay))} в день</span>
+              <span className="block text-muted">
+                на {days(after.days)}: доходы {formatMoney(after.income.plan, { whole: true })} − обязательные{" "}
+                {formatMoney(after.mandatory.plan, { whole: true })} − норма сбережений{" "}
+                {formatMoney(after.savings.target, { whole: true })}
+                {after.flexible.extraSavings > 0 ? ` − отложено сверх нормы ${formatMoney(after.flexible.extraSavings, { whole: true })}` : ""}
+                {after.flexible.reserved > 0 ? ` − запланированные траты ${formatMoney(after.flexible.reserved, { whole: true })}` : ""}.
+              </span>
+            </p>
+          )}
         </section>
 
         <section className={`rounded-2xl p-4 ${!budgetBinding ? "bg-accent-soft" : "bg-surface-2"}`}>

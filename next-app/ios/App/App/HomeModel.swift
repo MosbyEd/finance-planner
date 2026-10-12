@@ -161,6 +161,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var progress: Double
         var tone: Tone
         var daysLeft: String?
+        /// «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты.
+        var next: String?
     }
 
     struct Upcoming: Codable, Equatable, Sendable, Identifiable {

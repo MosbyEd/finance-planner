@@ -296,6 +296,11 @@ export const settingsSchema = z.object({
   }),
   /** Куда откладывать остаток гибкого бюджета прошлого месяца. Нет — «Сбережения». */
   rolloverAccountId: idSchema.optional(),
+  /**
+   * Период бюджета: от зарплаты до зарплаты (по регулярным доходам «Зарплата» и «Аванс») или календарный месяц.
+   * Нет — от зарплаты до зарплаты, если такие доходы есть.
+   */
+  budgetPeriod: z.enum(["pay", "month"]).optional(),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 

@@ -1,12 +1,14 @@
-import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf, type IsoDate } from "@/domain/dates";
+import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import {
   balanceAt,
   balanceEffect,
   monthMetrics,
+  payEventName,
   pendingRollover,
   safeToSpend,
   savingsTotal,
   upcomingEvents,
+  type BudgetPeriod,
   type SafeToSpend,
 } from "@/domain/metrics";
 import { formatMoney } from "@/domain/money";
@@ -91,6 +93,8 @@ export interface MonthModel {
   progress: number;
   tone: Tone;
   daysLeft: string | null;
+  /** «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты. */
+  next?: string | null;
 }
 
 export interface UpcomingModel {
@@ -457,6 +461,32 @@ function recentRow(state: State, tx: Transaction, today: IsoDate, autoSaving: nu
 /** Спрятанная сумма. */
 const MASK = "•••• ₽";
 
+/**
+ * Карточка гибкого бюджета: период от зарплаты до зарплаты («До аванса 25 октября») или месяц — и сколько
+ * будет в день после следующего поступления.
+ */
+function periodModel(period: BudgetPeriod, month: MonthKey): MonthModel {
+  const { current, next, after } = period;
+  const f = current.flexible;
+  const used = f.spent + f.reserved + f.extraSavings;
+  const ratio = f.budget > 0 ? used / f.budget : 1;
+  const days = (n: number) => `${n} ${plural(n, ["день", "дня", "дней"])}`;
+  return {
+    title: next ? `До ${payEventName(next)} ${formatDay(next.date)}` : formatMonth(month),
+    label: f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете",
+    amount: formatMoney(Math.abs(f.left), { whole: true }),
+    negative: f.left < 0,
+    of: `из ${formatMoney(Math.max(0, f.budget), { whole: true })}`,
+    progress: Math.max(0, ratio),
+    tone: ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent",
+    daysLeft: current.daysLeft > 0 ? (next ? `До ${payEventName(next)} ${days(current.daysLeft)}` : `До конца месяца ${days(current.daysLeft)}`) : null,
+    next:
+      after && next
+        ? `После ${payEventName(next)}: ≈ ${formatMoney(Math.max(0, after.perDay), { whole: true })} в день на ${days(after.days)}`
+        : null,
+  };
+}
+
 export function buildHomeModel(input: HomeInput): HomeModel {
   const { snapshot, today } = input;
   const masked = input.privacy?.masked ?? false;
@@ -617,19 +647,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
           command: { type: "open", overlay: { kind: "account", accountId: row.account.id } },
         }))
       : [],
-    month: {
-      title: formatMonth(month),
-      label: f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете",
-      amount: formatMoney(Math.abs(f.left), { whole: true }),
-      negative: f.left < 0,
-      of: `из ${formatMoney(Math.max(0, f.budget), { whole: true })}`,
-      progress: Math.max(0, ratio),
-      tone: ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent",
-      daysLeft:
-        metrics.daysLeft > 0
-          ? `До конца месяца ${metrics.daysLeft} ${plural(metrics.daysLeft, ["день", "дня", "дней"])}`
-          : null,
-    },
+    month: periodModel(sts.period, month),
     upcoming: upcomingEvents(state, today, addDays(today, 30))
       .slice(0, 30)
       .map((e) => ({

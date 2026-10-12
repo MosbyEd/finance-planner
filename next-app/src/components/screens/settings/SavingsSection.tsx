@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { monthKeyOf } from "@/domain/dates";
-import { monthMetrics } from "@/domain/metrics";
+import { monthMetrics, PAY_CATEGORIES } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { accountCards, activeAccounts, cardLabel, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
 import { pendingSavings, purchaseSavingAmount } from "@/domain/savings";
@@ -66,6 +66,8 @@ interface Form {
   /** С покупок по этим счетам и картам не откладывать. */
   excludedAccounts: string[];
   excludedCards: string[];
+  /** Период бюджета: от зарплаты до зарплаты или календарный месяц. */
+  period: "pay" | "month";
 }
 
 type ErrorKey = "rate" | "salaryPercent" | "salaryCategories" | "purchasePercent" | "cap" | "excluded";
@@ -89,6 +91,7 @@ const ERRORS_BY_FIELD: Record<keyof Form, ErrorKey[]> = {
   purchaseMin: [],
   excludedAccounts: [],
   excludedCards: [],
+  period: [],
 };
 
 function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
@@ -109,6 +112,7 @@ function toForm(s: Settings, state: Parameters<typeof savingsTarget>[0]): Form {
     purchaseMin: s.purchaseSaving.minTransfer ?? 0,
     excludedAccounts: s.purchaseSaving.excludedAccounts ?? [],
     excludedCards: s.purchaseSaving.excludedCards ?? [],
+    period: s.budgetPeriod ?? "pay",
   };
 }
 
@@ -139,6 +143,7 @@ function previewSettings(form: Form, base: Settings): Settings {
       ...(form.excludedCards.length ? { excludedCards: form.excludedCards } : {}),
     },
     ...(form.rolloverTarget !== SAVINGS_ACCOUNT_ID ? { rolloverAccountId: form.rolloverTarget } : {}),
+    ...(form.period === "month" ? { budgetPeriod: "month" as const } : {}),
   };
 }
 
@@ -195,6 +200,7 @@ export function SavingsSection() {
   useRowSummary(dirty ? UNSAVED_SUMMARY : null);
   const preview = previewSettings(form, saved);
 
+  const hasPayTemplates = state.templates.some((t) => t.active && t.kind === "income" && PAY_CATEGORIES.includes(t.category));
   const monthIncome = useMemo(() => monthMetrics(state, monthKeyOf(today), today).income.plan, [state, today]);
 
   const incomeOptions = withSelected(state.categories.income, form.salaryCategories);
@@ -251,6 +257,25 @@ export function SavingsSection() {
         }}
       >
         <div className="space-y-2">
+          <ChoiceChips
+            label="Период бюджета"
+            value={form.period}
+            options={[
+              { value: "pay", label: "От зарплаты до зарплаты" },
+              { value: "month", label: "Календарный месяц" },
+            ]}
+            onChange={(v) => patch({ period: v === "month" ? "month" : "pay" })}
+          />
+          <p className="text-sm text-muted">
+            {form.period === "month"
+              ? "Гибкий бюджет и лимит на день — на календарный месяц, с 1-го по последнее число."
+              : hasPayTemplates
+                ? "Гибкий бюджет и лимит на день — от поступления зарплаты или аванса до следующего. Сколько будет в день после следующего поступления — на Главной."
+                : "Нужен регулярный доход с категорией «Зарплата» или «Аванс» (вкладка «Регулярные»). Пока его нет, считаем по календарному месяцу."}
+          </p>
+        </div>
+
+        <div className="space-y-2 border-t border-border pt-5">
           <div className="max-w-56">
             <TextInput
               label="Норма сбережений, % от доходов"

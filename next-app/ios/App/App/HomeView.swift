@@ -683,6 +683,16 @@ private struct MonthCard: View {
                     Text(daysLeft).font(.caption).foregroundStyle(Theme.muted)
                 }
             }
+            // Сколько будет в день после следующей зарплаты или аванса.
+            if let next = month.next {
+                Text(next)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.fill, in: .rect(cornerRadius: 14, style: .continuous))
+            }
         }
     }
 }

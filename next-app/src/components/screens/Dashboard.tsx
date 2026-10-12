@@ -3,14 +3,16 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { autoSavingByDefault } from "@/domain/savings";
 import { legacySavingsFixes } from "@/domain/sms";
-import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf } from "@/domain/dates";
+import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf, type MonthKey } from "@/domain/dates";
 import {
   balanceAt,
   monthMetrics,
+  payEventName,
   pendingRollover,
   safeToSpend,
   savingsTotal,
   upcomingEvents,
+  type BudgetPeriod,
   type SafeToSpend,
   type UpcomingEvent,
 } from "@/domain/metrics";
@@ -460,7 +462,7 @@ export function Dashboard() {
             {hasOwnAccounts(state) && <AccountsCard />}
           </div>
           <div className="space-y-4">
-            <MonthCard metrics={data.metrics} />
+            <MonthCard period={data.sts.period} month={data.month} />
             <UpcomingCard events={data.upcoming} />
 
             <Card
@@ -612,14 +614,20 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
   );
 }
 
-function MonthCard({ metrics }: { metrics: ReturnType<typeof monthMetrics> }) {
+/**
+ * Гибкий бюджет текущего периода: от зарплаты до зарплаты («До аванса 25 октября») или месяца — и сколько будет
+ * в день после следующего поступления.
+ */
+function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey }) {
   const { setTab } = useUi();
-  const f = metrics.flexible;
+  const { current, next, after } = period;
+  const f = current.flexible;
   const used = f.spent + f.reserved + f.extraSavings;
   const ratio = f.budget > 0 ? used / f.budget : 1;
+  const days = `${current.daysLeft} ${plural(current.daysLeft, ["день", "дня", "дней"])}`;
   return (
     <Card
-      title={formatMonth(metrics.month)}
+      title={next ? `До ${payEventName(next)} ${formatDay(next.date)}` : formatMonth(month)}
       action={
         <Button variant="ghost" size="sm" onClick={() => setTab("analytics")}>
           Подробнее
@@ -640,12 +648,16 @@ function MonthCard({ metrics }: { metrics: ReturnType<typeof monthMetrics> }) {
           tone={ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent"}
           label="Использовано гибкого бюджета"
         />
-        {metrics.daysLeft > 0 && (
-          <p className="mt-1.5 text-xs text-muted">
-            До конца месяца {metrics.daysLeft} {plural(metrics.daysLeft, ["день", "дня", "дней"])}
-          </p>
+        {current.daysLeft > 0 && (
+          <p className="mt-1.5 text-xs text-muted">{next ? `До ${payEventName(next)} ${days}` : `До конца месяца ${days}`}</p>
         )}
       </div>
+      {after && next && (
+        <p className="mt-3 rounded-2xl bg-surface-2 px-3 py-2 text-sm">
+          После {payEventName(next)}: <span className="font-semibold tabular-nums">≈ {formatMoney(Math.max(0, after.perDay))} в день</span>
+          <span className="text-muted"> на {after.days} {plural(after.days, ["день", "дня", "дней"])}</span>
+        </p>
+      )}
 
       {/* Доходы, обязательные и отложенное с планом — в «Аналитике» («Подробнее»), предупреждения — в «Требует внимания». */}
     </Card>
