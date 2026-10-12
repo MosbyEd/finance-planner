@@ -755,40 +755,85 @@ function bankBalanceActions(
 }
 
 /**
- * Снятие с накопительного больше, чем на нём в приложении: банк знает лучше (туда могли прийти автонакопления
- * банка или проценты без СМС). Раньше такая СМС отклонялась целиком — без перевода и без сверки остатков.
- * Теперь перед снятием остаток счёта выравнивается: по «Балансу» из СМС (сколько осталось после снятия) или,
- * если его нет, ровно до суммы снятия.
+ * Снятие с накопительного больше, чем на нём в приложении. Чаще всего это деньги, которые банк откладывал сам
+ * (округления, автопереводы без СМС): в приложении они так и не уходили с основного счёта. Поэтому денег
+ * не придумываем — снятие записывается на столько, сколько на счёте в приложении (или не записывается вовсе),
+ * а остаток основного сверяется с «Балансом» из СМС: если разница всё же есть, приложение предложит её поправить.
  */
-function savingsShortfallActions(state: State, actions: Action[], ctx: { idBase: string; date: IsoDate; sms: string }): Action[] {
+function capSavingsWithdrawals(state: State, actions: Action[], date: IsoDate): { actions: Action[]; notes: string[] } {
   try {
     applyActions(state, actions);
-    return [];
+    return { actions, notes: [] };
   } catch {
     // Не прошло — смотрим, не в нехватке ли на накопительном дело.
   }
-  const withdrawals = new Map<string, Kopecks>();
-  const take = (id: string, amount: Kopecks) => withdrawals.set(id, (withdrawals.get(id) ?? 0) + amount);
+  const left = new Map<string, Kopecks>();
+  const available = (id: string) => left.get(id) ?? Math.max(0, accountBalance(state, id, date));
+  const notes: string[] = [];
+  const capped: Action[] = [];
   for (const a of actions) {
-    if (a.type === "savings.move" && a.amount < 0) take(a.toAccountId ?? SAVINGS_ACCOUNT_ID, -a.amount);
-    else if (a.type === "transfer.add" && findAccount(state, a.from)?.kind === "savings") take(a.from, a.amount);
+    const withdrawal =
+      a.type === "savings.move" && a.amount < 0
+        ? { account: a.toAccountId ?? SAVINGS_ACCOUNT_ID, amount: -a.amount }
+        : a.type === "transfer.add" && findAccount(state, a.from)?.kind === "savings"
+          ? { account: a.from, amount: a.amount }
+          : null;
+    if (!withdrawal || available(withdrawal.account) >= withdrawal.amount) {
+      if (withdrawal) left.set(withdrawal.account, available(withdrawal.account) - withdrawal.amount);
+      capped.push(a);
+      continue;
+    }
+    const have = available(withdrawal.account);
+    const name = findAccount(state, withdrawal.account)?.name ?? "";
+    left.set(withdrawal.account, 0);
+    if (have <= 0) {
+      notes.push(`на «${name}» в приложении пусто — снятие не записано: эти деньги приложение и так считало на счёте`);
+      continue;
+    }
+    notes.push(`на «${name}» в приложении было только ${formatMoney(have)} — записано столько`);
+    capped.push(a.type === "savings.move" ? { ...a, amount: -have } : a.type === "transfer.add" ? { ...a, amount: have } : a);
   }
-  const balances = smsBalances(ctx.sms);
-  const keys = smsAccountKeys(ctx.sms);
-  const fixes: Action[] = [];
-  for (const [accountId, amount] of withdrawals) {
-    if (accountBalance(state, accountId, ctx.date) >= amount) continue;
-    const reported = balances.find((b) => accountForKey(state, b.key ?? keys.source)?.id === accountId);
-    const before = reported && reported.amount >= 0 ? reported.amount + amount : amount;
-    fixes.push({ type: "balance.set", id: `${ctx.idBase}.fix${fixes.length || ""}`, date: ctx.date, actual: before, accountId });
-  }
-  if (!fixes.length) return [];
   try {
-    applyActions(state, [...fixes, ...actions]);
-    return fixes;
+    applyActions(state, capped);
+    return { actions: capped, notes };
   } catch {
-    return [];
+    return { actions, notes: [] };
   }
+}
+
+/**
+ * Операция пришла позже, а расхождение с банком из-за неё уже поправили корректировкой («Поправить» на Главной):
+ * корректировка на ту же сумму по тому же счёту в ближайшие дни после операции заменяется самой операцией —
+ * иначе деньги учлись бы дважды.
+ */
+function replacedCorrections(state: State, actions: Action[], date: IsoDate): { actions: Action[]; notes: string[] } {
+  let after: State;
+  try {
+    after = applyActions(state, actions);
+  } catch {
+    return { actions: [], notes: [] };
+  }
+  const horizon = addDays(date, 30);
+  const deletes: Action[] = [];
+  const notes: string[] = [];
+  for (const account of accountsOf(state)) {
+    const effect = accountBalance(after, account.id, horizon) - accountBalance(state, account.id, horizon);
+    if (effect === 0) continue;
+    const correction = state.transactions.find(
+      (t) =>
+        t.type === "adjustment" &&
+        !t.loanId &&
+        (t.accountId ?? MAIN_ACCOUNT_ID) === account.id &&
+        t.amount === effect &&
+        t.date >= date &&
+        t.date <= addDays(date, 3) &&
+        !deletes.some((d) => d.type === "tx.delete" && d.id === t.id),
+    );
+    if (!correction) continue;
+    deletes.push({ type: "tx.delete", id: correction.id });
+    notes.push(`заменила корректировку остатка «${account.name}» на ту же сумму`);
+  }
+  return { actions: deletes, notes };
 }
 
 /**
@@ -799,21 +844,18 @@ function savingsShortfallActions(state: State, actions: Action[], ctx: { idBase:
 export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
   const plan = planOperation(state, op, ctx);
   if (plan.skip?.status === "ignored") return plan;
-  const fixes = savingsShortfallActions(state, plan.actions, ctx);
-  const actions = [...fixes, ...plan.actions];
+  const capped = capSavingsWithdrawals(state, plan.actions, ctx.date);
+  const replaced = replacedCorrections(state, capped.actions, ctx.date);
+  const actions = [...replaced.actions, ...capped.actions];
   const bank = bankBalanceActions(state, actions, ctx);
-  const notes = [
-    ...fixes.map((f) => {
-      const name = f.type === "balance.set" ? (findAccount(state, f.accountId ?? MAIN_ACCOUNT_ID)?.name ?? "") : "";
-      return `на «${name}» в приложении было меньше — остаток выровнен по банку`;
-    }),
-    ...bank.unmatched.map((key) => `остаток *${key} не сверен: укажите эти цифры у счёта (Настройки → Счета)`),
-  ];
-  return {
-    ...plan,
-    actions: [...actions, ...bank.actions],
-    ...(notes.length && plan.summary ? { summary: `${plan.summary}. ${notes.join("; ")[0].toUpperCase()}${notes.join("; ").slice(1)}.` } : {}),
-  };
+  const notes = [...capped.notes, ...replaced.notes, ...bank.unmatched.map((key) => `остаток *${key} не сверен: укажите эти цифры у счёта (Настройки → Счета)`)];
+  const text = notes.join("; ");
+  const summary = text && plan.summary ? `${plan.summary}. ${text[0].toUpperCase()}${text.slice(1)}.` : plan.summary;
+  // Снятие не записано и сверять нечего — сообщаем почему, ничего не добавляя.
+  if (plan.actions.length && !actions.length && !bank.actions.length) {
+    return { actions: [], summary, skip: { status: "ignored", message: summary } };
+  }
+  return { ...plan, actions: [...actions, ...bank.actions], summary };
 }
 
 function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
@@ -971,4 +1013,56 @@ function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; da
     ],
     summary: `${op.kind === "income" ? "Доход" : "Расход"} ${money} · ${title} → ${category}`,
   };
+}
+
+/** Дубль от прежней версии: корректировка накопительного перед снятием по СМС и само снятие. */
+export interface LegacySavingsFix {
+  /** id корректировки. */
+  id: string;
+  title: string;
+  text: string;
+  /** Привести пару к тому, что записывается теперь: снятие — на столько, сколько было в приложении. */
+  actions: Action[];
+}
+
+/**
+ * Прежняя версия (12 октября 2026) при снятии с накопительного, на котором в приложении меньше, добавляла
+ * корректировку «sms-….fix» — и деньги, которые банк откладывал сам, учитывались второй раз. Находим такие пары.
+ */
+export function legacySavingsFixes(state: State): LegacySavingsFix[] {
+  const result: LegacySavingsFix[] = [];
+  for (const fix of state.transactions) {
+    const base = /^(sms-[0-9a-f]+)\.fix\d*$/.exec(fix.id)?.[1];
+    if (!base || fix.type !== "adjustment" || fix.amount <= 0) continue;
+    const withdrawal = state.transactions.find((t) => t.id === base);
+    if (!withdrawal) continue;
+    const move =
+      withdrawal.type === "saving" && withdrawal.amount < 0
+        ? { from: withdrawal.toAccountId ?? SAVINGS_ACCOUNT_ID, to: withdrawal.accountId ?? MAIN_ACCOUNT_ID, amount: -withdrawal.amount }
+        : withdrawal.type === "transfer"
+          ? { from: withdrawal.accountId ?? MAIN_ACCOUNT_ID, to: withdrawal.toAccountId ?? MAIN_ACCOUNT_ID, amount: withdrawal.amount }
+          : null;
+    if (!move || (fix.accountId ?? MAIN_ACCOUNT_ID) !== move.from) continue;
+    const keep = Math.max(0, move.amount - fix.amount);
+    const source = findAccount(state, move.from);
+    const target = findAccount(state, move.to);
+    const actions: Action[] = [
+      keep > 0 ? { type: "tx.move", id: base, date: withdrawal.date, from: move.from, to: move.to, amount: keep } : { type: "tx.delete", id: base },
+      { type: "tx.delete", id: fix.id },
+    ];
+    // Расхождение с банком у счёта, куда пришли деньги, считалось с лишней суммой — пересчитываем.
+    if (target?.bank && target.bank.date >= withdrawal.date) {
+      actions.push({ type: "account.bank", accountId: target.id, amount: target.bank.amount, delta: target.bank.delta + (move.amount - keep), date: target.bank.date });
+    }
+    result.push({
+      id: fix.id,
+      title: `«${source?.name ?? ""}»: корректировка ${formatMoney(fix.amount)} повторяет снятие по СМС`,
+      text:
+        keep > 0
+          ? `Убрать корректировку — снятие останется на ${formatMoney(keep)}, сколько было в приложении. Остальное приложение и так считало на «${target?.name ?? ""}».`
+          : `Убрать корректировку и снятие: эти деньги приложение и так считало на «${target?.name ?? ""}».`,
+      actions,
+    });
+  }
+  return result;
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { accountBalance, findAccount } from "./accounts";
 import { applyActions } from "./actions";
 import { savingsTotal } from "./metrics";
-import { parseSberSms, planSmsImport, smsAccountKeys, smsBalances, smsDate } from "./sms";
+import { legacySavingsFixes, parseSberSms, planSmsImport, smsAccountKeys, smsBalances, smsDate } from "./sms";
 import type { Action } from "./actions";
 
 /** Действия операции без сверки остатка (account.bank) — её проверяют отдельно. */
@@ -221,11 +221,11 @@ describe("операции из СМС", () => {
     expect(s.transactions.find((t) => t.id === "sms-2")).toMatchObject({ type: "income", amount: 35_890 });
   });
 
-  it("снятие с накопительного больше, чем есть в приложении, — остаток выравнивается до суммы снятия", () => {
+  it("снятие с накопительного больше, чем есть в приложении, — денег не придумываем, снятие не записано", () => {
     const text = "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р";
-    const actions = plan(stateWith(), text).actions;
-    expect(actions[0]).toMatchObject({ type: "balance.set", accountId: "savings", actual: 950_132 });
-    expect(savingsTotal(applyActions(stateWith(), actions))).toBe(0);
+    const result = plan(stateWith(), text);
+    expect(result.actions).toEqual([]);
+    expect(result.skip?.message).toMatch(/снятие не записано/);
   });
 });
 
@@ -458,10 +458,12 @@ describe("счета в СМС", () => {
   });
 
   it("накопительный счёт по цифрам: снятие с него и пополнение его", () => {
-    const withdraw = plan(accounts(), "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р");
-    // На счёте в приложении пусто — сначала остаток выравнивается по банку, потом снятие.
-    expect(ops(withdraw.actions).map((a) => a.type)).toEqual(["balance.set", "savings.move"]);
-    expect(withdraw.actions[1]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });
+    const funded = applyActions(accounts(), [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 2_000_000 },
+      { type: "savings.move", id: "put", date: "2026-10-02", amount: 1_000_000, note: "", toAccountId: "dep" },
+    ]);
+    const withdraw = plan(funded, "Накопительный счет *3150 16:16 Перевод 9501.32р на СЧЁТ5804. Баланс счёта *3150: 0р");
+    expect(withdraw.actions[0]).toMatchObject({ type: "savings.move", amount: -950_132, toAccountId: "dep" });
     const deposit = plan(accounts(), "СЧЁТ5804 09:00 Перевод 1000р на Накопительный счет *3150");
     expect(deposit.actions[0]).toMatchObject({ type: "savings.move", amount: 100_000, toAccountId: "dep" });
   });
@@ -574,16 +576,40 @@ describe("снятие с накопительного и сверка оста�
       transactions: [tx({ id: "start", type: "adjustment", amount: 100_000, date: "2026-10-01", category: "" })],
     });
 
-  it("в приложении на накопительном меньше — остаток выравнивается по банку, перевод и сверка проходят", () => {
+  it("в приложении на накопительном пусто — снятие не записано (денег не придумываем), основной сверяется с банком", () => {
     const s = withAccounts(["5804"]);
     const plan = planSmsImport(s, parseSberSms(sms)!, ctx);
-    expect(plan.actions[0]).toMatchObject({ type: "balance.set", accountId: "dep", actual: 48_257 });
+    expect(plan.actions.some((a) => a.type === "savings.move" || a.type === "balance.set")).toBe(false);
     const next = applyActions(s, plan.actions);
     expect(accountBalance(next, "dep", "2026-10-12")).toBe(0);
-    expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000 + 48_257);
-    // В банке на основном 1 592,92 ₽, в приложении 1 482,57 ₽ — расхождение запомнено, приложение предложит поправить.
-    expect(findAccount(next, "main")?.bank).toMatchObject({ amount: 159_292, delta: 159_292 - 148_257 });
-    expect(plan.summary).toMatch(/остаток выровнен по банку/i);
+    expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000);
+    // В банке на основном 1 592,92 ₽, в приложении 1 000 ₽ — разница видна, приложение предложит поправить.
+    expect(findAccount(next, "main")?.bank).toMatchObject({ amount: 159_292, delta: 159_292 - 100_000 });
+    expect(plan.summary).toMatch(/снятие не записано/i);
+  });
+
+  it("на накопительном меньше суммы — снятие записывается на то, что есть", () => {
+    const s = applyActions(withAccounts(["5804"]), [
+      { type: "savings.move", id: "put", date: "2026-10-02", amount: 20_000, note: "", toAccountId: "dep" },
+    ]);
+    const plan = planSmsImport(s, parseSberSms(sms)!, ctx);
+    expect(plan.actions.find((a) => a.type === "savings.move")).toMatchObject({ amount: -20_000, toAccountId: "dep" });
+    expect(plan.summary).toMatch(/было только 200/);
+  });
+
+  it("расхождение уже поправили корректировкой, потом пришла сама операция — корректировка заменяется, без дубля", () => {
+    let s = applyActions(withAccounts(["5804"]), [
+      { type: "savings.move", id: "put", date: "2026-10-02", amount: 50_000, note: "", toAccountId: "dep" },
+    ]);
+    // «Поправить» на Главной: основной +482,57 ₽ (СМС о переводе ещё не было).
+    s = applyActions(s, [{ type: "balance.set", id: "fix", date: "2026-10-12", actual: accountBalance(s, "main", "2026-10-12") + 48_257 }]);
+    const before = accountBalance(s, "main", "2026-10-12");
+    const plan = planSmsImport(s, parseSberSms(sms)!, ctx);
+    expect(plan.actions[0]).toEqual({ type: "tx.delete", id: "fix" });
+    const next = applyActions(s, plan.actions);
+    expect(accountBalance(next, "main", "2026-10-12")).toBe(before);
+    expect(next.transactions.some((t) => t.id === "fix")).toBe(false);
+    expect(plan.summary).toMatch(/заменила корректировку/i);
   });
 
   it("у основного цифры не указаны — неизвестный СЧЁТ5804 сверяется с ним, как и операции по нему", () => {
@@ -609,5 +635,45 @@ describe("сверка: накопительный без цифр в прило
     // Основной сверяется по *5804 (у него цифр нет), накопительный *3150 — нет.
     expect(checks).toEqual([expect.objectContaining({ accountId: "main", amount: 159_292 })]);
     expect(plan.summary).toMatch(/остаток \*3150 не сверен/i);
+  });
+});
+
+describe("дубль прежней версии: корректировка накопительного перед снятием", () => {
+  const setup = (onDep: number) => {
+    let s = stateWith({
+      accounts: [
+        { id: "main", name: "Сбербанк", kind: "debit", spending: true, smsKeys: ["5804"] },
+        { id: "savings", name: "Сбережения", kind: "savings", spending: false, smsKeys: [] },
+        { id: "dep", name: "Горы", kind: "savings", spending: false, smsKeys: ["3150"] },
+      ],
+      transactions: [tx({ id: "start", type: "adjustment", amount: 100_000, date: "2026-10-01", category: "" })],
+    });
+    if (onDep) s = applyActions(s, [{ type: "savings.move", id: "put", date: "2026-10-02", amount: onDep, note: "", toAccountId: "dep" }]);
+    // Как записывала прежняя версия: выровнять «Горы» до суммы снятия, потом снять.
+    return applyActions(s, [
+      { type: "balance.set", id: "sms-abc.fix", date: "2026-10-12", actual: 48_257, accountId: "dep" },
+      { type: "savings.move", id: "sms-abc", date: "2026-10-12", amount: -48_257, note: "", accountId: "main", toAccountId: "dep" },
+    ]);
+  };
+
+  it("на «Горы» было пусто — убираются и корректировка, и снятие", () => {
+    const s = setup(0);
+    const [fix] = legacySavingsFixes(s);
+    expect(fix.actions.slice(0, 2)).toEqual([
+      { type: "tx.delete", id: "sms-abc" },
+      { type: "tx.delete", id: "sms-abc.fix" },
+    ]);
+    const next = applyActions(s, fix.actions);
+    expect(accountBalance(next, "dep", "2026-10-12")).toBe(0);
+    expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000 - 0);
+    expect(legacySavingsFixes(next)).toEqual([]);
+  });
+
+  it("на «Горы» было 200 ₽ — снятие остаётся на 200 ₽", () => {
+    const s = setup(20_000);
+    const next = applyActions(s, legacySavingsFixes(s)[0].actions);
+    expect(next.transactions.find((t) => t.id === "sms-abc")).toMatchObject({ type: "saving", amount: -20_000 });
+    expect(accountBalance(next, "dep", "2026-10-12")).toBe(0);
+    expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000);
   });
 });

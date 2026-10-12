@@ -12,6 +12,7 @@ import {
 import { formatMoney } from "@/domain/money";
 import type { Account, State, Transaction } from "@/domain/schema";
 import { autoSavingAmount } from "@/domain/savings";
+import { legacySavingsFixes } from "@/domain/sms";
 import { plural } from "@/domain/text";
 import { accountBalances, accountCards, activeAccounts, cardLabel } from "@/domain/accounts";
 import type { Snapshot } from "@/client/store";
@@ -308,6 +309,18 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
         { label: "Отложить", primary: true, command: { type: "rollover", month: rollover.month, amount: rollover.amount, decision: "saved" } },
         { label: "Оставить", primary: false, command: { type: "rollover", month: rollover.month, amount: rollover.amount, decision: "dismissed" } },
       ],
+    });
+  }
+  // Дубль от прежней версии: корректировка накопительного повторяет снятие по СМС.
+  for (const fix of legacySavingsFixes(state)) {
+    rows.push({
+      id: `fix:${fix.id}`,
+      symbol: "exclamationmark.triangle",
+      tone: "warning",
+      title: fix.title,
+      text: fix.text,
+      command: null,
+      actions: [{ label: "Убрать дубль", primary: true, command: { type: "repairSmsFix", id: fix.id } }],
     });
   }
   for (const m of bankMismatches(state, today)) {

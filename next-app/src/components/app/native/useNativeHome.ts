@@ -14,6 +14,7 @@ import { useUi } from "../overlays";
 import { quickPicks } from "../quickPicks";
 import { bankResolveActions, transferAction, transferMessage } from "../accounts";
 import { smsTextImport } from "../smsText";
+import { legacySavingsFixes } from "@/domain/sms";
 import { BALANCE_CONFIRMED_KEY } from "../sheets/MoneySheets";
 import { commandSchema, type CommandResult, type NativeCommand } from "./commands";
 import { SKIP_MANDATORY_KEY, buildHomeModel, quickKey } from "./homeModel";
@@ -208,6 +209,12 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           const result = store.dispatch(imported.actions);
           if (!result.ok) return result;
           return { ok: true, message: imported.message, ...(imported.txId ? { txId: imported.txId } : {}) };
+        }
+        case "repairSmsFix": {
+          const fix = legacySavingsFixes(state).find((f) => f.id === command.id);
+          if (!fix) return { ok: true };
+          const result = store.dispatch(fix.actions);
+          return result.ok ? { ok: true, message: "Дубль убран" } : result;
         }
         case "undo": {
           const result = store.dispatch({ type: "tx.delete", id: command.txId });

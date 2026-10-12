@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { autoSavingByDefault } from "@/domain/savings";
+import { legacySavingsFixes } from "@/domain/sms";
 import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf } from "@/domain/dates";
 import {
   balanceAt,
@@ -175,6 +176,23 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
               Оставить
             </Button>
           </>
+        }
+      />,
+    );
+  }
+  // Дубль от прежней версии: корректировка накопительного повторяет снятие по СМС.
+  for (const fix of legacySavingsFixes(state)) {
+    rows.push(
+      <AttentionRow
+        key={`fix:${fix.id}`}
+        icon="alert"
+        tone="warning"
+        title={fix.title}
+        text={fix.text}
+        actions={
+          <Button size="sm" onClick={() => dispatch(fix.actions) && toast("Дубль убран")}>
+            Убрать дубль
+          </Button>
         }
       />,
     );

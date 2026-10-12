@@ -19,6 +19,8 @@ export type NativeCommand =
   | { type: "transfer"; draft: TransferDraft }
   /** Операция из вставленного текста СМС (окно «+» → «Из СМС»). */
   | { type: "sms"; text: string }
+  /** Убрать дубль прежней версии: корректировку накопительного перед снятием по СМС. */
+  | { type: "repairSmsFix"; id: string }
   | { type: "undo"; txId: string }
   | { type: "refresh" }
   | { type: "toastAction"; id: number }
@@ -122,6 +124,7 @@ export const commandSchema: z.ZodType<NativeCommand> = z.discriminatedUnion("typ
     }),
   }),
   z.object({ type: z.literal("sms"), text: z.string().trim().min(1).max(2000) }),
+  z.object({ type: z.literal("repairSmsFix"), id: z.string().min(1).max(120) }),
   z.object({ type: z.literal("undo"), txId: z.string().min(1).max(100) }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("toastAction"), id: z.number().int() }),
