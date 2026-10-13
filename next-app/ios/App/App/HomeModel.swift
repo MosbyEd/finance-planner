@@ -163,6 +163,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var daysLeft: String?
         /// «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты.
         var next: String?
+        /// Почему остаток — по деньгам на счетах («Зарплаты 10 октября в приложении нет…»).
+        var note: String?
     }
 
     struct Upcoming: Codable, Equatable, Sendable, Identifiable {

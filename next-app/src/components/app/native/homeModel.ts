@@ -5,6 +5,7 @@ import {
   monthMetrics,
   payEventName,
   pendingRollover,
+  periodLeftView,
   safeToSpend,
   savingsTotal,
   upcomingEvents,
@@ -95,6 +96,8 @@ export interface MonthModel {
   daysLeft: string | null;
   /** «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты. */
   next?: string | null;
+  /** Почему остаток — по деньгам на счетах («Зарплаты 10 октября в приложении нет…»). */
+  note?: string | null;
 }
 
 export interface UpcomingModel {
@@ -233,6 +236,8 @@ function statusBadge(sts: SafeToSpend): { text: string; tone: Tone } {
   const base = STATUS[sts.status];
   if (sts.status === "over" && sts.leftToday >= 0) return { ...base, text: "Бюджет месяца исчерпан" };
   if (sts.status === "tight" && sts.horizon.reason === "month-end") return { ...base, text: "До конца месяца впритык" };
+  // Выплаты, с которой начался период, в приложении нет — плана нет, лимит по деньгам на счетах.
+  if (sts.status === "ok" && sts.period.current.basis === "cash") return { ...base, text: "По деньгам на счетах" };
   return base;
 }
 
@@ -468,14 +473,14 @@ const MASK = "•••• ₽";
 function periodModel(period: BudgetPeriod, month: MonthKey): MonthModel {
   const { current, next, after } = period;
   const f = current.flexible;
-  const used = f.spent + f.reserved + f.extraSavings;
-  const ratio = f.budget > 0 ? used / f.budget : 1;
+  const view = periodLeftView(period);
+  const ratio = f.budget > 0 ? view.used / f.budget : 1;
   const days = (n: number) => `${n} ${plural(n, ["день", "дня", "дней"])}`;
   return {
     title: next ? `До ${payEventName(next)} ${formatDay(next.date)}` : formatMonth(month),
-    label: f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете",
-    amount: formatMoney(Math.abs(f.left), { whole: true }),
-    negative: f.left < 0,
+    label: view.label,
+    amount: formatMoney(Math.abs(view.left), { whole: true }),
+    negative: view.left < 0,
     of: `из ${formatMoney(Math.max(0, f.budget), { whole: true })}`,
     progress: Math.max(0, ratio),
     tone: ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent",
@@ -484,6 +489,7 @@ function periodModel(period: BudgetPeriod, month: MonthKey): MonthModel {
       after && next
         ? `После ${payEventName(next)}: ≈ ${formatMoney(Math.max(0, after.perDay), { whole: true })} в день на ${days(after.days)}`
         : null,
+    note: view.note,
   };
 }
 

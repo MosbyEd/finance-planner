@@ -682,6 +682,12 @@ private struct MonthCard: View {
                 if let daysLeft = month.daysLeft {
                     Text(daysLeft).font(.caption).foregroundStyle(Theme.muted)
                 }
+                if let note = month.note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             // Сколько будет в день после следующей зарплаты или аванса.
             if let next = month.next {

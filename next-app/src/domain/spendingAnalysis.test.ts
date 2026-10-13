@@ -156,8 +156,9 @@ describe("агрегаты для разбора", () => {
     expect([d.from, d.to, d.days]).toEqual(["2026-10-10", "2026-11-09", 31]);
     expect(d.previous).toMatchObject({ start: "2026-10-10", end: "2026-10-24", days: 15, flexible: 1_025_000 });
     expect(d.last).toMatchObject({ start: "2026-10-25", end: "2026-11-09", days: 16, flexible: 2_625_000, mandatory: 3_000_000 });
-    // Октябрьскую зарплату приложение не видело — бюджет периода всё равно от неё, как на Главной.
-    expect(d.previous.budget).toBeGreaterThan(0);
+    // Октябрьской зарплаты в приложении нет — сколько было на период, неизвестно: бюджет не придумываем.
+    expect(d.previous.budget).toBeNull();
+    expect(d.last.budget).toBeGreaterThan(0);
   });
 
   it("категории, мелкие траты, магазины", () => {

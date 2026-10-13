@@ -608,20 +608,50 @@ export interface PeriodBudget {
   flexible: { budget: Kopecks; spent: Kopecks; spentToday: Kopecks; reserved: Kopecks; extraSavings: Kopecks; left: Kopecks };
   /** Сколько можно тратить в день: (бюджет − потрачено до сегодня − запланировано − отложено сверх нормы) / дней. */
   perDay: Kopecks;
+  /**
+   * plan — по плану доходов и платежей; cash — по деньгам на счетах для трат (выплаты, с которой начался период,
+   * в приложении нет): остаток — cash.left, бюджет — остаток плюс уже потраченное и отложенное.
+   */
+  basis: "plan" | "cash";
+  /** Деньги на счетах для трат на остаток отрезка — у отрезка, в который входит сегодня. */
+  cash: PeriodCash | null;
 }
 
-/**
- * assumedIncome — выплата, с которой начался период, если в приложении её нет (регулярный доход завели позже):
- * бюджет периода всё равно строится от неё, по плановой сумме.
- */
-export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: IsoDate, assumedIncome = 0): PeriodBudget {
+/** Деньги на счетах для трат на остаток отрезка: сколько сейчас и что по плану придёт и уйдёт до его конца. */
+export interface PeriodCash {
+  /** На счетах для трат на конец сегодняшнего дня. */
+  now: Kopecks;
+  /** Поступления на счета для трат — после сегодня и до конца отрезка. */
+  incoming: Kopecks;
+  /** Платежи, переводы и запланированные траты со счетов для трат — после сегодня и до конца отрезка. */
+  outgoing: Kopecks;
+  /** now + incoming − outgoing. */
+  left: Kopecks;
+}
+
+function periodCash(state: State, today: IsoDate, end: IsoDate): PeriodCash {
+  let incoming = 0;
+  let outgoing = 0;
+  for (const e of upcomingEvents(state, today, end)) {
+    if (e.effect > 0) incoming += e.effect;
+    else outgoing -= e.effect;
+  }
+  const now = balanceAt(state, today);
+  return { now, incoming, outgoing, left: now + incoming - outgoing };
+}
+
+/** byCash — бюджет текущего отрезка по деньгам на счетах (см. PeriodBudget.basis). */
+export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: IsoDate, byCash = false): PeriodBudget {
   const cutoff = today < start ? addDays(start, -1) : today > end ? end : today;
   const w = windowTotals(state, start, end, cutoff, today);
-  const incomePlan = w.incomeFact + w.incomeFuture + assumedIncome;
+  const incomePlan = w.incomeFact + w.incomeFuture;
   const mandatoryPlan = w.mandatoryFact + w.mandatoryFuture;
   const target = percentOf(incomePlan, savingsRateFor(state.settings, monthKeyOf(start)));
-  const budget = incomePlan - mandatoryPlan - target;
   const extraSavings = Math.max(0, w.savingsFact + w.savingsPlanned - target);
+  const used = w.flexibleSpent + w.flexibleReserved + extraSavings;
+  const cash = today >= start && today <= end ? periodCash(state, today, end) : null;
+  const basis = byCash && cash ? "cash" : "plan";
+  const budget = basis === "cash" && cash ? cash.left + used : incomePlan - mandatoryPlan - target;
   const days = diffDays(start, end) + 1;
   const daysLeft = today < start ? days : today > end ? 0 : diffDays(today, end) + 1;
   const spentBeforeToday = w.flexibleSpent - w.flexibleToday;
@@ -639,9 +669,11 @@ export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: 
       spentToday: w.flexibleToday,
       reserved: w.flexibleReserved,
       extraSavings,
-      left: budget - w.flexibleSpent - w.flexibleReserved - extraSavings,
+      left: budget - used,
     },
     perDay: daysLeft > 0 ? floorToRubles((budget - spentBeforeToday - w.flexibleReserved - extraSavings) / daysLeft) : 0,
+    basis,
+    cash,
   };
 }
 
@@ -653,6 +685,11 @@ export interface BudgetPeriod {
   next: PayEvent | null;
   /** Следующий период — с этого поступления до следующего: сколько будет в день после него. */
   after: PeriodBudget | null;
+  /**
+   * Выплата, с которой начался период, — по расписанию, в приложении её нет (учёт начали позже или она не пришла).
+   * Сколько от неё осталось, приложение не знает: текущий период — по деньгам на счетах, а не по плановой сумме.
+   */
+  missedPay: PayEvent | null;
 }
 
 /** Текущий период бюджета: от последней зарплаты или аванса до дня перед следующим (или календарный месяц). */
@@ -663,6 +700,7 @@ export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
     current: periodBudget(state, firstDayOfMonth(month), lastDayOfMonth(month), today),
     next: null,
     after: null,
+    missedPay: null,
   };
   if (state.settings.budgetPeriod === "month") return asMonth;
   // Одно поступление в день — граница.
@@ -673,9 +711,10 @@ export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
   const following = events.find((e) => e.date > next.date);
   return {
     kind: "pay",
-    current: periodBudget(state, start.date, addDays(next.date, -1), today, start.received ? 0 : start.amount),
+    current: periodBudget(state, start.date, addDays(next.date, -1), today, !start.received),
     next,
     after: following ? periodBudget(state, next.date, addDays(following.date, -1), today) : null,
+    missedPay: start.received ? null : start,
   };
 }
 
@@ -710,6 +749,46 @@ export function payEventName(event: Pick<PayEvent, "category" | "title">): strin
   if (event.category === "Аванс" || /аванс/i.test(event.title)) return "аванса";
   if (event.category === "Зарплата" || /зарплат|оклад|заработн/i.test(event.title)) return "зарплаты";
   return `«${event.title}»`;
+}
+
+/** Остаток в карточке периода — что показать и как подписать. */
+export interface PeriodLeftView {
+  left: Kopecks;
+  /** Сколько из бюджета уже недоступно: бюджет − остаток (для полоски). */
+  used: Kopecks;
+  label: string;
+  /** Почему остаток — по деньгам на счетах. */
+  note: string | null;
+}
+
+/** Остаток гибкого бюджета, но не больше денег на счетах для трат до конца периода. */
+export function periodLeftView(period: BudgetPeriod): PeriodLeftView {
+  const { current, missedPay } = period;
+  const f = current.flexible;
+  const planLeft = f.left;
+  // По деньгам — и когда бюджет по ним посчитан (тогда f.left = cash.left), и когда денег меньше, чем по плану.
+  const byCash = current.basis === "cash" || (current.cash !== null && current.cash.left < planLeft);
+  const left = byCash && current.cash ? current.cash.left : planLeft;
+  let note: string | null = null;
+  if (missedPay) {
+    const name = payEventName(missedPay);
+    note = `${name[0].toUpperCase()}${name.slice(1)} ${formatDay(missedPay.date)} в приложении нет — считаем по деньгам на счетах.`;
+  } else if (byCash) {
+    const plan = formatMoney(Math.abs(planLeft), { whole: true });
+    note = `${planLeft < 0 ? `По плану перерасход ${plan}` : `По плану осталось бы ${plan}`}, но на счетах для трат меньше.`;
+  }
+  return {
+    left,
+    used: f.budget - left,
+    label: byCash
+      ? left < 0
+        ? "Не хватает на счетах для трат"
+        : "Осталось на счетах для трат"
+      : left < 0
+        ? "Перерасход гибкого бюджета"
+        : "Осталось в гибком бюджете",
+    note,
+  };
 }
 
 /**
@@ -750,7 +829,8 @@ export function safeToSpend(state: State, today: IsoDate): SafeToSpend {
   const cashAvailable = cashNow - plannedOut;
   const cashPerDay = floorToRubles(cashAvailable / daysUntil);
   const budgetPerDay = period.current.perDay;
-  const usesBudget = period.current.income.plan > 0;
+  // По деньгам на счетах (выплаты, с которой начался период, в приложении нет) — бюджет есть, даже без доходов.
+  const usesBudget = period.current.income.plan > 0 || period.current.basis === "cash";
 
   const recommended = Math.max(0, usesBudget ? Math.min(budgetPerDay, cashPerDay) : cashPerDay);
   const leftToday = recommended - spentToday;

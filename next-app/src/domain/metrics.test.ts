@@ -120,7 +120,9 @@ describe("сколько можно потратить сегодня", () => {
       template({ kind: "income", amount: 10_000_000, dayOfMonth: 25, startDate: "2026-03-01" }),
       template({ kind: "expense", amount: 3_000_000, dayOfMonth: 20, startDate: "2026-03-01" }),
     ];
-    // На счёте 40 000, до зарплаты 25-го — 10 дней, до неё аренда 30 000.
+    // На счёте 40 000, до зарплаты 25-го — 10 дней, до неё аренда 30 000. Бюджет — по плану месяца
+    // (от зарплаты до зарплаты прошлой выплаты 25 февраля в приложении нет — там бюджет по деньгам, см. payPeriod.test).
+    s.settings.budgetPeriod = "month";
     s.transactions.push(tx({ type: "adjustment", amount: 4_000_000, date: "2026-03-01" }));
     const r = safeToSpend(s, "2026-03-15");
     expect(r.horizon).toMatchObject({ date: "2026-03-25", reason: "income" });

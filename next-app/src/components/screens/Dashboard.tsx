@@ -8,6 +8,7 @@ import {
   balanceAt,
   monthMetrics,
   payEventName,
+  periodLeftView,
   pendingRollover,
   safeToSpend,
   savingsTotal,
@@ -59,6 +60,8 @@ function statusBadge(sts: SafeToSpend): { text: string; icon: IconName; tone: st
   const base = STATUS_TEXT[sts.status];
   if (sts.status === "over" && sts.leftToday >= 0) return { ...base, text: "Бюджет месяца исчерпан" };
   if (sts.status === "tight" && sts.horizon.reason === "month-end") return { ...base, text: "До конца месяца впритык" };
+  // Выплаты, с которой начался период, в приложении нет — плана нет, лимит по деньгам на счетах.
+  if (sts.status === "ok" && sts.period.current.basis === "cash") return { ...base, text: "По деньгам на счетах" };
   return base;
 }
 
@@ -622,8 +625,9 @@ function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey })
   const { setTab } = useUi();
   const { current, next, after } = period;
   const f = current.flexible;
-  const used = f.spent + f.reserved + f.extraSavings;
-  const ratio = f.budget > 0 ? used / f.budget : 1;
+  // Остаток — не больше денег на счетах для трат до конца периода.
+  const view = periodLeftView(period);
+  const ratio = f.budget > 0 ? view.used / f.budget : 1;
   const days = `${current.daysLeft} ${plural(current.daysLeft, ["день", "дня", "дней"])}`;
   return (
     <Card
@@ -636,14 +640,14 @@ function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey })
     >
       <div className="flex items-end justify-between gap-3">
         <div>
-          <p className="text-sm text-muted">{f.left < 0 ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете"}</p>
-          <Money value={Math.abs(f.left)} whole tone={f.left < 0 ? "negative" : "default"} className="text-2xl font-semibold" />
+          <p className="text-sm text-muted">{view.label}</p>
+          <Money value={Math.abs(view.left)} whole tone={view.left < 0 ? "negative" : "default"} className="text-2xl font-semibold" />
         </div>
         <p className="text-right text-sm text-muted">из {formatMoney(Math.max(0, f.budget), { whole: true })}</p>
       </div>
       <div className="mt-3">
         <Progress
-          value={used}
+          value={view.used}
           max={Math.max(f.budget, 1)}
           tone={ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent"}
           label="Использовано гибкого бюджета"
@@ -651,6 +655,7 @@ function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey })
         {current.daysLeft > 0 && (
           <p className="mt-1.5 text-xs text-muted">{next ? `До ${payEventName(next)} ${days}` : `До конца месяца ${days}`}</p>
         )}
+        {view.note && <p className="mt-1 text-xs text-muted">{view.note}</p>}
       </div>
       {after && next && (
         <p className="mt-3 rounded-2xl bg-surface-2 px-3 py-2 text-sm">

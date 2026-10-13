@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { budgetPeriod, payPeriodStatus, safeToSpend } from "./metrics";
+import { budgetPeriod, payPeriodStatus, periodLeftView, safeToSpend } from "./metrics";
 import type { State } from "./schema";
-import { run, stateWith, template } from "./test-utils";
+import { run, stateWith, template, tx } from "./test-utils";
 
 /** Зарплата 10-го, аванс 25-го, аренда 1-го, связь 20-го; норма сбережений 10%. */
 function withPay(): State {
@@ -27,6 +27,20 @@ describe("бюджет от зарплаты до зарплаты", () => {
     expect(p.current.flexible.budget).toBe(8_900_000);
     expect(p.current.perDay).toBe(684_600);
     expect(p.next).toMatchObject({ date: "2026-10-25", category: "Аванс" });
+    // Денег на счетах больше, чем осталось по плану, — карточка по плану.
+    expect(p.current.basis).toBe("plan");
+    expect(periodLeftView(p)).toMatchObject({ left: 8_900_000, label: "Осталось в гибком бюджете", note: null });
+  });
+
+  it("на счетах для трат меньше, чем осталось по плану, — карточка показывает деньги и пишет, сколько по плану", () => {
+    // Сверили остаток 12 октября: на счёте 20 000 ₽, до аванса ещё связь 1 000 ₽.
+    const s = run(withPay(), { type: "balance.set", id: "fix", date: "2026-10-12", actual: 2_000_000 });
+    const p = budgetPeriod(s, "2026-10-12");
+    expect(p.current.flexible.left).toBe(8_900_000);
+    expect(p.current.cash).toMatchObject({ now: 2_000_000, outgoing: 100_000, left: 1_900_000 });
+    const view = periodLeftView(p);
+    expect(view).toMatchObject({ left: 1_900_000, used: 7_000_000, label: "Осталось на счетах для трат" });
+    expect(view.note).toMatch(/^По плану осталось бы 89\s000\s₽, но на счетах для трат меньше\.$/);
   });
 
   it("после аванса — по плану: аванс 50 000 − аренда 1 ноября 30 000 − норма 5 000, на 16 дней", () => {
@@ -67,7 +81,7 @@ describe("зарплата и аванс по названию", () => {
 });
 
 describe("прошлую выплату приложение не видело", () => {
-  it("регулярные доходы завели после зарплаты — период всё равно с неё, по плановой сумме", () => {
+  it("регулярные доходы завели после зарплаты — период с неё, но по деньгам на счетах, а не по плановой сумме", () => {
     let s = stateWith();
     s.settings.savingsRatePercent = 10;
     s.settings.salarySaving.enabled = false;
@@ -80,8 +94,49 @@ describe("прошлую выплату приложение не видело",
     s = run(s, { type: "balance.set", id: "start", date: "2026-10-01", actual: 2_000_000 }, { type: "recurring.sync", today: "2026-10-12" });
     const p = budgetPeriod(s, "2026-10-12");
     expect(p.kind).toBe("pay");
-    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24" });
-    expect(p.current.income.plan).toBe(10_000_000);
+    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24", basis: "cash" });
+    expect(p.missedPay).toMatchObject({ date: "2026-10-10", received: false });
+    // Сколько от зарплаты осталось, неизвестно: 100 000 ₽ не придумываем — на счёте 20 000 ₽, платежей до аванса нет.
+    expect(p.current.income.plan).toBe(0);
+    expect(p.current.flexible).toMatchObject({ budget: 2_000_000, left: 2_000_000 });
+    expect(p.current.perDay).toBe(153_800);
+    expect(periodLeftView(p)).toEqual({
+      left: 2_000_000,
+      used: 0,
+      label: "Осталось на счетах для трат",
+      note: "Зарплаты 10 октября в приложении нет — считаем по деньгам на счетах.",
+    });
+    // Лимит на день — по тем же деньгам; плана нет, но и «нет доходов» — неправда: бюджет есть.
+    const sts = safeToSpend(s, "2026-10-12");
+    expect(sts).toMatchObject({ usesBudget: true, budgetPerDay: 153_800, recommended: 153_800, status: "ok" });
+  });
+
+  it("потраченное в периоде — в бюджете, а остаток — сколько на счетах после трат и платежей до аванса", () => {
+    let s = stateWith();
+    s.settings.savingsRatePercent = 10;
+    s.settings.salarySaving.enabled = false;
+    s.settings.purchaseSaving.enabled = false;
+    s.templates = [
+      template({ id: "salary", kind: "income", amount: 10_000_000, dayOfMonth: 10, startDate: "2026-11-10" }),
+      template({ id: "advance", kind: "income", title: "Аванс", category: "Аванс", amount: 5_000_000, dayOfMonth: 25, startDate: "2026-10-25" }),
+      template({ id: "phone", kind: "expense", title: "Связь", category: "Связь и интернет", amount: 100_000, dayOfMonth: 20, startDate: "2026-10-01" }),
+    ];
+    s = run(
+      s,
+      { type: "balance.set", id: "start", date: "2026-10-10", actual: 500_000 },
+      { type: "recurring.sync", today: "2026-10-13" },
+    );
+    s.transactions.push(
+      tx({ type: "expense", amount: 30_000, date: "2026-10-11", category: "Кафе и рестораны" }),
+      tx({ type: "expense", amount: 5_000, date: "2026-10-13", category: "Транспорт" }),
+    );
+    const p = budgetPeriod(s, "2026-10-13");
+    // На счёте 5 000 − 300 − 50 = 4 650 ₽, до аванса — связь 1 000 ₽: остаётся 3 650 ₽ на 12 дней.
+    expect(p.current.cash).toMatchObject({ now: 465_000, outgoing: 100_000, left: 365_000 });
+    expect(p.current.flexible).toMatchObject({ spent: 35_000, budget: 400_000, left: 365_000 });
+    // В лимит дня входят и сегодняшние траты: (3 650 + 50) / 12.
+    expect(p.current.perDay).toBe(30_800);
+    expect(periodLeftView(p).used).toBe(35_000);
   });
 });
 
@@ -108,8 +163,8 @@ describe("что с периодом — для настроек", () => {
     s = run(s, { type: "balance.set", id: "start", date: "2026-10-01", actual: 2_000_000 }, { type: "recurring.sync", today: "2026-10-13" });
     const p = budgetPeriod(s, "2026-10-13");
     expect(p.kind).toBe("pay");
-    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24" });
-    expect(p.current.income.plan).toBe(10_000_000);
+    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24", basis: "cash" });
+    expect(p.missedPay).toMatchObject({ date: "2026-10-10" });
     expect(p.next).toMatchObject({ date: "2026-10-25", category: "Аванс" });
     expect(p.after).toMatchObject({ start: "2026-10-25", end: "2026-11-09" });
     expect(p.after?.income.plan).toBe(5_000_000);

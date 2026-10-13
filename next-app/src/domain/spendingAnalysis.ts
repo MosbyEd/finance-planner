@@ -263,9 +263,9 @@ function periodStat(state: State, p: SpendingPeriod, today: IsoDate): PeriodStat
     if (tx.mandatory) mandatory += tx.amount;
     else flexible += tx.amount;
   }
-  // Выплату, с которой начался период, приложение могло не видеть — бюджет всё равно от неё (как на Главной).
-  const b = periodBudget(state, p.start, p.end, today, p.opening && !p.opening.received ? p.opening.amount : 0);
-  const budget = b.flexible.budget > 0 ? b.flexible.budget : null;
+  // Выплаты, с которой начался период, в приложении нет — сколько было на период, неизвестно: бюджет не придумываем.
+  const b = periodBudget(state, p.start, p.end, today);
+  const budget = b.flexible.budget > 0 && !(p.opening && !p.opening.received) ? b.flexible.budget : null;
   return {
     start: p.start,
     end: p.end,

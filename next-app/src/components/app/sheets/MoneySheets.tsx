@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { formatDay, formatMonthIn, type MonthKey } from "@/domain/dates";
 import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "@/domain/accounts";
-import { balanceAt, goalsReservedOn, payEventName, safeToSpend, savingsTotal } from "@/domain/metrics";
+import { balanceAt, goalsReservedOn, payEventName, periodLeftView, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
 import { plural } from "@/domain/text";
@@ -261,7 +261,9 @@ export function ExplainSheet() {
   const today = useToday();
   const sts = safeToSpend(state, today);
   // Бюджет — за период от зарплаты до зарплаты (или за месяц); показываем его же, а не календарный месяц.
-  const { kind, current: m, next, after } = sts.period;
+  const { kind, current: m, next, after, missedPay } = sts.period;
+  const cash = m.basis === "cash" ? m.cash : null;
+  const leftView = periodLeftView(sts.period);
   const until = next ? `до ${payEventName(next)} ${formatDay(next.date)}` : "до конца месяца";
   // Без доходов в плане периода лимит считается только по деньгам на счёте (как в safeToSpend).
   const hasIncome = sts.usesBudget;
@@ -313,26 +315,38 @@ export function ExplainSheet() {
 
         <section className={`rounded-2xl p-4 ${budgetBinding ? "bg-accent-soft" : "bg-surface-2"}`}>
           <h3 className="font-semibold">
-            По бюджету {kind === "pay" ? until : "месяца"}: {formatMoney(sts.budgetPerDay)} в день
+            {cash ? "По деньгам на период" : "По бюджету"} {kind === "pay" ? until : "месяца"}: {formatMoney(sts.budgetPerDay)} в день
           </h3>
           {kind === "pay" && (
             <p className="mt-1 text-sm text-muted">
               Период — с {formatDay(m.start)} {until}: от зарплаты до зарплаты.
+              {missedPay && leftView.note && ` ${leftView.note}`}
             </p>
           )}
-          <dl className="mt-2 space-y-1 text-sm">
-            <Row label={kind === "pay" ? "Доходы периода (с плановыми)" : "Доходы за месяц (с плановыми)"} value={m.income.plan} />
-            <Row label="− Обязательные расходы" value={m.mandatory.plan} />
-            <Row label={`− Норма сбережений (${state.settings.savingsRatePercent}%)`} value={m.savings.target} />
-            <Row label="= Гибкий бюджет" value={m.flexible.budget} strong />
-            <Row label="− Уже потрачено до сегодня" value={m.flexible.spent - m.flexible.spentToday} />
-            {m.flexible.reserved > 0 && <Row label="− Запланированные траты" value={m.flexible.reserved} />}
-            {m.flexible.extraSavings > 0 && <Row label="− Отложено сверх нормы" value={m.flexible.extraSavings} />}
-          </dl>
+          {cash ? (
+            <dl className="mt-2 space-y-1 text-sm">
+              <Row label="Сейчас на счетах для трат" value={cash.now} />
+              {cash.incoming > 0 && <Row label={`+ Поступления ${until}`} value={cash.incoming} />}
+              <Row label={`− Платежи и запланированное ${until}`} value={cash.outgoing} />
+              <Row label="= Осталось на период" value={m.flexible.left} strong />
+              {m.flexible.spentToday > 0 && <Row label="+ Потрачено сегодня (входит в лимит дня)" value={m.flexible.spentToday} />}
+            </dl>
+          ) : (
+            <dl className="mt-2 space-y-1 text-sm">
+              <Row label={kind === "pay" ? "Доходы периода (с плановыми)" : "Доходы за месяц (с плановыми)"} value={m.income.plan} />
+              <Row label="− Обязательные расходы" value={m.mandatory.plan} />
+              <Row label={`− Норма сбережений (${state.settings.savingsRatePercent}%)`} value={m.savings.target} />
+              <Row label="= Гибкий бюджет" value={m.flexible.budget} strong />
+              <Row label="− Уже потрачено до сегодня" value={m.flexible.spent - m.flexible.spentToday} />
+              {m.flexible.reserved > 0 && <Row label="− Запланированные траты" value={m.flexible.reserved} />}
+              {m.flexible.extraSavings > 0 && <Row label="− Отложено сверх нормы" value={m.flexible.extraSavings} />}
+            </dl>
+          )}
           <p className="pt-1 text-sm text-muted">
             Делим на {days(m.daysLeft)} {until}, включая сегодня.
             {!hasIncome && " Без доходов в плане этот расчёт не учитывается."}
-            {m.flexible.extraSavings > 0 &&
+            {!cash &&
+              m.flexible.extraSavings > 0 &&
               " «Отложено» — пополнения целей и автоотчисления с доходов и покупок; переводы на накопительные счета без цели сюда не входят."}
           </p>
           {after && next && (
