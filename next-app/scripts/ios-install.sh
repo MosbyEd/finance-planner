@@ -8,7 +8,8 @@ cd "$(dirname "$0")/.."
 
 DEVICE=${IOS_DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /available|connected/ && !/unavailable/ {print $3; exit}')}
 : "${DEVICE:?не найден iPhone — подключите телефон или задайте IOS_DEVICE}"
-DERIVED=${IOS_DERIVED:-${TMPDIR:-/tmp}/budget-ios-build}
+# Не во временной папке: macOS её чистит, и скачанные пакеты Capacitor ломаются («no Info.plist found»).
+DERIVED=${IOS_DERIVED:-$HOME/Library/Caches/budget-ios-build}
 NOTICE=$(sed -n 's/^ *summary: "\(.*\)",$/\1/p' src/components/app/whatsNew/releases.ts | head -1)
 
 echo "→ Интерфейс"
