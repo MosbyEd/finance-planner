@@ -135,6 +135,8 @@ actor SmsQueue {
     private struct Item: Codable {
         var id = UUID()
         var text: String
+        /// Отправитель из «Команд» — по нему сервер определяет банк. У СМС из прежних версий его нет.
+        var sender: String?
         var receivedAt: Date
         /// Аккаунт, в который был выполнен вход, когда пришла СМС.
         var account: String?
@@ -167,8 +169,8 @@ actor SmsQueue {
     }
 
     /// Отправляет СМС (и всё, что ждало в очереди до неё). Возвращает фразу для уведомления.
-    func submit(text: String, receivedAt: Date) async -> String {
-        items.append(Item(text: text, receivedAt: receivedAt, account: BudgetStore.account))
+    func submit(text: String, sender: String? = nil, receivedAt: Date) async -> String {
+        items.append(Item(text: text, sender: sender, receivedAt: receivedAt, account: BudgetStore.account))
         let result = await flush()
         switch result.stop {
         case .notSignedIn:
@@ -206,10 +208,9 @@ actor SmsQueue {
         // СМС другого аккаунта ждут, пока в него снова войдут.
         while let item = items.first(where: { $0.account == nil || $0.account == account }) {
             do {
-                let reply = try await BudgetAPI.post(
-                    "/api/import/sms",
-                    json: ["text": item.text, "receivedAt": iso.string(from: item.receivedAt)]
-                )
+                var body: [String: Any] = ["text": item.text, "receivedAt": iso.string(from: item.receivedAt)]
+                if let sender = item.sender { body["sender"] = sender }
+                let reply = try await BudgetAPI.post("/api/import/sms", json: body)
                 lastMessage = reply.message ?? "Готово."
             } catch BudgetAPI.Failure.offline {
                 return FlushResult(lastMessage: lastMessage, remaining: items.count, stop: .offline)

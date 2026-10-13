@@ -8,8 +8,8 @@ import { autoSavingByDefault } from "./savings";
 import { LIMITS, type Account, type State, type Transaction } from "./schema";
 
 /**
- * Операции из СМС Сбербанка (номер 900). iOS не даёт приложениям читать СМС, поэтому текст присылает
- * автоматизация «Команд» на сервер; здесь — только разбор текста и выбор категории, без сети и базы.
+ * Операции из СМС банков. iOS не даёт приложениям читать СМС, поэтому текст присылает автоматизация «Команд»;
+ * здесь — только разбор текста и выбор категории, без сети и базы. Какой банк прислал СМС, определяет banks.ts.
  */
 
 export type SmsOperation =
@@ -78,7 +78,13 @@ function timeOf(text: string): string | null {
 const NOT_OPERATION = /отказ|отклон|недостаточно|не выполн|не прош|код[\s:]|парол|одобрен|предлага|акци[яи]|https?:\/\/|\.ru\//iu;
 const SAVINGS_ACCOUNT = /^(?:Накопительный|Сберегательный) сч[её]т|^Вклад/iu;
 
-/** Разбирает СМС от 900. Не операция или незнакомый формат — null. */
+/** Похоже на операцию: есть сумма в рублях и это не код, отказ или реклама. Для «не разобрали СМС банка». */
+export function looksLikeOperation(raw: string): boolean {
+  const text = normalizeSms(raw);
+  return !NOT_OPERATION.test(text) && /\d\s?(?:руб|р\.|р(?![а-яё])|₽|RUB|RUR)/iu.test(text);
+}
+
+/** Разбирает СМС Сбербанка (900). Не операция или незнакомый формат — null. */
 export function parseSberSms(raw: string): SmsOperation | null {
   const text = normalizeSms(raw);
   if (!text || NOT_OPERATION.test(text)) return null;
@@ -181,6 +187,26 @@ export function parseSberSms(raw: string): SmsOperation | null {
   m = on(String.raw`Списание${VIA_SBP}\s+${AMOUNT}${TAIL}`);
   if (m) return expense("writeoff", m, m[3]);
 
+  return null;
+}
+
+/** Форматы СМС банков, которые приложение знает (см. KNOWN_BANKS в banks.ts). */
+export type SmsFormat = "sber" | "tbank" | "alfa" | "vtb";
+
+/** Разбор по формату банка; null — СМС этого банка пока не разбираем (нужны примеры). */
+export const SMS_PARSERS: Record<SmsFormat, ((text: string) => SmsOperation | null) | null> = {
+  sber: parseSberSms,
+  tbank: null,
+  alfa: null,
+  vtb: null,
+};
+
+/** СМС, разобранная любым известным разбором (банк неизвестен): формат и операция. */
+export function parseKnownSms(text: string): { format: SmsFormat; op: SmsOperation } | null {
+  for (const [format, parse] of Object.entries(SMS_PARSERS) as [SmsFormat, ((text: string) => SmsOperation | null) | null][]) {
+    const op = parse?.(text);
+    if (op) return { format, op };
+  }
   return null;
 }
 
@@ -299,7 +325,7 @@ function rememberedOperation(state: State, op: Extract<SmsOperation, { kind: "in
   for (let i = state.transactions.length - 1; i >= 0; i--) {
     const t = state.transactions[i];
     if (t.review || t.type !== op.kind || t.templateId || !t.category || !t.note.startsWith(SMS_NOTE_PREFIX)) continue;
-    const past = parseSberSms(t.note.slice(SMS_NOTE_PREFIX.length));
+    const past = parseKnownSms(t.note.slice(SMS_NOTE_PREFIX.length))?.op;
     if (past && past.kind === op.kind && normalizeName(past.counterparty) === key) return t;
   }
   return null;
@@ -492,10 +518,22 @@ export function smsAccountKeys(raw: string): { source: string | null; target: st
   return { source, target };
 }
 
-/** Открытый счёт с этими цифрами (их указывают в настройках счёта). */
-function accountForKey(state: State, key: string | null): Account | undefined {
+/**
+ * Открытый счёт с этими цифрами (их указывают в настройках счёта). Одни и те же цифры могут быть у карт разных
+ * банков: сначала — счёт банка этой СМС, потом — счёт без банка, потом — любой.
+ */
+export function accountForKey(state: State, key: string | null, bankId?: string): Account | undefined {
   if (!key) return undefined;
-  return accountsOf(state).find((a) => !a.archived && accountKeys(a).includes(key));
+  const found = accountsOf(state).filter((a) => !a.archived && accountKeys(a).includes(key));
+  const rank = (a: Account) => (bankId && a.bankId === bankId ? 0 : !a.bankId ? 1 : 2);
+  return found.sort((a, b) => rank(a) - rank(b))[0];
+}
+
+/** Единственный открытый счёт банка — на него операции из СМС этого банка без знакомых цифр. */
+function onlyBankAccount(state: State, bankId: string | undefined): Account | undefined {
+  if (!bankId) return undefined;
+  const own = accountsOf(state).filter((a) => !a.archived && a.bankId === bankId);
+  return own.length === 1 ? own[0] : undefined;
 }
 
 /** Общие слова в названиях счетов — по ним свой счёт в СМС не узнать. */
@@ -700,12 +738,15 @@ function savingsKeysIn(sms: string): Set<string> {
  * Счёт для цифр из СМС. Цифры, которых нет ни у одного счёта, — основной, пока у него самого цифр нет (туда же
  * записываются и операции по таким цифрам). Но не цифры накопительного: его остаток с основным не сравнить.
  */
-function balanceAccount(state: State, key: string | null, savingsKeys: Set<string>): Account | undefined {
-  const known = accountForKey(state, key);
+function balanceAccount(state: State, key: string | null, savingsKeys: Set<string>, bankId?: string): Account | undefined {
+  const known = accountForKey(state, key, bankId);
   if (known) return known;
   if (key && savingsKeys.has(key)) return undefined;
+  const own = onlyBankAccount(state, bankId);
+  if (own) return accountKeys(own).length ? undefined : own;
   const main = findAccount(state, MAIN_ACCOUNT_ID);
-  return main && !main.archived && !accountKeys(main).length ? main : undefined;
+  // Основной счёт другого банка — не сюда.
+  return main && !main.archived && !accountKeys(main).length && (!bankId || !main.bankId || main.bankId === bankId) ? main : undefined;
 }
 
 /**
@@ -717,7 +758,7 @@ function balanceAccount(state: State, key: string | null, savingsKeys: Set<strin
 function bankBalanceActions(
   state: State,
   actions: Action[],
-  ctx: { date: IsoDate; sms: string },
+  ctx: { date: IsoDate; sms: string; bankId?: string },
 ): { actions: Action[]; unmatched: string[] } {
   const none = { actions: [], unmatched: [] };
   const balances = smsBalances(ctx.sms);
@@ -732,7 +773,7 @@ function bankBalanceActions(
   const savingsKeys = savingsKeysIn(ctx.sms);
   const unmatched: string[] = [];
   const byKey = (key: string | null) => {
-    const account = balanceAccount(state, key, savingsKeys);
+    const account = balanceAccount(state, key, savingsKeys, ctx.bankId);
     if (!account && key && !unmatched.includes(key)) unmatched.push(key);
     return account;
   };
@@ -836,12 +877,20 @@ function replacedCorrections(state: State, actions: Action[], date: IsoDate): { 
   return { actions: deletes, notes };
 }
 
+/** Операция из СМС: устойчивый id, дата, текст и банк, приславший СМС (по нему ищем счёт по цифрам карты). */
+export interface SmsContext {
+  idBase: string;
+  date: IsoDate;
+  sms: string;
+  bankId?: string;
+}
+
 /**
  * Действия для операции из СМС. idBase — устойчивый id (по тексту СМС): повторная отправка той же СМС
  * не создаст вторую операцию. Остаток из СМС сверяется с приложением (account.bank) — даже если сама операция
  * уже учтена второй СМС того же перевода: в той СМС остаток другого счёта.
  */
-export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
+export function planSmsImport(state: State, op: SmsOperation, ctx: SmsContext): SmsPlan {
   const plan = planOperation(state, op, ctx);
   if (plan.skip?.status === "ignored") return plan;
   const capped = capSavingsWithdrawals(state, plan.actions, ctx.date);
@@ -858,13 +907,14 @@ export function planSmsImport(state: State, op: SmsOperation, ctx: { idBase: str
   return { ...plan, actions: [...actions, ...bank.actions], summary };
 }
 
-function planOperation(state: State, op: SmsOperation, ctx: { idBase: string; date: IsoDate; sms: string }): SmsPlan {
+function planOperation(state: State, op: SmsOperation, ctx: SmsContext): SmsPlan {
   const note = smsNote(ctx.sms);
   const money = formatMoney(op.amount);
-  // Счета по цифрам карты из СМС (их указывают в настройках счёта). Не нашли — основной счёт и «Сбережения».
+  // Счета по цифрам карты из СМС (их указывают в настройках счёта), среди счетов банка этой СМС. Цифр нет
+  // или они незнакомы — единственный счёт банка, иначе основной счёт и «Сбережения».
   const keys = smsAccountKeys(ctx.sms);
-  const source = accountForKey(state, keys.source);
-  const target = accountForKey(state, keys.target);
+  const source = accountForKey(state, keys.source, ctx.bankId) ?? onlyBankAccount(state, ctx.bankId);
+  const target = accountForKey(state, keys.target, ctx.bankId);
   const savingsAccount = (a: Account | undefined) => (a?.kind === "savings" ? a : undefined);
   const notSavings = (a: Account | undefined) => (a && a.kind !== "savings" ? a : undefined);
   const defaultSavings = findAccount(state, SAVINGS_ACCOUNT_ID);

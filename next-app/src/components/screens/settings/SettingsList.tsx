@@ -42,6 +42,7 @@ export function SectionCard({ title, children }: { title: string; children: Reac
 /** Значки, которых нет в общем наборе (контур 24×24, как у Icon). */
 const GLYPHS = {
   message: "M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 9h8M8 12.5h5",
+  bank: "M3 9.5 12 4l9 5.5M4.5 10v8M9.5 10v8M14.5 10v8M19.5 10v8M3 20h18",
   bell: "M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4",
   tag: "M3 4v7.2a1 1 0 0 0 .3.7l8.8 8.8a1 1 0 0 0 1.4 0l7.2-7.2a1 1 0 0 0 0-1.4L11.9 3.3a1 1 0 0 0-.7-.3H4a1 1 0 0 0-1 1zM8 8h.01",
   idCard: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM5.5 16.5a3.5 3.5 0 0 1 7 0M15 10h3M15 14h3",

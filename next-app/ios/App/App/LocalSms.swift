@@ -13,8 +13,9 @@ actor LocalSms {
         var account: String
         /// Уже принята сервером (или передана ему по запасному пути).
         var sent: Bool
-        /// Текст и время СМС — для запасного пути: если сервер не принял изменения, он разберёт СМС сам.
+        /// Текст, отправитель и время СМС — для запасного пути: если сервер не принял изменения, он разберёт СМС сам.
         var text: String
+        var sender: String?
         var receivedAt: Date
     }
 
@@ -70,10 +71,10 @@ actor LocalSms {
 
     /// Разбирает СМС на телефоне. nil — разобрать здесь нельзя (нет копии данных, другой аккаунт, разбор
     /// не получился): тогда СМС уходит прежним путём, на разбор сервером.
-    func submit(text: String, receivedAt: Date) async -> String? {
+    func submit(text: String, sender: String?, receivedAt: Date) async -> String? {
         guard BudgetStore.token != nil, let account = BudgetStore.account,
               let mirror = readMirror(), mirror.account == account,
-              let plan = SmsEngine.shared.plan(stateJson: mirror.stateJson, text: text, received: receivedAt)
+              let plan = SmsEngine.shared.plan(stateJson: mirror.stateJson, text: text, sender: sender, received: receivedAt)
         else { return nil }
 
         // По копии на телефоне не применилось — пусть решит сервер по своим данным.
@@ -82,7 +83,7 @@ actor LocalSms {
         guard !plan.ops.isEmpty else { return plan.message }
 
         var list = items
-        list.append(Item(id: UUID().uuidString, ops: plan.ops, account: account, sent: false, text: text, receivedAt: receivedAt))
+        list.append(Item(id: UUID().uuidString, ops: plan.ops, account: account, sent: false, text: text, sender: sender, receivedAt: receivedAt))
         items = list
         if let stateJson = plan.stateJson { writeMirror(Mirror(account: account, stateJson: stateJson)) }
 
@@ -91,12 +92,12 @@ actor LocalSms {
     }
 
     /// Проверка сборки: разбирает СМС на копии данных и возвращает итог — ничего не сохраняет и не отправляет.
-    func dryRun(text: String) async -> String {
+    func dryRun(text: String, sender: String? = nil) async -> String {
         for _ in 0..<20 where readMirror() == nil {
             try? await Task.sleep(for: .milliseconds(500))
         }
         guard let mirror = readMirror() else { return "нет копии данных" }
-        guard let plan = SmsEngine.shared.plan(stateJson: mirror.stateJson, text: text, received: Date()) else {
+        guard let plan = SmsEngine.shared.plan(stateJson: mirror.stateJson, text: text, sender: sender, received: Date()) else {
             return "движок не ответил"
         }
         return "\(plan.status) | \(plan.message) | изменений: \(plan.ops.count) | данных: \(mirror.stateJson.count) байт"
@@ -122,7 +123,7 @@ actor LocalSms {
                 // Сервер не смог применить изменения к своим данным (копия на телефоне отстала) —
                 // отдаём ему саму СМС: он разберёт её по своим данным.
                 markSent(item.id)
-                _ = await SmsQueue.shared.submit(text: item.text, receivedAt: item.receivedAt)
+                _ = await SmsQueue.shared.submit(text: item.text, sender: item.sender, receivedAt: item.receivedAt)
             } catch {
                 return false
             }

@@ -3,27 +3,35 @@ import Foundation
 
 // Команды приложения: появляются в «Командах» и в Siri и работают без открытия приложения.
 
-/// Операция из СМС банка: в автоматизации «Когда приходит сообщение от 900» достаточно этого действия —
-/// без адреса сервера и ключа. СМС разбирается на телефоне (тем же кодом, что на сервере) и работает без сети;
-/// если копии данных ещё нет — уходит на разбор сервером, без сети ждёт в очереди.
+/// Операция из СМС банка: в автоматизации «Когда приходит сообщение от отправителей банка» достаточно этого
+/// действия — без адреса сервера и ключа. СМС разбирается на телефоне (тем же кодом, что на сервере) и работает
+/// без сети; если копии данных ещё нет — уходит на разбор сервером, без сети ждёт в очереди. По отправителю
+/// определяется банк (Настройки → Банки); прежние автоматизации передают только текст — тогда банк ищется по нему.
 struct AddSmsOperationIntent: AppIntent {
     static let title: LocalizedStringResource = "Добавить операцию из СМС"
     static let description = IntentDescription(
-        "Разбирает СМС банка (номер 900) и добавляет операцию в бюджет. Без интернета СМС подождёт и отправится, когда связь появится."
+        "Разбирает СМС банка и добавляет операцию в бюджет. Банк — по отправителю (Настройки → Банки). Без интернета СМС подождёт и отправится, когда связь появится."
     )
     static let openAppWhenRun = false
 
     @Parameter(title: "Текст СМС", inputOptions: String.IntentInputOptions(multiline: true))
     var text: String
 
+    @Parameter(title: "Отправитель", description: "Номер или имя отправителя СМС («900», «Tinkoff») — по нему определяется банк")
+    var sender: String?
+
     static var parameterSummary: some ParameterSummary {
-        Summary("Добавить операцию из СМС \(\.$text)")
+        Summary("Добавить операцию из СМС \(\.$text)") {
+            \.$sender
+        }
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         let received = Date()
-        let local = await LocalSms.shared.submit(text: text, receivedAt: received)
-        let message = if let local { local } else { await SmsQueue.shared.submit(text: text, receivedAt: received) }
+        let trimmed = sender?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let from: String? = trimmed.isEmpty ? nil : trimmed
+        let local = await LocalSms.shared.submit(text: text, sender: from, receivedAt: received)
+        let message = if let local { local } else { await SmsQueue.shared.submit(text: text, sender: from, receivedAt: received) }
         return .result(value: message, dialog: IntentDialog(stringLiteral: message))
     }
 }

@@ -20,6 +20,7 @@ import {
   sourceAccountId,
   targetAccountId,
 } from "./accounts";
+import { banksOf, senderKey, withSavedBanks } from "./banks";
 import { formatMoney, type Kopecks } from "./money";
 import {
   balanceAt,
@@ -37,6 +38,7 @@ import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount
 import {
   LIMITS,
   accountSchema,
+  bankSchema,
   categoryNameSchema,
   goalSchema,
   idSchema,
@@ -53,6 +55,7 @@ import {
   titleSchema,
   transactionSchema,
   type Account,
+  type Bank,
   type CategoryGroup,
   type Loan,
   type Settings,
@@ -121,9 +124,14 @@ const accountPatchSchema = accountSchema
     terms: accountSchema.shape.terms.unwrap().nullable(),
     number: accountSchema.shape.number.unwrap().nullable(),
     archived: z.boolean(),
+    // null — счёт без банка.
+    bankId: idSchema.nullable(),
   })
   .partial()
   .strict();
+
+/** Счета банка: перечисленные — в этом банке, остальные его счета — без банка. */
+const bankAccountIdsSchema = z.array(idSchema).max(LIMITS.accounts);
 
 export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tx.add"), tx: txInputSchema }),
@@ -189,6 +197,16 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("account.add"), account: accountSchema }),
   z.object({ type: z.literal("account.update"), id: idSchema, patch: accountPatchSchema }),
   z.object({ type: z.literal("account.delete"), id: idSchema }),
+  /** Банк: название, отправители СМС и (если переданы) его счета. */
+  z.object({ type: z.literal("bank.add"), bank: bankSchema, accountIds: bankAccountIdsSchema.optional() }),
+  z.object({
+    type: z.literal("bank.update"),
+    id: idSchema,
+    patch: bankSchema.omit({ id: true }).partial().strict(),
+    accountIds: bankAccountIdsSchema.optional(),
+  }),
+  /** Удалить банк: его счета остаются, но уже без банка. */
+  z.object({ type: z.literal("bank.delete"), id: idSchema }),
   /** Остаток в банке по СМС и расхождение с приложением; delta 0 — расхождение решено (поправили или оставили). */
   z.object({
     type: z.literal("account.bank"),
@@ -435,16 +453,67 @@ function isBuiltinAccount(id: string): boolean {
   return id === MAIN_ACCOUNT_ID || id === SAVINGS_ACCOUNT_ID;
 }
 
-/** Одни и те же цифры карты у двух счетов — СМС не поймёт, куда записать. */
+/**
+ * Одни и те же цифры карты у двух счетов одного банка — СМС не поймёт, куда записать. У карт разных банков
+ * цифры могут совпасть: счёт ищется среди счетов банка, приславшего СМС.
+ */
 function assertUniqueSmsKeys(accounts: Account[]): void {
   const seen = new Map<string, string>();
   for (const account of accounts) {
     for (const key of new Set(accountKeys(account))) {
-      const other = seen.get(key);
-      if (other) throw new DomainError(`Цифры ${key} уже указаны у счёта «${other}».`);
-      seen.set(key, account.name);
+      const scoped = `${account.bankId ?? ""}|${key}`;
+      const other = seen.get(scoped);
+      if (other) throw new DomainError(`Цифры ${key} уже указаны у счёта «${other}»${account.bankId ? " этого банка" : ""}.`);
+      seen.set(scoped, account.name);
     }
   }
+}
+
+/** Банк: без пустых и повторяющихся отправителей. */
+function cleanBank(bank: Bank): Bank {
+  const seen = new Set<string>();
+  const senders = bank.senders
+    .map((s) => s.trim())
+    .filter((s) => {
+      const key = senderKey(s);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return { ...bank, name: bank.name.trim(), senders };
+}
+
+/** Названия банков не повторяются; отправитель — только у одного банка, иначе СМС не поймёт, чья она. */
+function assertBanks(banks: Bank[]): void {
+  const names = new Set<string>();
+  const senders = new Map<string, string>();
+  for (const bank of banks) {
+    const name = senderKey(bank.name);
+    if (names.has(name)) throw new DomainError(`Банк «${bank.name}» уже есть.`);
+    names.add(name);
+    for (const sender of bank.senders) {
+      const other = senders.get(senderKey(sender));
+      if (other) throw new DomainError(`Отправитель «${sender}» уже указан у банка «${other}».`);
+      senders.set(senderKey(sender), bank.name);
+    }
+  }
+}
+
+/** Счета банка (accountIds): перечисленные переходят в этот банк, остальные его счета остаются без банка. */
+function linkBankAccounts(state: State, bankId: string, accountIds: string[] | undefined): State {
+  if (!accountIds) return state;
+  const ids = new Set(accountIds);
+  const accounts = accountsOf(state);
+  for (const id of ids) if (!accounts.some((a) => a.id === id)) throw new DomainError("Счёт не найден — возможно, его удалили.");
+  const next = accounts.map((a) => {
+    if (ids.has(a.id)) return a.bankId === bankId ? a : { ...a, bankId };
+    if (a.bankId !== bankId) return a;
+    const copy = { ...a };
+    delete copy.bankId;
+    return copy;
+  });
+  assertUniqueSmsKeys(next);
+  return { ...state, accounts: next };
 }
 
 /** Куда автоотчисление: с дохода — на счёт из настроек «Откладывать с доходов», с покупки — «с покупок». */
@@ -1038,21 +1107,31 @@ export function applyAction(state: State, action: Action): State {
     }
 
     case "account.add": {
-      const accounts = accountsOf(state);
+      // Счёт сразу в банке — банки по умолчанию сохраняются, чтобы ссылка была на запись.
+      const base = action.account.bankId ? withSavedBanks(state) : state;
+      if (action.account.bankId && !base.banks?.some((b) => b.id === action.account.bankId)) throw new DomainError("Банк не найден.");
+      const accounts = accountsOf(base);
       if (accounts.some((a) => a.id === action.account.id)) throw new DomainError("Такой счёт уже есть.");
       if (accounts.length >= LIMITS.accounts) throw new DomainError("Слишком много счетов.");
       const account: Account = { ...action.account, spending: action.account.kind === "credit" ? false : action.account.spending };
       const next = [...accounts, account];
       assertUniqueSmsKeys(next);
-      return { ...state, accounts: next };
+      return { ...base, accounts: next };
     }
 
     case "account.update": {
-      const accounts = accountsOf(state);
+      const { creditLimit, graceDays, terms, archived, number, bankId, ...rest } = action.patch;
+      // Меняется банк счёта — банки по умолчанию сохраняются (см. withSavedBanks).
+      const base = bankId !== undefined ? withSavedBanks(state) : state;
+      if (bankId && !base.banks?.some((b) => b.id === bankId)) throw new DomainError("Банк не найден.");
+      const accounts = accountsOf(base);
       const current = accounts.find((a) => a.id === action.id);
       if (!current) throw new DomainError("Счёт не найден.");
-      const { creditLimit, graceDays, terms, archived, number, ...rest } = action.patch;
       const updated: Account = { ...current, ...rest };
+      if (bankId !== undefined) {
+        if (bankId === null) delete updated.bankId;
+        else updated.bankId = bankId;
+      }
       if (terms !== undefined) {
         if (terms === null) delete updated.terms;
         else updated.terms = terms;
@@ -1081,7 +1160,34 @@ export function applyAction(state: State, action: Action): State {
       }
       const next = accounts.map((a) => (a.id === current.id ? updated : a));
       assertUniqueSmsKeys(next);
-      return { ...state, accounts: next };
+      return { ...base, accounts: next };
+    }
+
+    case "bank.add": {
+      const base = withSavedBanks(state);
+      const banks = base.banks ?? [];
+      if (banks.some((b) => b.id === action.bank.id)) throw new DomainError("Такой банк уже есть.");
+      if (banks.length >= LIMITS.banks) throw new DomainError("Слишком много банков.");
+      const next = [...banks, cleanBank(action.bank)];
+      assertBanks(next);
+      return linkBankAccounts({ ...base, banks: next }, action.bank.id, action.accountIds);
+    }
+
+    case "bank.update": {
+      const base = withSavedBanks(state);
+      const banks = base.banks ?? [];
+      const current = banks.find((b) => b.id === action.id);
+      if (!current) throw new DomainError("Банк не найден.");
+      const next = banks.map((b) => (b.id === current.id ? cleanBank({ ...current, ...action.patch }) : b));
+      assertBanks(next);
+      return linkBankAccounts({ ...base, banks: next }, current.id, action.accountIds);
+    }
+
+    case "bank.delete": {
+      const base = withSavedBanks(state);
+      if (!banksOf(base).some((b) => b.id === action.id)) throw new DomainError("Банк не найден.");
+      const banks = (base.banks ?? []).filter((b) => b.id !== action.id);
+      return linkBankAccounts({ ...base, banks }, action.id, []);
     }
 
     case "account.bank": {

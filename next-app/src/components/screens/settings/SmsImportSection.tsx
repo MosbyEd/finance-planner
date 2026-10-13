@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Share } from "@capacitor/share";
+import { banksOf } from "@/domain/banks";
 import { ApiError, api, type SmsKeyStatus } from "@/client/api";
 import { useSnapshot, useToday } from "@/client/react";
 import { useDispatch } from "../../app/hooks";
+import { useUi } from "../../app/overlays";
+import { SmsAutomationSetup } from "../../app/SmsAutomationSetup";
+import { allSmsSenders, copyText, keyPrompt, sendersText } from "../../app/smsSetup";
 import { smsTextImport } from "../../app/smsText";
-import { nativeAddSmsShortcut, nativeOpenShortcuts, nativeOpenShortcutsApp } from "@/client/native";
 import { apiBase, isNativeApp } from "@/client/runtime";
 import { Button } from "../../ui/Button";
 import { Notice } from "../../ui/controls";
@@ -20,41 +22,6 @@ function importUrl(): string {
   return `${apiBase() || window.location.origin}/api/import/sms`;
 }
 
-/** Задание для Siri с командой самого приложения: без адреса и ключа — она входит токеном приложения. */
-const APP_ACTION_PROMPT = [
-  "Создай в приложении «Команды» личную автоматизацию.",
-  "Когда: я получаю сообщение от отправителя 900. Запускать сразу, без подтверждения.",
-  "Действие: «Добавить операцию из СМС» из приложения «Бюджет», в поле «Текст СМС» — содержимое полученного сообщения.",
-].join("\n");
-
-/** Текст для Siri: по нему она сама собирает автоматизацию в «Командах» (запрос к серверу с ключом). */
-function siriPrompt(url: string, key: string): string {
-  return [
-    "Создай в приложении «Команды» личную автоматизацию.",
-    "Когда: я получаю сообщение от отправителя 900. Запускать сразу, без подтверждения.",
-    "Действия:",
-    `1. «Получить содержимое URL»: адрес ${url}, метод POST, заголовок Authorization со значением «Bearer ${key}», тело запроса JSON с полем text (тип «Текст»), в которое подставлено содержимое полученного сообщения.`,
-    "2. «Получить значение из словаря» по ключу message из ответа.",
-    "3. «Показать уведомление» с этим значением.",
-  ].join("\n");
-}
-
-/** Копирует текст; если буфер обмена недоступен, в приложении открывает «Поделиться» (там есть «Скопировать»). */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    if (!isNativeApp()) return false;
-    try {
-      await Share.share({ text });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
 function formatWhen(ms: number): string {
   return new Date(ms).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
 }
@@ -66,105 +33,41 @@ export function SmsImportSection() {
   return isNativeApp() ? <AppActionSetup /> : <SmsImport />;
 }
 
+/** Банки и их отправители: СМС от них разбираются; ссылка на раздел «Банки». */
+function BanksNote() {
+  const { state } = useSnapshot();
+  const { openSettings } = useUi();
+  const banks = banksOf(state);
+  return (
+    <Notice
+      tone="info"
+      action={
+        <Button size="sm" variant="secondary" onClick={() => openSettings("banks")}>
+          Банки
+        </Button>
+      }
+    >
+      {banks.length
+        ? `Банки: ${banks.map((b) => b.name).join(", ")}. Отправители СМС и счета каждого банка — в разделе «Банки».`
+        : "Банков пока нет — СМС принимаются от Сбербанка (900). Другие банки и их отправителей добавьте в разделе «Банки»."}
+    </Notice>
+  );
+}
+
 /** В iOS-приложении: автоматизация с командой самого приложения (ключ не нужен), ключ — запасной способ. */
 function AppActionSetup() {
-  const toast = useToast();
-  const [manual, setManual] = useState(false);
-  const [siri, setSiri] = useState(false);
+  const { state } = useSnapshot();
   const [keyWay, setKeyWay] = useState(false);
-  const copy = async () => {
-    if (await copyText(APP_ACTION_PROMPT)) toast("Задание для Siri скопировано");
-    else toast("Не удалось скопировать — выделите текст вручную.", { kind: "error" });
-  };
   return (
     <SectionCard title="Операции из СМС">
       <div className="space-y-4">
         <p className="text-[15px] text-muted">
-          Покупки, переводы и зарплата из СМС Сбербанка (номер 900) добавляются сами, а запланированные платежи
-          отмечаются фактической суммой. Новые операции приложение покажет при запуске — их можно подтвердить или
-          поправить.
+          Покупки, переводы и зарплата из СМС банков добавляются сами, а запланированные платежи отмечаются фактической
+          суммой. Новые операции приложение покажет при запуске — их можно подтвердить или поправить.
         </p>
-        <ol className="space-y-3 text-[15px]">
-          <li>
-            <p className="font-medium">1. Добавьте команду «Бюджет СМС»</p>
-            <p className="text-sm text-muted">В окне «Поделиться» выберите «Команды» → «Добавить быструю команду».</p>
-            <Button
-              className="mt-2"
-              icon="plus"
-              onClick={() =>
-                void nativeAddSmsShortcut().then((ok) => {
-                  if (!ok) toast("Обновите приложение — в этой сборке команды нет.", { kind: "error" });
-                })
-              }
-            >
-              Добавить команду
-            </Button>
-          </li>
-          <li>
-            <p className="font-medium">2. Создайте автоматизацию</p>
-            <p className="text-sm text-muted">
-              «Команды» → «Автоматизация» → «+» → «Сообщение». Отправитель — 900, включите «Запускать сразу» → «Новая
-              пустая автоматизация» → действие «Запустить быструю команду» → «Бюджет СМС», ввод — «Ввод команды».
-            </p>
-            <Button
-              className="mt-2"
-              variant="secondary"
-              onClick={() =>
-                void nativeOpenShortcutsApp().then((ok) => {
-                  if (!ok) toast("Не удалось открыть «Команды».", { kind: "error" });
-                })
-              }
-            >
-              Открыть «Команды»
-            </Button>
-          </li>
-        </ol>
-        <p className="text-sm text-muted">
-          Создать автоматизацию по сообщениям iOS разрешает только вам — приложение не может добавить её само. Без
-          интернета СМС подождёт и отправится, когда связь появится.
-        </p>
-        <Disclosure label="Задание для Siri и действия приложения" open={siri} onToggle={() => setSiri((v) => !v)}>
-          <div className="space-y-3">
-            <textarea
-              readOnly
-              rows={5}
-              value={APP_ACTION_PROMPT}
-              aria-label="Задание для Siri"
-              onFocus={(e) => e.currentTarget.select()}
-              className={`${controlClass} h-auto py-3 text-base sm:text-sm`}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => void copy()}>
-                Скопировать задание для Siri
-              </Button>
-              <Button
-                variant="secondary"
-                icon="sparkles"
-                onClick={() =>
-                  void nativeOpenShortcuts().then((ok) => {
-                    if (!ok) toast("Обновите приложение, чтобы открыть «Siri и Команды».", { kind: "error" });
-                  })
-                }
-              >
-                Siri и Команды
-              </Button>
-            </div>
-          </div>
-        </Disclosure>
-        <Disclosure label="Без команды — действием приложения" open={manual} onToggle={() => setManual((v) => !v)}>
-          <ol className="list-decimal space-y-2 pl-5 text-sm">
-            <li>В «Контактах» создайте контакт «900» с номером 900 — чтобы выбрать его отправителем.</li>
-            <li>
-              «Команды» → «Автоматизация» → «+» → «Сообщение». Отправитель — 900. Включите «Запускать сразу» → «Далее» →
-              «Новая пустая команда».
-            </li>
-            <li>
-              Найдите действие «Добавить операцию из СМС» (приложение «Бюджет») и в поле «Текст СМС» выберите «Ввод
-              команды» — содержимое сообщения.
-            </li>
-            <li>Команда работает, пока вы вошли в аккаунт в приложении.</li>
-          </ol>
-        </Disclosure>
+        <BanksNote />
+        <SmsAutomationSetup senders={allSmsSenders(state)} />
+        <p className="text-sm text-muted">Без интернета СМС подождёт и отправится, когда связь появится.</p>
         <Disclosure label="Другой способ — через адрес сервера и ключ" open={keyWay} onToggle={() => setKeyWay((v) => !v)}>
           <SmsImport embedded />
         </Disclosure>
@@ -178,6 +81,7 @@ type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind:
 
 /** Ключ для автоматизации, которая сама шлёт СМС на сервер. embedded — внутри раздела приложения, без своей карточки. */
 function SmsImport({ embedded = false }: { embedded?: boolean }) {
+  const { state } = useSnapshot();
   const toast = useToast();
   const confirm = useConfirm();
   const [status, setStatus] = useState<Status>({ kind: "loading" });
@@ -252,14 +156,17 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
   };
 
   const url = importUrl();
+  const senders = allSmsSenders(state);
+  const siriPrompt = (key: string) => keyPrompt(url, key, senders);
 
   const body = (
     <div className="space-y-4">
       <p className="text-[15px] text-muted">
         {embedded
           ? "Автоматизация отправляет СМС прямо на сервер с отдельным ключом — так можно настроить и без приложения."
-          : "Покупки, переводы и зарплата из СМС Сбербанка (номер 900) добавляются сами, а запланированные платежи отмечаются фактической суммой. Приложения на iPhone не могут читать СМС, поэтому текст передаёт автоматизация «Команд». Категорию подбираем по магазину и запоминаем, если вы её поправите."}
+          : "Покупки, переводы и зарплата из СМС банков добавляются сами, а запланированные платежи отмечаются фактической суммой. Приложения на iPhone не могут читать СМС, поэтому текст передаёт автоматизация «Команд». Категорию подбираем по магазину и запоминаем, если вы её поправите."}
       </p>
+      {!embedded && <BanksNote />}
 
       {status.kind === "loading" && <p className="text-sm text-muted">Загружаем…</p>}
       {status.kind === "error" && (
@@ -293,13 +200,13 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
           <textarea
             readOnly
             rows={7}
-            value={siriPrompt(url, fresh)}
+            value={siriPrompt(fresh)}
             aria-label="Задание для Siri"
             onFocus={(e) => e.currentTarget.select()}
             className={`${controlClass} h-auto py-3 text-base sm:text-sm`}
           />
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void copy(siriPrompt(url, fresh), "Задание для Siri скопировано")}>
+            <Button onClick={() => void copy(siriPrompt(fresh), "Задание для Siri скопировано")}>
               Скопировать задание для Siri
             </Button>
             <Button variant="secondary" onClick={() => void copy(fresh, "Ключ скопирован")}>
@@ -308,16 +215,17 @@ function SmsImport({ embedded = false }: { embedded?: boolean }) {
           </div>
           <Disclosure label="Настроить вручную" open={manual} onToggle={() => setManual((v) => !v)}>
             <ol className="list-decimal space-y-2 pl-5 text-sm">
-              <li>В «Контактах» создайте контакт «900» с номером 900 — чтобы выбрать его отправителем.</li>
               <li>
-                «Команды» → «Автоматизация» → «+» → «Сообщение». Отправитель — 900. Включите «Запускать сразу» → «Далее» →
-                «Новая пустая команда».
+                «Команды» → «Автоматизация» → «+» → «Сообщение». {senders.length > 1 ? "Отправители" : "Отправитель"} —{" "}
+                {sendersText(senders)} (нет в списке — создайте контакт с этим номером или именем в поле телефона). Включите
+                «Запускать сразу» → «Далее» → «Новая пустая команда».
               </li>
               <li>
                 Добавьте действие «Получить содержимое URL». Адрес: <span className="break-all font-mono">{url}</span>.
                 Метод — POST. Заголовок <span className="font-mono">Authorization</span> со значением{" "}
                 <span className="break-all font-mono">Bearer {fresh}</span>. Тело запроса — JSON: поле{" "}
-                <span className="font-mono">text</span> (Текст), значение — «Ввод команды» (содержимое сообщения).
+                <span className="font-mono">text</span> (Текст) — «Ввод команды» → «Содержимое» и поле{" "}
+                <span className="font-mono">sender</span> (Текст) — «Ввод команды» → «Отправитель».
               </li>
               <li>
                 По желанию: «Получить значение из словаря» по ключу <span className="font-mono">message</span> и «Показать

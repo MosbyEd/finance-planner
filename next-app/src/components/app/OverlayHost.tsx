@@ -3,6 +3,7 @@
 import { AccountSheet } from "./sheets/AccountSheets";
 import { AiChatSheet } from "./sheets/AiChatSheet";
 import { AnalysisSheet } from "./sheets/AnalysisSheet";
+import { BankSheet } from "./sheets/BankSheet";
 import { WhatsNewSheet } from "./sheets/WhatsNewSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
@@ -38,6 +39,8 @@ export function OverlayHost() {
       return <BalanceSheet key={overlay.accountId ?? "main"} accountId={overlay.accountId} />;
     case "account":
       return <AccountSheet key={overlay.accountId ?? "new"} accountId={overlay.accountId} preset={overlay.preset} />;
+    case "bank":
+      return <BankSheet key={overlay.bankId ?? "new"} bankId={overlay.bankId} />;
     case "transfer":
       // Перевод — то же окно операции, сразу на «Перевод».
       return (

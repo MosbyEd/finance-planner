@@ -2,12 +2,14 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import { activeAccounts } from "@/domain/accounts";
+import { banksOf } from "@/domain/banks";
 import { useSnapshot } from "@/client/react";
 import { isNativeApp } from "@/client/runtime";
 import { APP_VERSION, AboutSection } from "./settings/AboutSection";
 import { AccountSection } from "./settings/AccountSection";
 import { AccountsSection } from "./settings/AccountsSection";
 import { AppleAiSection } from "./settings/AppleAiSection";
+import { BanksSection } from "./settings/BanksSection";
 import { BudgetPeriodSection } from "./settings/BudgetPeriodSection";
 import { CategoriesSection } from "./settings/CategoriesSection";
 import { DataSection } from "./settings/DataSection";
@@ -64,6 +66,13 @@ export function Settings() {
       label: "Автоматика и напоминания",
       rows: [
         signedIn && { id: "sms", icon: "message", title: "Операции из СМС", content: <SmsImportSection /> },
+        signedIn && {
+          id: "banks",
+          icon: "bank",
+          title: "Банки",
+          summary: banksOf(state).length ? String(banksOf(state).length) : "Нет",
+          content: <BanksSection />,
+        },
         native && { id: "notifications", icon: "bell", title: "Уведомления", content: <NotificationsSection /> },
         native && { id: "apple-ai", icon: "sparkles", title: "Apple Intelligence", content: <AppleAiSection /> },
       ],

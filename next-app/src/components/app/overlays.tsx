@@ -17,6 +17,8 @@ export type Overlay =
   | { kind: "balance"; accountId?: string }
   /** Счёт: новый или правка (название, вид, цифры карты, лимит кредитки). */
   | { kind: "account"; accountId?: string; preset?: { kind?: "debit" | "cash" | "savings" | "credit" } }
+  /** Банк: новый или правка (название, отправители СМС, счета, настройка «Команд»). */
+  | { kind: "bank"; bankId?: string }
   /** Перевод между своими счетами; amount — подставить (погашение всего долга кредитки). */
   | { kind: "transfer"; from?: string; to?: string; amount?: number; resolveBank?: string }
   | { kind: "explain" }

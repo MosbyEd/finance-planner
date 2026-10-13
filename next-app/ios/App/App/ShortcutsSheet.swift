@@ -3,8 +3,9 @@ import Capacitor
 import SwiftUI
 import UIKit
 
-/// Подписанная команда «Бюджет СМС» в пакете приложения: передаёт текст СМС действию «Добавить операцию из СМС»
-/// и показывает уведомление с результатом. «Команды» импортируют её из окна «Поделиться».
+/// Подписанная команда «Бюджет СМС» в пакете приложения: передаёт текст и отправителя СМС действию «Добавить
+/// операцию из СМС» и показывает уведомление с результатом. Исходник — ios/shortcuts/budget-sms.plist; после правки:
+/// plutil -convert binary1, затем shortcuts sign --mode anyone --input … --output «Бюджет СМС.shortcut». «Команды» импортируют её из окна «Поделиться».
 enum SmsShortcut {
     static var fileURL: URL? { Bundle.main.url(forResource: "Бюджет СМС", withExtension: "shortcut") }
 }
@@ -46,7 +47,7 @@ struct ShortcutsSheet: View {
 
                 Section {
                     Label("«Команды» → «Автоматизация» → «+» → «Сообщение»", systemImage: "1.circle")
-                    Label("Отправитель — 900, включите «Запускать сразу»", systemImage: "2.circle")
+                    Label("Отправители — номера и имена банков из Настроек → «Банки» (у Сбербанка — 900), включите «Запускать сразу»", systemImage: "2.circle")
                     Label("Действие «Запустить быструю команду» → «Бюджет СМС», ввод — «Ввод команды»", systemImage: "3.circle")
                     Button {
                         if let url = URL(string: "shortcuts://") { openURL(url) }

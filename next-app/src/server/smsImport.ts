@@ -72,8 +72,11 @@ export function findUserBySmsKey(key: string, now = Date.now()): User | null {
 }
 
 export interface SmsImportResult {
-  /** added — операция добавлена; duplicate — эту СМС уже присылали; ignored — не операция; failed — не добавлено. */
-  status: "added" | "duplicate" | "ignored" | "failed";
+  /**
+   * added — операция добавлена; duplicate — эту СМС уже присылали; ignored — не операция; unparsed — похоже
+   * на операцию, но формат банка не разобран; failed — не добавлено.
+   */
+  status: "added" | "duplicate" | "ignored" | "unparsed" | "failed";
   /** Короткий текст для уведомления на телефоне. */
   message: string;
 }
@@ -97,12 +100,12 @@ export function receivedTime(receivedAt: unknown, now: Date): Date {
 }
 
 /**
- * Разбирает СМС и добавляет операцию пользователю. received — когда СМС пришла на телефон (по умолчанию — сейчас).
- * Бросает StoredStateError, если состояние повреждено.
+ * Разбирает СМС и добавляет операцию пользователю. received — когда СМС пришла на телефон (по умолчанию — сейчас);
+ * sender — отправитель из «Команд», по нему определяется банк. Бросает StoredStateError, если состояние повреждено.
  */
-export function importSms(userId: number, text: string, now = new Date(), received = now): SmsImportResult {
+export function importSms(userId: number, text: string, now = new Date(), received = now, sender?: string | null): SmsImportResult {
   const { state } = loadState(userId);
-  const prepared = prepareSmsImport(state, text, { day: todayLocal(received), time: hhmm(received) });
+  const prepared = prepareSmsImport(state, text, { day: todayLocal(received), time: hhmm(received) }, sender);
   if (!prepared.ops.length) return { status: prepared.status, message: prepared.message };
   try {
     const result = applyUserOps(userId, prepared.ops, todayLocal(now), now.getTime());

@@ -9,6 +9,7 @@ import {
   MAIN_ACCOUNT_ID,
   SAVINGS_ACCOUNT_ID,
 } from "@/domain/accounts";
+import { accountBankId, banksOf } from "@/domain/banks";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { AccountKind } from "@/domain/schema";
 import { newId, useSnapshot, useToday } from "@/client/react";
@@ -23,6 +24,7 @@ import { ACCOUNT_KINDS } from "../accounts";
 import { useBalancesPrivacy } from "@/client/privacy";
 import { BalancesEye } from "../BalancesEye";
 import { InterestNotes } from "../InterestNotes";
+import { ChoiceChips } from "../../screens/settings/common";
 import { CreditTermsFields, parseTerms, termsDraft, type TermsDraft } from "./CreditTermsFields";
 import { useDispatch } from "../hooks";
 import { useUi } from "../overlays";
@@ -69,6 +71,10 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
   const [nextCardKey, setNextCardKey] = useState(cards.length);
   const [limit, setLimit] = useState<Kopecks | null>(existing?.creditLimit ?? null);
   const [terms, setTerms] = useState<TermsDraft>(() => termsDraft(existing?.terms, existing?.graceDays));
+  // Банк счёта: по нему СМС банка находят счёт по цифрам карты. "" — без банка.
+  const banks = banksOf(state);
+  const currentBank = existing ? (accountBankId(state, existing) ?? "") : "";
+  const [bankId, setBankId] = useState(currentBank);
   const [errors, setErrors] = useState<{ name?: string; number?: string; cards?: string; terms?: string }>({});
 
   const updateCard = (key: number, patch: Partial<CardDraft>) => {
@@ -122,6 +128,8 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             number: number || null,
             // Прежний список цифр перенесён в карты.
             smsKeys: [],
+            // Банк — только если его поменяли: иначе банки по умолчанию не нужно сохранять.
+            ...(bankId !== currentBank ? { bankId: bankId || null } : {}),
             creditLimit: kind === "credit" ? limit : null,
             graceDays: kind === "credit" ? graceDays : null,
             terms: kind === "credit" ? parsed.terms : null,
@@ -133,6 +141,7 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
             id: newId(),
             ...fields,
             ...(number ? { number } : {}),
+            ...(bankId ? { bankId } : {}),
             ...(kind === "credit" && limit ? { creditLimit: limit } : {}),
             ...(kind === "credit" && graceDays ? { graceDays } : {}),
             ...(kind === "credit" && parsed.terms ? { terms: parsed.terms } : {}),
@@ -281,6 +290,15 @@ export function AccountSheet({ accountId, preset }: { accountId?: string; preset
               hint="Беспроцентный период — с первой операции, когда долга не было. Не погасили к его концу — проценты за все дни с первой операции (оценка). Пусто — периода нет, проценты с первого дня."
             />
           </>
+        )}
+
+        {banks.length > 0 && (
+          <ChoiceChips
+            label="Банк"
+            value={bankId}
+            onChange={setBankId}
+            options={[{ value: "", label: "Без банка" }, ...banks.map((b) => ({ value: b.id, label: b.name }))]}
+          />
         )}
 
         <TextInput

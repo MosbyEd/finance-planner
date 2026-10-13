@@ -2,14 +2,15 @@ import type { NextRequest } from "next/server";
 import { getSessionUser, type User } from "@/server/auth";
 import { bearerToken, clientIp, jsonOk, readText } from "@/server/http";
 import { rateLimit } from "@/server/rateLimit";
-import { parseSberSms } from "@/domain/sms";
+import { parseKnownSms } from "@/domain/sms";
 import { findUserBySmsKey, importSms, receivedTime, smsKeyFromHeader } from "@/server/smsImport";
 import { StoredStateError } from "@/server/stateStore";
 
 /**
  * Приём СМС банка от «Команд» на iPhone. Авторизация — Authorization: Bearer <ключ из настроек>
  * (автоматизация, собранная вручную) или токен сессии приложения (команда самого приложения).
- * Тело — JSON {"text": "…", "receivedAt"?: ISO-время получения}, форма с полями text/receivedAt или просто текст СМС.
+ * Тело — JSON {"text": "…", "sender"?: отправитель, "receivedAt"?: ISO-время получения}, форма с полями
+ * text/sender/receivedAt или просто текст СМС. По отправителю определяется банк (Настройки → Банки).
  * В ответе всегда есть message — его «Команды» могут показать уведомлением.
  */
 
@@ -22,7 +23,18 @@ function reply(status: number, result: { status: string; message: string }) {
 
 interface SmsBody {
   text: string;
+  sender?: string;
   receivedAt?: unknown;
+}
+
+/** Отправитель из «Команд»: строка (номер или имя) или контакт, превращённый в словарь. */
+function senderOf(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim().slice(0, 60) || undefined;
+  if (value && typeof value === "object") {
+    const { name, phone, value: inner } = value as { name?: unknown; phone?: unknown; value?: unknown };
+    return senderOf(phone) ?? senderOf(inner) ?? senderOf(name);
+  }
+  return undefined;
 }
 
 /**
@@ -38,7 +50,7 @@ function findSmsText(value: unknown): string {
   };
   walk(value, 0);
   const candidates = strings.filter((x) => x.trim() && !/^\d{4}-\d{2}-\d{2}T/.test(x));
-  return candidates.find((x) => parseSberSms(x) !== null) ?? candidates.sort((a, b) => b.length - a.length)[0] ?? "";
+  return candidates.find((x) => parseKnownSms(x) !== null) ?? candidates.sort((a, b) => b.length - a.length)[0] ?? "";
 }
 
 async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
@@ -48,9 +60,11 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
       const data: unknown = JSON.parse(body);
       if (typeof data === "string") return { text: data };
       if (data && typeof data === "object") {
-        const { text, receivedAt } = data as { text?: unknown; receivedAt?: unknown };
-        if (typeof text === "string" && text.trim()) return { text, receivedAt };
-        return { text: findSmsText(data), receivedAt };
+        const { text, sender: rawSender, receivedAt, ...rest } = data as { text?: unknown; sender?: unknown; receivedAt?: unknown };
+        const sender = senderOf(rawSender);
+        if (typeof text === "string" && text.trim()) return { text, sender, receivedAt };
+        // Отправителя среди строк для поиска текста не берём: он короче СМС, но мог бы разобраться как она.
+        return { text: findSmsText({ text, ...rest }), sender, receivedAt };
       }
     } catch {
       // не JSON — ниже вернём пустой текст
@@ -60,7 +74,7 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
   if (type.includes("application/x-www-form-urlencoded")) {
     const form = new URLSearchParams(body);
     const text = form.get("text")?.trim() ? (form.get("text") as string) : findSmsText([...form.values()]);
-    return { text, receivedAt: form.get("receivedAt") ?? undefined };
+    return { text, sender: senderOf(form.get("sender")), receivedAt: form.get("receivedAt") ?? undefined };
   }
   if (type.includes("multipart/form-data")) {
     try {
@@ -70,6 +84,7 @@ async function smsBody(req: NextRequest, body: string): Promise<SmsBody> {
       const values = [...form.values()].filter((v): v is string => typeof v === "string");
       return {
         text: typeof text === "string" && text.trim() ? text : findSmsText(values),
+        sender: senderOf(form.get("sender")),
         receivedAt: typeof receivedAt === "string" ? receivedAt : undefined,
       };
     } catch {
@@ -151,13 +166,13 @@ export async function POST(req: NextRequest) {
   try {
     const now = new Date();
     const received = receivedTime(body.receivedAt, now);
-    const result = importSms(user.id, text, now, received);
+    const result = importSms(user.id, text, now, received, body.sender);
     logImport(
       user.id,
       via,
       result.status,
       now.getTime() - received.getTime(),
-      result.status === "ignored" ? debugShape(req, raw.text, text) : "",
+      result.status === "ignored" || result.status === "unparsed" ? debugShape(req, raw.text, text) : "",
     );
     return reply(200, result);
   } catch (error) {

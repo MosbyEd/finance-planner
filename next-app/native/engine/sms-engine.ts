@@ -19,11 +19,14 @@ if (!scope.crypto?.getRandomValues) {
 
 type Op = PreparedSms["ops"][number];
 
-/** СМС → изменения и данные после них. state — копия данных, которую приложение хранит для команд. */
-function plan(input: { state: unknown; text: string; day: IsoDate; time: string }): PreparedSms & { state: State | null } {
+/**
+ * СМС → изменения и данные после них. state — копия данных, которую приложение хранит для команд; sender —
+ * отправитель из «Команд» (по нему определяется банк), у прежних автоматизаций его нет.
+ */
+function plan(input: { state: unknown; text: string; sender?: string | null; day: IsoDate; time: string }): PreparedSms & { state: State | null } {
   const parsed = stateSchema.safeParse(input.state);
   if (!parsed.success) return { status: "failed", message: "Нет данных приложения на телефоне.", ops: [], state: null };
-  const prepared = prepareSmsImport(parsed.data, input.text, { day: input.day, time: input.time });
+  const prepared = prepareSmsImport(parsed.data, input.text, { day: input.day, time: input.time }, input.sender);
   if (!prepared.ops.length) return { ...prepared, state: null };
   try {
     const next = prepared.ops.reduce((state, op) => applyAction(state, op.action), parsed.data);

@@ -13,7 +13,7 @@ final class SmsEngine: @unchecked Sendable {
     }
 
     struct Plan: Decodable, Sendable {
-        /// added, duplicate, ignored, failed.
+        /// added, duplicate, ignored, unparsed (формат банка не разобран), failed.
         var status: String
         var message: String
         var ops: [Op]
@@ -61,13 +61,15 @@ final class SmsEngine: @unchecked Sendable {
         }
     }
 
-    /// СМС на копии данных. received — когда СМС пришла (день и время — в часовом поясе телефона, как в интерфейсе).
-    func plan(stateJson: String, text: String, received: Date) -> Plan? {
+    /// СМС на копии данных. received — когда СМС пришла (день и время — в часовом поясе телефона, как в интерфейсе);
+    /// sender — отправитель из «Команд», по нему определяется банк.
+    func plan(stateJson: String, text: String, sender: String?, received: Date) -> Plan? {
         let calendar = Calendar.current
         let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: received)
         let day = String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
         let time = String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
-        let input = "{\"state\":\(stateJson),\"text\":\(Self.quote(text)),\"day\":\"\(day)\",\"time\":\"\(time)\"}"
+        let from = sender.map { ",\"sender\":\(Self.quote($0))" } ?? ""
+        let input = "{\"state\":\(stateJson),\"text\":\(Self.quote(text))\(from),\"day\":\"\(day)\",\"time\":\"\(time)\"}"
         guard let output = call("planJson", input), let data = output.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(Plan.self, from: data)
     }

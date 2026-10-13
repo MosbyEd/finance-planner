@@ -9,6 +9,7 @@ export const LIMITS = {
   goals: 200,
   loans: 200,
   accounts: 50,
+  banks: 20,
   categoriesPerGroup: 100,
   title: 80,
   note: 500,
@@ -223,8 +224,21 @@ export const accountSchema = z.object({
    * (банк − приложение). delta ≠ 0 — приложение предлагает поправить остаток.
    */
   bank: z.object({ amount: kopecksSchema, delta: kopecksSchema, date: isoDateSchema }).optional(),
+  /** Банк счёта (см. banks.ts): по нему СМС этого банка ищут счёт по цифрам карты. Нет — без банка. */
+  bankId: idSchema.optional(),
 });
 export type Account = z.infer<typeof accountSchema>;
+
+/** Отправитель СМС банка, как он подписан в «Сообщениях»: «900», «Tinkoff», «Alfa-Bank». */
+export const smsSenderSchema = z.string().trim().min(1, "Пустой отправитель").max(40, "Слишком длинный отправитель");
+
+/** Банк: от каких отправителей приходят его СМС. Счета банка — у счёта поле bankId. */
+export const bankSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1, "Укажите название").max(40),
+  senders: z.array(smsSenderSchema).max(10),
+});
+export type Bank = z.infer<typeof bankSchema>;
 
 export const loanKindSchema = z.enum(["borrow", "lend", "credit"]);
 export type LoanKind = z.infer<typeof loanKindSchema>;
@@ -332,6 +346,8 @@ export const stateSchema = z
     loans: z.array(loanSchema).max(LIMITS.loans),
     /** Счета. Нет — два счёта по умолчанию: «Основной счёт» и «Сбережения» (см. accounts.ts). */
     accounts: z.array(accountSchema).max(LIMITS.accounts).optional(),
+    /** Банки. Нет — список по умолчанию: Сбербанк (900), если операции из СМС уже приходили (см. banks.ts). */
+    banks: z.array(bankSchema).max(LIMITS.banks).optional(),
     categories: categoriesSchema,
     categoryLimits: z.record(categoryNameSchema, positiveKopecksSchema),
     /** Пропущенные начисления шаблонов: templateId → месяцы. */
@@ -347,5 +363,6 @@ export const stateSchema = z
     checkUniqueIds(state.goals, "goals", ctx);
     checkUniqueIds(state.loans, "loans", ctx);
     if (state.accounts) checkUniqueIds(state.accounts, "accounts", ctx);
+    if (state.banks) checkUniqueIds(state.banks, "banks", ctx);
   });
 export type State = z.infer<typeof stateSchema>;

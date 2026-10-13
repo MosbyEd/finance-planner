@@ -153,8 +153,9 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
         let overlay = defaults.string(forKey: "BudgetDebugOverlay")
         let addSheet = defaults.bool(forKey: "BudgetDebugAdd")
         if let sms = defaults.string(forKey: "BudgetDebugSmsDryRun") {
+            let sender = defaults.string(forKey: "BudgetDebugSmsSender")
             Task.detached {
-                let result = await LocalSms.shared.dryRun(text: sms)
+                let result = await LocalSms.shared.dryRun(text: sms, sender: sender)
                 NSLog("DBG-SMS %@", result)
             }
         }
