@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetPeriod, safeToSpend } from "./metrics";
+import { budgetPeriod, payPeriodStatus, safeToSpend } from "./metrics";
 import type { State } from "./schema";
 import { run, stateWith, template } from "./test-utils";
 
@@ -82,5 +82,18 @@ describe("прошлую выплату приложение не видело",
     expect(p.kind).toBe("pay");
     expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24" });
     expect(p.current.income.plan).toBe(10_000_000);
+  });
+});
+
+describe("что с периодом — для настроек", () => {
+  it("определился — пишет период; дата начала в будущем — объясняет, что поправить", () => {
+    expect(payPeriodStatus(withPay(), "2026-10-12")).toEqual({ ok: true, text: "Сейчас: с 10 октября до аванса 25 октября." });
+    const s = withPay();
+    s.templates = s.templates.map((t) => (t.kind === "income" ? { ...t, startDate: "2026-11-01" } : t));
+    s.transactions = s.transactions.filter((t) => t.type !== "income");
+    const status = payPeriodStatus(s, "2026-10-12");
+    expect(status.ok).toBe(false);
+    expect(status.text).toMatch(/«Зарплата» 10-го — начнётся 1 ноября/);
+    expect(status.text).toMatch(/дату начала не позже сегодняшней/);
   });
 });

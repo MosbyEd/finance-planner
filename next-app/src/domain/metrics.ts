@@ -4,6 +4,7 @@ import {
   daysInMonth,
   diffDays,
   firstDayOfMonth,
+  formatDay,
   lastDayOfMonth,
   monthKeyOf,
   parseIsoDate,
@@ -655,6 +656,35 @@ export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
     current: periodBudget(state, start.date, addDays(next.date, -1), today, start.received ? 0 : start.amount),
     next,
     after: following ? periodBudget(state, next.date, addDays(following.date, -1), today) : null,
+  };
+}
+
+/** Что с периодом от зарплаты до зарплаты — для настроек: какой период сейчас или почему не получилось. */
+export function payPeriodStatus(state: State, today: IsoDate): { ok: boolean; text: string } {
+  if (state.settings.budgetPeriod === "month") return { ok: true, text: "Считаем по календарному месяцу, с 1-го по последнее число." };
+  const templates = state.templates.filter((t) => t.active && t.kind === "income" && isPayIncome(t));
+  if (!templates.length) {
+    return {
+      ok: false,
+      text: "Нет регулярного дохода «Зарплата» или «Аванс». Добавьте его на вкладке «Регулярные» — пока считаем по календарному месяцу.",
+    };
+  }
+  const period = budgetPeriod(state, today);
+  if (period.kind === "pay" && period.next) {
+    return { ok: true, text: `Сейчас: с ${formatDay(period.current.start)} до ${payEventName(period.next)} ${formatDay(period.next.date)}.` };
+  }
+  const reasons = templates.map((t) => {
+    const name = `«${t.title}» ${t.dayOfMonth}-го`;
+    if (t.endDate && t.endDate < today) return `${name} — закончился ${formatDay(t.endDate)}`;
+    if (t.startDate > today) return `${name} — начнётся ${formatDay(t.startDate)}`;
+    return `${name} — с ${formatDay(t.startDate)}`;
+  });
+  const future = templates.some((t) => t.startDate > today);
+  return {
+    ok: false,
+    text: `Не получилось определить период — пока считаем по месяцу. Регулярные доходы: ${reasons.join("; ")}.${
+      future ? " Если эти выплаты уже приходят, поставьте им в «Регулярных» дату начала не позже сегодняшней." : ""
+    }`,
   };
 }
 

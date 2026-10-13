@@ -8,6 +8,7 @@ import { APP_VERSION, AboutSection } from "./settings/AboutSection";
 import { AccountSection } from "./settings/AccountSection";
 import { AccountsSection } from "./settings/AccountsSection";
 import { AppleAiSection } from "./settings/AppleAiSection";
+import { BudgetPeriodSection } from "./settings/BudgetPeriodSection";
 import { CategoriesSection } from "./settings/CategoriesSection";
 import { DataSection } from "./settings/DataSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
@@ -70,6 +71,13 @@ export function Settings() {
     {
       label: "Бюджет",
       rows: [
+        {
+          id: "period",
+          icon: "calendar",
+          title: "Период бюджета",
+          summary: settings.budgetPeriod === "month" ? "Месяц" : "От зарплаты до зарплаты",
+          content: <BudgetPeriodSection />,
+        },
         {
           id: "accounts",
           icon: "card",
