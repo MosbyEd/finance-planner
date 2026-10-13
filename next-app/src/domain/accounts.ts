@@ -121,6 +121,28 @@ export function savingsAccountIds(state: Pick<State, "accounts">): Set<string> {
   );
 }
 
+/**
+ * Счета под платежи: на них приходят регулярные переводы (с зарплаты и аванса), а с них идут регулярные платежи —
+ * например, «Ипотека»: откладываем частями в дни поступлений, платим целиком в дату платежа. В бюджете
+ * обязательным считается перевод на такой счёт (в свой период), а платёж с него второй раз не вычитается.
+ * Кредитки и счета целей — не такие: у них свой учёт.
+ */
+export function paymentReserveAccounts(state: Pick<State, "accounts" | "templates" | "goals">): Set<string> {
+  const funded = new Set<string>();
+  const paying = new Set<string>();
+  for (const t of state.templates) {
+    if (!t.active || t.kind !== "expense" || t.goalId) continue;
+    if (t.toAccountId) funded.add(t.toAccountId);
+    else paying.add(t.accountId ?? MAIN_ACCOUNT_ID);
+  }
+  const goalAccounts = new Set(state.goals.map((g) => g.accountId).filter(Boolean));
+  return new Set(
+    accountsOf(state)
+      .filter((a) => funded.has(a.id) && paying.has(a.id) && a.kind !== "credit" && a.id !== MAIN_ACCOUNT_ID && !goalAccounts.has(a.id))
+      .map((a) => a.id),
+  );
+}
+
 /** Накопительный счёт, куда можно откладывать: существует, открыт и накопительный; иначе — «Сбережения». */
 export function savingsTarget(state: Pick<State, "accounts">, id: string | undefined): string {
   const account = id ? findAccount(state, id) : undefined;

@@ -115,3 +115,23 @@ describe("что с периодом — для настроек", () => {
     expect(p.after?.income.plan).toBe(5_000_000);
   });
 });
+
+describe("счёт под платежи: откладываем на ипотеку с зарплаты и аванса, платим с него", () => {
+  it("обязательное — переводы на «Ипотеку» в свои периоды; сам платёж 21-го второй раз не вычитается", () => {
+    let s = withPay();
+    s.templates = s.templates.filter((t) => t.id === "salary" || t.id === "advance");
+    s = run(
+      s,
+      { type: "account.add", account: { id: "mort", name: "Ипотека", kind: "debit", spending: false } },
+      { type: "template.add", template: template({ id: "m1", kind: "expense", title: "На ипотеку", category: "Ипотека/кредит", amount: 2_000_000, dayOfMonth: 10, startDate: "2026-10-01", toAccountId: "mort" }) },
+      { type: "template.add", template: template({ id: "m2", kind: "expense", title: "На ипотеку", category: "Ипотека/кредит", amount: 2_000_000, dayOfMonth: 25, startDate: "2026-10-01", toAccountId: "mort" }) },
+      { type: "template.add", template: template({ id: "pay", kind: "expense", title: "Ипотека", category: "Ипотека/кредит", amount: 4_000_000, dayOfMonth: 21, startDate: "2026-10-01", accountId: "mort" }) },
+      { type: "recurring.sync", today: "2026-10-12" },
+    );
+    const p = budgetPeriod(s, "2026-10-12");
+    // 10–24 октября: перевод 10-го (20 000), платёж 21-го не считается.
+    expect(p.current.mandatory.plan).toBe(2_000_000);
+    // 25 октября – 9 ноября: перевод 25-го (20 000).
+    expect(p.after?.mandatory.plan).toBe(2_000_000);
+  });
+});

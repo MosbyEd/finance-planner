@@ -20,8 +20,10 @@ import {
   SAVINGS_ACCOUNT_ID,
   accountBalances,
   creditDebts,
+  paymentReserveAccounts,
   savingsAccountIds,
   savingsTarget,
+  sourceAccountId,
   spendingAccountIds,
   targetAccountId,
   spendingEffect,
@@ -250,15 +252,27 @@ function windowTotals(state: State, first: IsoDate, last: IsoDate, cutoff: IsoDa
     savingsPlanned: 0,
   };
   const goalAccounts = goalAccountIds(state);
+  // Счета под платежи («Ипотека»): обязательное — перевод на них, а не платёж с них (иначе дважды).
+  const reserve = paymentReserveAccounts(state);
   for (const tx of state.transactions) {
     if (tx.date < first || tx.date > last) continue;
     const isFact = tx.date <= cutoff;
+    const target = targetAccountId(tx);
     if (tx.type === "income") {
       if (isFact) totals.incomeFact += tx.amount;
       else totals.incomeFuture += tx.amount;
     } else if (tx.type === "expense" && tx.mandatory) {
+      if (reserve.has(sourceAccountId(tx))) continue;
       if (isFact) totals.mandatoryFact += tx.amount;
       else totals.mandatoryFuture += tx.amount;
+    } else if (
+      (tx.type === "transfer" || (tx.type === "saving" && tx.amount > 0)) &&
+      target &&
+      reserve.has(target) &&
+      !reserve.has(sourceAccountId(tx))
+    ) {
+      if (isFact) totals.mandatoryFact += Math.abs(tx.amount);
+      else totals.mandatoryFuture += Math.abs(tx.amount);
     } else if (tx.type === "expense") {
       if (isFact) {
         totals.flexibleSpent += tx.amount;
@@ -274,8 +288,11 @@ function windowTotals(state: State, first: IsoDate, last: IsoDate, cutoff: IsoDa
   const after = cutoff < first ? addDays(first, -1) : cutoff;
   for (const occ of plannedOccurrences(state, after, last)) {
     if (occ.kind === "income") totals.incomeFuture += occ.amount;
-    else if (occurrenceIsExpense(state, occ)) totals.mandatoryFuture += occ.amount;
-    else if (occ.goalId || (occ.toAccountId && goalAccounts.has(occ.toAccountId))) totals.savingsPlanned += occ.amount;
+    else if (occ.toAccountId && reserve.has(occ.toAccountId) && !reserve.has(occ.accountId ?? MAIN_ACCOUNT_ID)) {
+      totals.mandatoryFuture += occ.amount;
+    } else if (occurrenceIsExpense(state, occ)) {
+      if (!reserve.has(occ.accountId ?? MAIN_ACCOUNT_ID)) totals.mandatoryFuture += occ.amount;
+    } else if (occ.goalId || (occ.toAccountId && goalAccounts.has(occ.toAccountId))) totals.savingsPlanned += occ.amount;
   }
   return totals;
 }

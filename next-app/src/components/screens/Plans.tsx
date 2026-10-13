@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { isSkipped, nextOccurrence, occurrenceDate, templateEnd, type TemplateEnd } from "@/domain/recurring";
-import { findAccount } from "@/domain/accounts";
+import { findAccount, MAIN_ACCOUNT_ID, paymentReserveAccounts } from "@/domain/accounts";
 import type { State, Template } from "@/domain/schema";
 import { useSnapshot, useToday } from "@/client/react";
 import { templateRoute } from "../app/accounts";
@@ -36,21 +36,30 @@ function isLive(state: State, t: Template, today: IsoDate): boolean {
   return t.active && templateEnd(state, t, today).status !== "finished";
 }
 
-/** Сумма действующих шаблонов. Платежи на свои счета и в цели (погашение кредитки, сбережения) — отдельно. */
+/**
+ * Сумма действующих шаблонов. Платежи на свои счета и в цели (погашение кредитки, сбережения) — отдельно.
+ * Счёт под платежи («Ипотека»): платёж — это переводы на него с зарплаты и аванса, а не сам платёж с него.
+ */
 function sumActive(state: State, kind: Kind, today: IsoDate): Kopecks {
-  return state.templates.reduce(
-    (sum, t) =>
-      isLive(state, t, today) && t.kind === kind && !(kind === "expense" && (t.toAccountId || t.goalId)) ? sum + t.amount : sum,
-    0,
-  );
+  const reserve = paymentReserveAccounts(state);
+  return state.templates.reduce((sum, t) => {
+    if (!isLive(state, t, today) || t.kind !== kind) return sum;
+    if (kind !== "expense") return sum + t.amount;
+    if (t.toAccountId && reserve.has(t.toAccountId)) return sum + t.amount;
+    if (t.toAccountId || t.goalId || reserve.has(t.accountId ?? MAIN_ACCOUNT_ID)) return sum;
+    return sum + t.amount;
+  }, 0);
 }
 
 /** Регулярные переводы на свои счета: на накопительные и в цели — это сбережения, остальное — погашение кредиток. */
 function sumTransfers(state: State, today: IsoDate): { savings: Kopecks; other: Kopecks } {
+  const reserve = paymentReserveAccounts(state);
   let savings = 0;
   let other = 0;
   for (const t of state.templates) {
     if (!isLive(state, t, today) || t.kind !== "expense" || (!t.toAccountId && !t.goalId)) continue;
+    // Переводы на счёт под платежи уже посчитаны как платежи.
+    if (t.toAccountId && reserve.has(t.toAccountId)) continue;
     if (t.goalId || findAccount(state, t.toAccountId!)?.kind === "savings") savings += t.amount;
     else other += t.amount;
   }
