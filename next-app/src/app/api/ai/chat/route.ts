@@ -135,7 +135,7 @@ async function analysisReply(
   }
   const data = analysisData(state, plan, today);
   const mode = requested === "auto" ? pickAiMode(ANALYSIS_QUESTION[kind]) : requested;
-  const reply = await ask(mode, requested === "auto", analysisMessages(data));
+  const reply = await ask(mode, requested === "auto", analysisMessages(data, state.profile.savingsStyle));
   const report = parseAnalysisReply(reply.text, data, { model: reply.model, createdAt: Date.now(), thinking: Boolean(reply.reasoning) });
   saveReport(userId, report);
   return jsonOk({ text: reportHeadline(report), report, reasoning: reply.reasoning, model: reply.model });

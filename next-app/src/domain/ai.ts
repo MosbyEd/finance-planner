@@ -18,7 +18,7 @@ import { isReservedKey } from "./records";
 import { nextOccurrence } from "./recurring";
 import { autoSavingByDefault } from "./savings";
 import { suggestCategory } from "./sms";
-import { LIMITS, type Account, type CreditTerms, type State } from "./schema";
+import { LIMITS, type Account, type CreditTerms, type Profile, type State } from "./schema";
 import {
   accountBalance,
   activeAccounts,
@@ -177,7 +177,6 @@ export function buildAiSnapshot(state: State, today: IsoDate, detail: AiDetail =
       salarySavingPercent: state.settings.salarySaving.enabled ? state.settings.salarySaving.percent : 0,
       purchaseSavingPercent: state.settings.purchaseSaving.enabled ? state.settings.purchaseSaving.percent : 0,
     },
-    profile: state.profile,
     recentTransactions: recent,
   };
 }
@@ -198,6 +197,48 @@ function aiInterest(summary: CreditSummary, terms: CreditTerms | undefined) {
   };
 }
 
+// ---------- профиль ----------
+
+/** Как учитывать отношение к риску. В настройках профиля под выбором написано то же для пользователя. */
+const RISK_RULES: Record<NonNullable<Profile["riskLevel"]> | "none", string> = {
+  none: "не указано. Про вложения говори, только если спросят, и сначала уточни, готов ли человек к тому, что сумма может временно уменьшиться.",
+  low: "низкое — человек не готов к потерям. Сначала подушка безопасности на 6 месяцев расходов; сбережения — только на вкладах и накопительных счетах. Акции, фонды акций и криптовалюту не предлагай.",
+  medium:
+    "среднее. Сначала подушка безопасности на 3–6 месяцев расходов, потом — вклады и надёжные облигации; небольшую часть можно предложить в фонды акций, предупредив о колебаниях.",
+  high: "высокое — человек готов к колебаниям ради дохода. После подушки безопасности на 3 месяца расходов можно предлагать и доходные вложения с колебаниями (акции, фонды), всегда предупреждая, что сумма может уменьшиться.",
+};
+
+/** Как учитывать темп накоплений. Не указан — темп модель подбирает по цифрам сама. */
+const SAVINGS_RULES: Record<NonNullable<Profile["savingsStyle"]>, string> = {
+  relaxed:
+    "спокойно — копить без напряжения. Предлагай откладывать до 10% дохода и не урезать привычные траты; если к цели не успевает — сначала предложи сдвинуть срок или уменьшить пополнение, а не резать траты.",
+  balanced: "сбалансированно — откладывать 10–20% дохода и сокращать самые заметные необязательные траты, не трогая остальное.",
+  aggressive:
+    "активно — прийти к целям как можно быстрее. Предлагай откладывать 20% дохода и больше, строже сокращать необязательные траты и ставить лимиты по категориям пониже — но не за счёт обязательных платежей.",
+};
+
+/**
+ * Профиль словами — с тем, как его учитывать. Раньше он шёл в JSON как есть, и значения low / aggressive
+ * модель толковала по-своему: совет почти не зависел от выбора.
+ */
+export function profilePrompt(profile: Profile): string[] {
+  const lines = ["Профиль пользователя — учитывай в советах:"];
+  if (profile.occupation) lines.push(`- Чем занимается: ${profile.occupation}.`);
+  lines.push(`- Отношение к риску: ${RISK_RULES[profile.riskLevel ?? "none"]}`);
+  if (profile.savingsStyle) {
+    lines.push(
+      `- Как копить: ${SAVINGS_RULES[profile.savingsStyle]}`,
+      "  Если норма сбережений (savingsRatePercent) заметно расходится с этим темпом, подскажи поменять её в настройках «Сбережения».",
+    );
+  }
+  if (profile.notes) lines.push(`- О себе пишет: «${profile.notes.replace(/\s*\n\s*/g, "; ")}»`);
+  lines.push(
+    "- При любом профиле: деньги на обязательные платежи, подушку безопасности и заёмные не советуй вкладывать во что-то с колебаниями;",
+    "  конкретные акции, облигации, фонды и брокеров не называй.",
+  );
+  return lines;
+}
+
 export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDetail = "full"): string {
   const snapshot = buildAiSnapshot(state, today, detail);
   return [
@@ -214,9 +255,10 @@ export function buildAiSystemPrompt(state: State, today: IsoDate, detail: AiDeta
     "  а объясняй: recommended = меньшее из budgetPerDay (по бюджету месяца) и cashPerDay (деньги на счёте",
     "  минус обязательные платежи до ближайшего дохода, делённые на дни до него). status gap — кассовый разрыв.",
     "- Долги: kind borrow или credit — это мой долг; kind lend — мне должны (актив, а не обязательство).",
-    "- Профиль пользователя (profile) учитывай в советах, если он заполнен.",
     "",
     "- accounts — счета пользователя: balance — остаток, у кредитки debt — долг и interestFreeUntil — до какого дня без процентов.",
+    "",
+    ...profilePrompt(state.profile),
     "",
     "Если пользователь просит что-то добавить или изменить, в самом конце ответа добавь одну строку",
     "(пользователь подтвердит её перед применением):",

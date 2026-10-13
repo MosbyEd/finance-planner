@@ -74,11 +74,14 @@ export function ChipGroup({
  */
 export function ChoiceChips<T extends string>({
   label,
+  description,
   value,
   options,
   onChange,
 }: {
   label: string;
+  /** Что это за выбор — мелким текстом под подписью. */
+  description?: ReactNode;
   value: T;
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
@@ -89,7 +92,17 @@ export function ChoiceChips<T extends string>({
       <p id={id} className="text-sm font-medium text-muted">
         {label}
       </p>
-      <div role="radiogroup" aria-labelledby={id} className="flex flex-wrap gap-2">
+      {description && (
+        <p id={`${id}-about`} className="text-xs text-muted">
+          {description}
+        </p>
+      )}
+      <div
+        role="radiogroup"
+        aria-labelledby={id}
+        aria-describedby={description ? `${id}-about` : undefined}
+        className="flex flex-wrap gap-2"
+      >
         {options.map((o) => (
           <button
             key={o.value}

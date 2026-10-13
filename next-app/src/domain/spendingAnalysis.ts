@@ -2,7 +2,7 @@ import { z } from "zod";
 import { addDays, addMonths, diffDays, firstDayOfMonth, formatDay, isValidIsoDate, isWeekend, lastDayOfMonth, monthKeyOf, weekdayShort, type IsoDate } from "./dates";
 import { kopecksToRubles, type Kopecks } from "./money";
 import { budgetPeriod, payEventName, payEvents, periodBudget, type PayEvent } from "./metrics";
-import type { State, Transaction } from "./schema";
+import type { Profile, State, Transaction } from "./schema";
 import { plural } from "./text";
 
 /**
@@ -497,9 +497,17 @@ const PERIOD_FORMAT = `Это итоги только что закончивш�
  "changes": ["1–3 главных изменения"],
  "steps": [{"title": "один шаг на следующий период", "target": "категория или магазин из данных", "cutPercent": 20, "why": "почему — одно предложение"}]}`;
 
-export function analysisMessages(d: AnalysisData): { role: "system" | "user"; content: string }[] {
+/** Насколько смелые шаги — по «Как копить» из профиля (в настройках профиля это и написано). */
+const PACE_RULES: Record<NonNullable<Profile["savingsStyle"]>, string> = {
+  relaxed: "Человек копит спокойно: шаги мягкие, cutPercent 10–25, привычные траты совсем не отменяй.",
+  balanced: "Человек копит сбалансированно: cutPercent 15–40, начинай с самых заметных необязательных трат.",
+  aggressive: "Человек копит активно: шаги смелее, cutPercent 30–100 — где трату легко убрать, можно предложить отказаться от неё совсем.",
+};
+
+export function analysisMessages(d: AnalysisData, pace: Profile["savingsStyle"] = null): { role: "system" | "user"; content: string }[] {
+  const rules = pace ? `${COMMON_RULES}\n- ${PACE_RULES[pace]}` : COMMON_RULES;
   return [
-    { role: "system", content: `${COMMON_RULES}\n\n${d.kind === "analysis" ? ANALYSIS_FORMAT : PERIOD_FORMAT}` },
+    { role: "system", content: `${rules}\n\n${d.kind === "analysis" ? ANALYSIS_FORMAT : PERIOD_FORMAT}` },
     { role: "user", content: `${ANALYSIS_QUESTION[d.kind]}.\nДанные:\n${JSON.stringify(analysisPromptData(d))}` },
   ];
 }

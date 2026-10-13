@@ -79,6 +79,27 @@ describe("системный промпт", () => {
     expect(prompt).toContain('"balanceOnAccount":12345');
     expect(prompt).toContain("AI_CMDS");
   });
+
+  it("профиль — словами и с правилами, а не служебными значениями в JSON", () => {
+    const s = stateWith({
+      profile: { occupation: "Инженер", riskLevel: "low", savingsStyle: "aggressive", notes: "Двое детей\nКопим на квартиру" },
+    });
+    const prompt = buildAiSystemPrompt(s, "2026-03-15");
+    expect(prompt).not.toMatch(/"profile"|"riskLevel"|"aggressive"/);
+    expect(prompt).toContain("- Чем занимается: Инженер.");
+    expect(prompt).toContain("Отношение к риску: низкое");
+    expect(prompt).toContain("криптовалюту не предлагай");
+    expect(prompt).toContain("Как копить: активно");
+    expect(prompt).toContain("«Двое детей; Копим на квартиру»");
+  });
+
+  it("пустой профиль: про вложения — только по вопросу, темп не задан", () => {
+    const prompt = buildAiSystemPrompt(stateWith(), "2026-03-15");
+    expect(prompt).toContain("Отношение к риску: не указано");
+    expect(prompt).not.toContain("Как копить");
+    expect(prompt).not.toContain("Чем занимается");
+    expect(prompt).toContain("конкретные акции, облигации, фонды и брокеров не называй");
+  });
 });
 
 describe("страховка для модели на телефоне", () => {

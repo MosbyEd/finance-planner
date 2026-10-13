@@ -205,6 +205,12 @@ describe("агрегаты для разбора", () => {
     expect(prompt).not.toContain("Пятёрочка\",\"total\":14000,\"purchases\":7,\"category\":\"Продукты\",\"note");
   });
 
+  it("«Как копить» из профиля задаёт, насколько смелые шаги", () => {
+    expect(analysisMessages(d)[0].content).not.toContain("Человек копит");
+    expect(analysisMessages(d, "relaxed")[0].content).toContain("cutPercent 10–25");
+    expect(analysisMessages(d, "aggressive")[0].content).toContain("cutPercent 30–100");
+  });
+
   it("эффект шага считает приложение: такси −30% → +150 ₽ в день к лимиту", () => {
     // 15 000 ₽ за 31 день ≈ 484 ₽ в день; 30% ≈ 145 ₽ — до десятков рублей.
     expect(stepEffect(d, "такси", 30)).toEqual({ perDay: 15_000, perPeriod: 15_000 * d.periodDays });

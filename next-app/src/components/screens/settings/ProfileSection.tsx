@@ -16,19 +16,54 @@ const MAX_OCCUPATION = 100;
 type Risk = "none" | NonNullable<Profile["riskLevel"]>;
 type Style = "none" | NonNullable<Profile["savingsStyle"]>;
 
-const RISK_OPTIONS: { value: Risk; label: string }[] = [
-  { value: "none", label: "Не указано" },
-  { value: "low", label: "Низкий" },
-  { value: "medium", label: "Средний" },
-  { value: "high", label: "Высокий" },
+/**
+ * Варианты с тем, что помощник с ними делает (effect). Для модели те же правила записаны в profilePrompt
+ * (domain/ai.ts) и в анализе трат (domain/spendingAnalysis.ts) — меняются вместе.
+ */
+const RISK_OPTIONS: { value: Risk; label: string; effect: string }[] = [
+  {
+    value: "none",
+    label: "Не указано",
+    effect: "Про вложения помощник заговорит, только если спросите, — и сначала уточнит, готовы ли вы к колебаниям.",
+  },
+  {
+    value: "low",
+    label: "Низкий",
+    effect: "Сначала подушка на 6 месяцев расходов, сбережения — на вкладах и накопительных счетах. Акции и криптовалюту помощник не предложит.",
+  },
+  {
+    value: "medium",
+    label: "Средний",
+    effect: "Сначала подушка на 3–6 месяцев расходов, потом вклады и надёжные облигации; небольшую часть — в фонды акций, с предупреждением о колебаниях.",
+  },
+  {
+    value: "high",
+    label: "Высокий",
+    effect: "После подушки на 3 месяца расходов помощник может предложить и доходные вложения с колебаниями — акции, фонды — и предупредит о риске.",
+  },
 ];
 
-const STYLE_OPTIONS: { value: Style; label: string }[] = [
-  { value: "none", label: "Не указано" },
-  { value: "relaxed", label: "Спокойно" },
-  { value: "balanced", label: "Сбалансированно" },
-  { value: "aggressive", label: "Активно" },
+const STYLE_OPTIONS: { value: Style; label: string; effect: string }[] = [
+  { value: "none", label: "Не указано", effect: "Темп помощник подбирает сам — по вашим доходам и целям." },
+  {
+    value: "relaxed",
+    label: "Спокойно",
+    effect: "До 10% дохода, привычные траты не урезать. Не успеваете к цели — помощник предложит сдвинуть срок, а не затянуть пояс. В анализе трат — мягкие шаги.",
+  },
+  {
+    value: "balanced",
+    label: "Сбалансированно",
+    effect: "10–20% дохода и сокращение самых заметных необязательных трат. В анализе трат — умеренные шаги.",
+  },
+  {
+    value: "aggressive",
+    label: "Активно",
+    effect: "20% дохода и больше, строже сокращать необязательные траты и ставить лимиты пониже — чтобы прийти к целям быстрее. В анализе трат — смелые шаги.",
+  },
 ];
+
+const effectOf = <T extends string>(options: { value: T; effect: string }[], value: T) =>
+  options.find((o) => o.value === value)?.effect;
 
 interface Form {
   occupation: string;
@@ -92,8 +127,9 @@ export function ProfileSection() {
         }}
       >
         <p className="text-sm text-muted">
-          Так AI-помощник сможет давать советы под вашу ситуацию. Всё необязательно. Профиль отправляется помощнику,
-          только когда вы задаёте ему вопрос.
+          Так AI-помощник сможет давать советы под вашу ситуацию. Профиль меняет только его ответы: лимит на день, бюджет
+          и отчисления в сбережения от него не зависят — они в настройках «Сбережения». Всё необязательно. Профиль
+          отправляется помощнику, только когда вы задаёте ему вопрос; «Как копить» учитывает ещё анализ трат.
         </p>
         <TextInput
           label="Чем вы занимаетесь"
@@ -102,13 +138,34 @@ export function ProfileSection() {
           maxLength={MAX_OCCUPATION}
           onChange={(e) => patch({ occupation: e.target.value })}
         />
-        <ChoiceChips label="Отношение к риску" value={form.risk} options={RISK_OPTIONS} onChange={(risk) => patch({ risk })} />
-        <ChoiceChips
-          label="Как копить"
-          value={form.style}
-          options={STYLE_OPTIONS}
-          onChange={(style) => patch({ style })}
-        />
+        <div className="space-y-2">
+          <ChoiceChips
+            label="Отношение к риску"
+            description="Готовы ли вы к тому, что вложения временно подешевеют, ради бо́льшего дохода. Влияет на советы, где держать сбережения."
+            value={form.risk}
+            options={RISK_OPTIONS}
+            onChange={(risk) => patch({ risk })}
+          />
+          <p className="text-sm" aria-live="polite">
+            {effectOf(RISK_OPTIONS, form.risk)}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <ChoiceChips
+            label="Как копить"
+            description="Насколько усердно откладывать. Влияет на советы, сколько откладывать и какие траты сократить."
+            value={form.style}
+            options={STYLE_OPTIONS}
+            onChange={(style) => patch({ style })}
+          />
+          <p className="text-sm" aria-live="polite">
+            {effectOf(STYLE_OPTIONS, form.style)}
+          </p>
+        </div>
+        <p className="text-xs text-muted">
+          При любом выборе помощник не советует вкладывать деньги на обязательные платежи, подушку и заёмные и не
+          называет конкретные акции, фонды и брокеров.
+        </p>
         <TextArea
           label="Что ещё важно знать"
           placeholder="Семья, планы, крупные расходы впереди"
