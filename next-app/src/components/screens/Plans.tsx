@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatDay, formatMonthIn, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { isSkipped, nextOccurrence, occurrenceDate, templateEnd, type TemplateEnd } from "@/domain/recurring";
@@ -12,6 +12,7 @@ import { useDispatch } from "../app/hooks";
 import { useUi } from "../app/overlays";
 import { Button } from "../ui/Button";
 import { Card, EmptyState, Money } from "../ui/controls";
+import { Icon } from "../ui/Icon";
 import { useToast } from "../ui/feedback";
 
 type Kind = Template["kind"];
@@ -36,34 +37,67 @@ function isLive(state: State, t: Template, today: IsoDate): boolean {
   return t.active && templateEnd(state, t, today).status !== "finished";
 }
 
-/**
- * Сумма действующих шаблонов. Платежи на свои счета и в цели (погашение кредитки, сбережения) — отдельно.
- * Счёт под платежи («Ипотека»): платёж — это переводы на него с зарплаты и аванса, а не сам платёж с него.
- */
-function sumActive(state: State, kind: Kind, today: IsoDate): Kopecks {
-  const reserve = paymentReserveAccounts(state);
-  return state.templates.reduce((sum, t) => {
-    if (!isLive(state, t, today) || t.kind !== kind) return sum;
-    if (kind !== "expense") return sum + t.amount;
-    if (t.toAccountId && reserve.has(t.toAccountId)) return sum + t.amount;
-    if (t.toAccountId || t.goalId || reserve.has(t.accountId ?? MAIN_ACCOUNT_ID)) return sum;
-    return sum + t.amount;
-  }, 0);
+/** Строка расшифровки итога: регулярный платёж или доход, из которых сложилась сумма. */
+interface Part {
+  id: string;
+  title: string;
+  detail: string;
+  amount: Kopecks;
+  /** Показан для ясности, но в сумму не входит (платёж со счёта под платежи — его уже покрыли переводы). */
+  excluded?: boolean;
 }
 
-/** Регулярные переводы на свои счета: на накопительные и в цели — это сбережения, остальное — погашение кредиток. */
-function sumTransfers(state: State, today: IsoDate): { savings: Kopecks; other: Kopecks } {
+/** Из чего складывается итог месяца: доходы, обязательные, переводы на накопительные и в цели, прочие переводы. */
+interface Breakdown {
+  income: Part[];
+  mandatory: Part[];
+  savings: Part[];
+  other: Part[];
+  /** Среди прочих переводов есть не только кредитки — строка называется «Переводы на свои счета». */
+  otherNotCredit: boolean;
+}
+
+const sumParts = (parts: Part[]): Kopecks => parts.reduce((sum, p) => (p.excluded ? sum : sum + p.amount), 0);
+
+/**
+ * Действующие шаблоны по строкам итога. Счёт под платежи («Ипотека»): платёж — это переводы на него с зарплаты
+ * и аванса; сам платёж с него показан в расшифровке, но второй раз не считается.
+ */
+function breakdown(state: State, today: IsoDate): Breakdown {
   const reserve = paymentReserveAccounts(state);
-  let savings = 0;
-  let other = 0;
-  for (const t of state.templates) {
-    if (!isLive(state, t, today) || t.kind !== "expense" || (!t.toAccountId && !t.goalId)) continue;
-    // Переводы на счёт под платежи уже посчитаны как платежи.
-    if (t.toAccountId && reserve.has(t.toAccountId)) continue;
-    if (t.goalId || findAccount(state, t.toAccountId!)?.kind === "savings") savings += t.amount;
-    else other += t.amount;
+  const result: Breakdown = { income: [], mandatory: [], savings: [], other: [], otherNotCredit: false };
+  const name = (id: string | undefined) => findAccount(state, id ?? MAIN_ACCOUNT_ID)?.name ?? "";
+  for (const t of [...state.templates].sort(byActiveAndDay)) {
+    if (!isLive(state, t, today)) continue;
+    const day = `${t.dayOfMonth}-го`;
+    const part = (detail: string, excluded?: boolean): Part => ({
+      id: t.id,
+      title: t.title,
+      detail,
+      amount: t.amount,
+      ...(excluded ? { excluded } : {}),
+    });
+    if (t.kind === "income") {
+      result.income.push(part(`${day} · ${t.category}`));
+    } else if (t.toAccountId && reserve.has(t.toAccountId)) {
+      result.mandatory.push(part(`${day} · перевод на «${name(t.toAccountId)}» под платежи`));
+    } else if (t.goalId) {
+      const goal = state.goals.find((g) => g.id === t.goalId);
+      result.savings.push(part(`${day} · в цель «${goal?.name ?? ""}»`));
+    } else if (t.toAccountId) {
+      const target = findAccount(state, t.toAccountId);
+      if (target?.kind === "savings") result.savings.push(part(`${day} · на «${target.name}»`));
+      else {
+        result.other.push(part(`${day} · на «${target?.name ?? ""}»`));
+        if (target?.kind !== "credit") result.otherNotCredit = true;
+      }
+    } else if (reserve.has(t.accountId ?? MAIN_ACCOUNT_ID)) {
+      result.mandatory.push(part(`${day} · со счёта «${name(t.accountId)}» — уже отложено переводами, не считается`, true));
+    } else {
+      result.mandatory.push(part(`${day} · ${t.category}`));
+    }
   }
-  return { savings, other };
+  return result;
 }
 
 export function Plans() {
@@ -77,10 +111,11 @@ export function Plans() {
         .filter((t) => t.kind === kind)
         .sort(byActiveAndDay)
         .map((t) => ({ template: t, next: nextOccurrence(state, t, today)?.date ?? null }));
-    const income = sumActive(state, "income", today);
-    const expense = sumActive(state, "expense", today);
+    const parts = breakdown(state, today);
+    const income = sumParts(parts.income);
+    const expense = sumParts(parts.mandatory);
     const savingsTarget = percentOf(income, state.settings.savingsRatePercent);
-    const transfers = sumTransfers(state, today);
+    const transfers = { savings: sumParts(parts.savings), other: sumParts(parts.other) };
     // Регулярные переводы на накопительные покрывают норму сбережений; больше нормы — откладывается больше.
     const saving = Math.max(savingsTarget, transfers.savings);
     const skipped: SkippedRow[] = state.templates
@@ -89,6 +124,7 @@ export function Plans() {
       .sort((a, b) => a.date.localeCompare(b.date));
     return {
       month,
+      parts,
       incomes: rows("income"),
       expenses: rows("expense"),
       income,
@@ -114,6 +150,7 @@ export function Plans() {
       ) : (
         <>
           <SummaryCard
+            parts={data.parts}
             income={data.income}
             expense={data.expense}
             transfers={data.transfers}
@@ -132,6 +169,7 @@ export function Plans() {
 }
 
 function SummaryCard({
+  parts,
   income,
   expense,
   transfers,
@@ -140,6 +178,7 @@ function SummaryCard({
   rate,
   free,
 }: {
+  parts: Breakdown;
   income: Kopecks;
   expense: Kopecks;
   transfers: { savings: Kopecks; other: Kopecks };
@@ -151,11 +190,12 @@ function SummaryCard({
   return (
     <Card title="Итого в месяц">
       <dl className="space-y-1.5 text-[15px]">
-        <SummaryRow label="Доходы" value={income} tone="positive" />
-        <SummaryRow label="Обязательные платежи" value={-expense} />
+        <SummaryRow label="Доходы" value={income} tone="positive" parts={parts.income} />
+        <SummaryRow label="Обязательные платежи" value={-expense} parts={parts.mandatory} />
         <SummaryRow
           label="Сбережения"
           value={-saving}
+          parts={parts.savings}
           note={
             transfers.savings === 0
               ? `Норма ${rate}% от доходов`
@@ -167,9 +207,14 @@ function SummaryCard({
         {transfers.other > 0 && (
           // Погашение кредитки — перевод между своими счетами: покупки по ней уже учтены, когда их делали.
           <SummaryRow
-            label="Погашение кредиток"
+            label={parts.otherNotCredit ? "Переводы на свои счета" : "Погашение кредиток"}
             value={-transfers.other}
-            note="Уходит со счёта каждый месяц. В лимите на день покупки по кредитке считаются, когда вы их делаете"
+            parts={parts.other}
+            note={
+              parts.otherNotCredit
+                ? "Уходит со счёта каждый месяц"
+                : "Уходит со счёта каждый месяц. В лимите на день покупки по кредитке считаются, когда вы их делаете"
+            }
           />
         )}
         <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-border pt-3">
@@ -202,6 +247,7 @@ function SummaryRow({
   tone = "default",
   note,
   neutral = false,
+  parts,
 }: {
   label: string;
   value: Kopecks;
@@ -210,11 +256,29 @@ function SummaryRow({
   note?: string;
   /** Справочная сумма: без знака, в «Свободно» не входит. */
   neutral?: boolean;
+  /** Из чего сложилась сумма — раскрывается по нажатию на строку. */
+  parts?: Part[];
 }) {
+  const [open, setOpen] = useState(false);
+  const expandable = Boolean(parts?.length);
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <dt className="text-muted">{label}</dt>
+        <dt className="min-w-0 text-muted">
+          {expandable ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+              className="inline-flex items-center gap-1 text-left hover:text-text"
+            >
+              {label}
+              <Icon name="chevronDown" size={14} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+            </button>
+          ) : (
+            label
+          )}
+        </dt>
         <dd>
           <Money
             value={value}
@@ -225,6 +289,19 @@ function SummaryRow({
         </dd>
       </div>
       {note && <p className="text-xs text-muted">{note}</p>}
+      {open && parts && (
+        <ul className="mt-1.5 mb-2 space-y-1.5 rounded-2xl bg-surface-2 px-3 py-2">
+          {parts.map((p) => (
+            <li key={p.id} className={`flex items-baseline justify-between gap-3 text-sm ${p.excluded ? "text-muted" : ""}`}>
+              <span className="min-w-0">
+                <span className="block truncate">{p.title}</span>
+                <span className="block text-xs text-muted">{p.detail}</span>
+              </span>
+              <Money value={p.amount} whole={p.amount % 100 === 0} className={`shrink-0 ${p.excluded ? "line-through" : ""}`} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
