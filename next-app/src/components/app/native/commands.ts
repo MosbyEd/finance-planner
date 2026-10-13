@@ -80,6 +80,7 @@ const OVERLAY_KINDS = [
   "transfer",
   "whatsNew",
   "sms",
+  "analysis",
 ] as const satisfies readonly Overlay["kind"][];
 
 const isoDate = z.string().refine((v) => isValidIsoDate(v), "Некорректная дата") as unknown as z.ZodType<IsoDate>;

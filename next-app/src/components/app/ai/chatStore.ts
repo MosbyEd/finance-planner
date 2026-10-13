@@ -7,6 +7,7 @@ import type { State } from "@/domain/schema";
 import { ApiError, api, parseAiChatReply, type AiChatMessage, type AiChatResponse } from "@/client/api";
 import { AppleAiError, askApple } from "@/client/appleAi";
 import {
+  isAnalysisThread,
   nativeAiAck,
   nativeAiChatStart,
   nativeAiChatVisible,
@@ -370,6 +371,8 @@ export class ChatStore {
   }
 
   private onNativeReply = (reply: NativeAiReply): void => {
+    // Разбор трат забирает своё хранилище (analysisStore).
+    if (isAnalysisThread(reply.threadId)) return;
     nativeAiAck([reply.requestId]);
     const thread = this.snapshot.threads.find((t) => t.id === reply.threadId);
     // Чат удалили или ответ уже записан.
@@ -585,7 +588,8 @@ export class ChatStore {
 }
 
 function fromServer(response: AiChatResponse): AssistantMessage {
-  const engine: AiEngine = /reason/i.test(response.model) ? "reasoning" : "fast";
+  // DeepSeek называет модели по-разному (с рассуждением — и «deepseek-flash»): смотрим, было ли рассуждение.
+  const engine: AiEngine = response.reasoning?.trim() || /reason/i.test(response.model) ? "reasoning" : "fast";
   const message = assistant(response.text, response.reasoning?.trim() || null, response.proposal, response.skipped, engine);
   return response.skippedReasons?.length ? { ...message, skippedReasons: response.skippedReasons } : message;
 }

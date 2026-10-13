@@ -81,10 +81,15 @@ interface BudgetNativePlugin {
     engine: string;
     expectedSeconds: number;
     body: unknown;
+    /** Разбор трат или итоги периода: свой заголовок уведомления, нажатие открывает разбор. Нет — чат. */
+    kind?: "analysis" | "period";
+    /** Без Live Activity (итоги периода, о которых приложение просит само). */
+    silent?: boolean;
   }): Promise<void>;
   aiInbox(): Promise<{ done: NativeAiReply[]; running: { requestId: string; threadId: string; startedAt: number }[] }>;
   aiAck(options: { ids: string[] }): Promise<void>;
-  aiChatVisible(options: { visible: boolean }): Promise<void>;
+  /** Открыт чат или разбор трат: ответ в открытое окно приходит без уведомления. */
+  aiChatVisible(options: { visible: boolean; kind?: "chat" | "analysis" }): Promise<void>;
   addListener(event: "aiReply", listener: (data: NativeAiReply) => void): Promise<PluginListenerHandle>;
   biometricAuth(options: { reason: string }): Promise<{ ok: boolean }>;
   aiStatus(): Promise<AppleAiStatus>;
@@ -284,9 +289,16 @@ export function nativeAiAck(ids: string[]): void {
   plugin.aiAck({ ids }).catch(() => {});
 }
 
-export function nativeAiChatVisible(visible: boolean): void {
+export function nativeAiChatVisible(visible: boolean, kind: "chat" | "analysis" = "chat"): void {
   if (!isNativeApp()) return;
-  plugin.aiChatVisible({ visible }).catch(() => {});
+  plugin.aiChatVisible({ visible, kind }).catch(() => {});
+}
+
+/** Фоновые запросы разбора трат идут с threadId «analysis:…» — чат их не трогает. */
+export const ANALYSIS_THREAD_PREFIX = "analysis:";
+
+export function isAnalysisThread(threadId: string): boolean {
+  return threadId.startsWith(ANALYSIS_THREAD_PREFIX);
 }
 
 export function onNativeAiReply(handler: (reply: NativeAiReply) => void): () => void {

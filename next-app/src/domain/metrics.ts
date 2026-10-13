@@ -539,13 +539,15 @@ export interface PayEvent {
   received: boolean;
 }
 
-/** Поступления зарплаты и аванса около сегодняшнего дня: пришедшие — по факту, будущие — по плану. */
-export function payEvents(state: State, today: IsoDate): PayEvent[] {
+/**
+ * Поступления зарплаты и аванса около сегодняшнего дня (или за range): пришедшие — по факту, будущие — по плану.
+ */
+export function payEvents(state: State, today: IsoDate, range?: { from: IsoDate; to: IsoDate }): PayEvent[] {
   const templates = state.templates.filter((t) => t.active && t.kind === "income" && isPayIncome(t));
   if (!templates.length) return [];
   const ids = new Set(templates.map((t) => t.id));
-  const from = addDays(today, -62);
-  const to = addDays(today, 100);
+  const from = range?.from ?? addDays(today, -62);
+  const to = range?.to ?? addDays(today, 100);
   const received: PayEvent[] = [];
   const done = new Set<string>();
   for (const tx of state.transactions) {

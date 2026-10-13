@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { dueOccurrences } from "@/domain/recurring";
+import { analysisAvailability, periodSummaryDue } from "@/domain/spendingAnalysis";
 import { FinanceStore } from "@/client/store";
 import { StoreProvider, useSnapshot, useStore, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
@@ -22,6 +23,7 @@ import { Settings } from "../screens/Settings";
 import { useDispatch } from "./hooks";
 import { OverlayHost } from "./OverlayHost";
 import { forgetAiChat, getChatStore } from "./ai/chatStore";
+import { forgetAnalysis, useAnalysis } from "./ai/analysisStore";
 import { useWhatsNewPrompt } from "./sheets/WhatsNewSheet";
 import { UiProvider, useUi, type Tab } from "./overlays";
 import { useNativeHome, useNativeShell } from "./native/useNativeHome";
@@ -69,14 +71,23 @@ function Shell() {
   const toast = useToast();
   const { tab, setTab, open } = useUi();
 
-  useEffect(() => store.onSignOut(forgetAiChat), [store]);
+  useEffect(
+    () =>
+      store.onSignOut((login) => {
+        forgetAiChat(login);
+        forgetAnalysis(login);
+      }),
+    [store],
+  );
 
-  // Нажали на уведомление: ответ помощника — открыть его чат, «Бюджет обновлён» — «Что нового».
+  // Нажали на уведомление: ответ помощника — открыть его чат, разбор трат или итоги периода — окно разбора,
+  // «Бюджет обновлён» — «Что нового».
   useEffect(
     () =>
       onNotificationTap((extra) => {
         const data = extra && typeof extra === "object" ? (extra as { kind?: unknown; threadId?: unknown }) : {};
         if (data.kind === "ai") open({ kind: "ai", threadId: typeof data.threadId === "string" ? data.threadId : undefined });
+        else if (data.kind === "analysis") open({ kind: "analysis" });
         else if (data.kind === "whatsNew") open({ kind: "whatsNew" });
       }),
     [open],
@@ -129,6 +140,7 @@ function Shell() {
 
   useRecurringSync();
   useNotificationSync();
+  usePeriodSummary();
   useDesktopBridge(snapshot.aiEnabled);
   useNativeBridge();
   useReviewPrompt();
@@ -375,6 +387,33 @@ function useNotificationSync() {
     const timer = setTimeout(() => void syncNotifications(state), 2000);
     return () => clearTimeout(timer);
   }, [state, phase]);
+}
+
+/**
+ * Итоги периода после зарплаты или аванса: в iOS-приложении приложение просит их само (фоновым запросом,
+ * готовы — уведомление). Только в приложении: итоги, подведённые в браузере, телефон бы уже не прислал.
+ */
+function usePeriodSummary() {
+  const { state, phase, user, aiEnabled, sessionExpired } = useSnapshot();
+  const today = useToday();
+  const { store, snapshot } = useAnalysis(user?.login);
+  const attempted = useRef<string | null>(null);
+  const ready = phase === "ready" && !sessionExpired;
+  // Разборы — с сервера: при входе и каждый новый день.
+  useEffect(() => {
+    if (store && ready) void store.refresh();
+  }, [store, ready, today]);
+  const due = useMemo(
+    () => (store && ready && aiEnabled && snapshot.synced && isNativeApp() ? periodSummaryDue(analysisAvailability(state, today), snapshot.reports) : null),
+    [store, ready, aiEnabled, snapshot.synced, snapshot.reports, state, today],
+  );
+  useEffect(() => {
+    if (!store || !due || snapshot.pending.period) return;
+    const key = `${user?.login}|${due.from}`;
+    if (attempted.current === key) return;
+    attempted.current = key;
+    void store.run("period", true);
+  }, [store, due, snapshot.pending.period, user?.login]);
 }
 
 function useRecurringSync() {

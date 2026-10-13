@@ -30,7 +30,9 @@ export type Overlay =
   /** Новые операции из СМС и Siri — подтвердить или поправить. */
   | { kind: "review" }
   /** Операция из вставленного текста СМС (с окна «+»). */
-  | { kind: "sms" };
+  | { kind: "sms" }
+  /** Анализ трат от AI и итоги периодов. */
+  | { kind: "analysis" };
 
 export type Tab = "home" | "history" | "plans" | "goals" | "analytics" | "settings";
 

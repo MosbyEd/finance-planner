@@ -155,6 +155,12 @@ export function weekdayShort(date: IsoDate): string {
   return WEEKDAYS_SHORT[new Date(toUtcMs(date)).getUTCDay()];
 }
 
+/** Суббота или воскресенье. */
+export function isWeekend(date: IsoDate): boolean {
+  const day = new Date(toUtcMs(date)).getUTCDay();
+  return day === 0 || day === 6;
+}
+
 /** «Сегодня», «Вчера», «Завтра» или «9 октября, чт». */
 export function formatRelativeDay(date: IsoDate, today: IsoDate): string {
   const diff = diffDays(today, date);

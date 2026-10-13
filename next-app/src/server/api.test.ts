@@ -11,13 +11,17 @@ import { GET as me } from "@/app/api/me/route";
 import { GET as getState } from "@/app/api/state/route";
 import { POST as postActions } from "@/app/api/state/actions/route";
 import { POST as aiChat } from "@/app/api/ai/chat/route";
+import { GET as aiReports } from "@/app/api/ai/reports/route";
 import { DELETE as deleteAccount } from "@/app/api/account/route";
 import { POST as changePassword } from "@/app/api/account/password/route";
 import { emptyState } from "@/domain/defaults";
+import type { IsoDate } from "@/domain/dates";
+import { stateWith, template, tx } from "@/domain/test-utils";
 import { hashPassword, verifyPassword } from "./auth";
 import { closeDb, getDb } from "./db";
+import { deepseekChat } from "./deepseek";
 import { clearRateLimits } from "./rateLimit";
-import { clearStateCache } from "./stateStore";
+import { clearStateCache, writeState } from "./stateStore";
 
 // Внешний AI не вызываем: ответ провайдера подменён.
 vi.mock("./deepseek", async (importOriginal) => {
@@ -506,5 +510,88 @@ describe("вход в другой аккаунт в соседней вклад
     const body = { messages: [{ role: "user", content: "привет" }], mode: "fast", today };
     const ai = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body, headers: account("boris") }));
     expect(ai.status).toBe(409);
+  });
+});
+
+describe("анализ трат от AI", () => {
+  /** Учёт с 10 октября, зарплата 10-го, аванс 25-го; траты — в 22 днях октября. */
+  function seed(login: string) {
+    const s = stateWith();
+    s.templates = [
+      template({ id: "salary", kind: "income", amount: 10_000_000, dayOfMonth: 10, startDate: "2026-11-10" }),
+      template({ id: "advance", kind: "income", title: "Аванс", category: "Аванс", amount: 5_000_000, dayOfMonth: 25, startDate: "2026-10-25" }),
+    ];
+    s.transactions = [tx({ type: "adjustment", amount: 7_777_700, date: "2026-10-10", category: "" })];
+    for (let d = 10; d <= 31; d++) {
+      const date: IsoDate = `2026-10-${d}`;
+      s.transactions.push(tx({ type: "expense", amount: 150_000, date, category: "Такси", title: "Яндекс Такси", note: "Покупка 1500р Баланс 12345,67р" }));
+    }
+    const user = getDb().prepare("SELECT id FROM users WHERE login = ?").get(login) as { id: number };
+    writeState(user.id, s, 1);
+  }
+
+  const analysis = (kind: "analysis" | "period", day: IsoDate, auto = false) => ({ analysis: { kind, auto }, mode: "auto", today: day });
+
+  it("до 10 ноября закрыт: ручной разбор — 409 с причиной, автоматические итоги — тихо, без модели", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 10, 9, 12) });
+    const cookie = await signUp();
+    seed("anna");
+    vi.mocked(deepseekChat).mockClear();
+    const manual = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("analysis", "2026-11-09") }));
+    expect(manual.status).toBe(409);
+    expect((await manual.json()).error).toBe("Откроется после зарплаты 10 ноября · дней с тратами уже 22");
+    const auto = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("period", "2026-11-09", true) }));
+    expect(await auto.json()).toMatchObject({ silent: true, report: null });
+    expect(deepseekChat).not.toHaveBeenCalled();
+  });
+
+  it("10 ноября: итоги периода — моделью с рассуждением, один раз; в модель — без СМС и остатков", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 10, 10, 12) });
+    const cookie = await signUp();
+    seed("anna");
+    vi.mocked(deepseekChat).mockClear();
+    vi.mocked(deepseekChat).mockResolvedValueOnce({
+      text: JSON.stringify({ summary: "За период ушло 10 500 ₽ — почти всё на такси. Остальное в норме.", changes: [], steps: [{ title: "Такси реже", target: "Такси", cutPercent: 30, why: "" }] }),
+      reasoning: null,
+      model: "deepseek-reasoner",
+    });
+    const first = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("period", "2026-11-10", true) }));
+    expect(first.status).toBe(200);
+    const body = await first.json();
+    // Числа — с неразрывными пробелами: в уведомлении и на экране сумма не рвётся на строки.
+    expect(body.text).toBe("За период ушло 10\u00a0500\u00a0₽ — почти всё на такси.");
+    expect(body.silent).toBeUndefined();
+    expect(body.report).toMatchObject({ kind: "period", from: "2026-10-25", to: "2026-11-09" });
+    expect(body.report.steps[0].effectPerDay).toBeGreaterThan(0);
+
+    const [, mode, messages] = vi.mocked(deepseekChat).mock.calls[0];
+    expect(mode).toBe("reasoning");
+    const prompt = JSON.stringify(messages);
+    expect(prompt).toContain("Такси");
+    expect(prompt).not.toMatch(/12345|Баланс|77777/);
+
+    // Второй раз (другое устройство, повтор) — готовые итоги, без модели и без уведомления.
+    const again = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("period", "2026-11-10", true) }));
+    expect(await again.json()).toMatchObject({ cached: true, silent: true, report: { from: "2026-10-25" } });
+    expect(deepseekChat).toHaveBeenCalledTimes(1);
+
+    const list = await (await aiReports(request("/api/ai/reports", { cookie }))).json();
+    expect(list.reports).toHaveLength(1);
+    expect(list.reports[0]).toMatchObject({ kind: "period", summary: expect.stringContaining("такси") });
+  });
+
+  it("разбор — по двум полным периодам; чужие разборы не видны", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 10, 10, 12) });
+    const anna = await signUp("anna");
+    const boris = await signUp("boris");
+    seed("anna");
+    vi.mocked(deepseekChat).mockResolvedValueOnce({ text: "Не JSON, а просто текст.", reasoning: null, model: "deepseek-reasoner" });
+    const res = await aiChat(request("/api/ai/chat", { method: "POST", cookie: anna, body: analysis("analysis", "2026-11-10") }));
+    expect((await res.json()).report).toMatchObject({ kind: "analysis", from: "2026-10-10", to: "2026-11-09", summary: "Не JSON, а просто текст." });
+    expect((await (await aiReports(request("/api/ai/reports", { cookie: boris }))).json()).reports).toEqual([]);
+    expect((await aiReports(request("/api/ai/reports"))).status).toBe(401);
   });
 });

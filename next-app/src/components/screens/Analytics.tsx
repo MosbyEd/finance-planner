@@ -29,6 +29,7 @@ import { Card, EmptyState, Money, Progress, Segmented } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { MonthSwitcher } from "../ui/MonthSwitcher";
 import { plural } from "@/domain/text";
+import { AiAnalysisCard } from "./analytics/AiAnalysisCard";
 
 type ExpenseKind = Exclude<BreakdownKind, "income">;
 
@@ -85,6 +86,7 @@ export function Analytics() {
 
   return (
     <div className="space-y-4">
+      <AiAnalysisCard />
       <div className="flex flex-col items-center gap-2">
         <MonthSwitcher value={month} onChange={setMonth} max={addMonths(current, 12)} />
         <div className="flex flex-wrap items-center justify-center gap-2">

@@ -131,7 +131,8 @@ export async function readText(req: NextRequest, maxBytes: number): Promise<Body
 /** Читает JSON-тело с ограничением размера (в байтах) и проверкой схемой. */
 export async function readBody<T extends z.ZodType>(
   req: NextRequest,
-  schema: T,
+  /** Схема — или выбор схемы по самому телу (у одного адреса бывают запросы разного вида). */
+  schema: T | ((raw: unknown) => T),
   maxBytes: number,
 ): Promise<{ ok: true; data: z.infer<T> } | { ok: false; response: NextResponse }> {
   const body = await readText(req, maxBytes);
@@ -142,7 +143,7 @@ export async function readBody<T extends z.ZodType>(
   } catch {
     return { ok: false, response: jsonError(400, "Некорректный JSON.") };
   }
-  const parsed = schema.safeParse(raw);
+  const parsed = (typeof schema === "function" ? schema(raw) : schema).safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { ok: false, response: jsonError(400, issue?.message ?? "Некорректные данные.", { path: issue?.path }) };

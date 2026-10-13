@@ -158,10 +158,14 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let question = call.getString("question") ?? ""
         let engine = call.getString("engine") ?? "DeepSeek"
         let expected = call.getInt("expectedSeconds") ?? 10
+        // Разбор трат или итоги периода (свои уведомления); silent — без Live Activity.
+        let kind = call.getString("kind")
+        let silent = call.getBool("silent") ?? false
         DispatchQueue.main.async {
             do {
                 try AiRequests.shared.start(
-                    requestId: requestId, threadId: threadId, question: question, engine: engine, expectedSeconds: expected, body: data
+                    requestId: requestId, threadId: threadId, question: question, engine: engine, expectedSeconds: expected, body: data,
+                    kind: kind, silent: silent
                 )
                 call.resolve()
             } catch {
@@ -193,8 +197,9 @@ public class BudgetNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func aiChatVisible(_ call: CAPPluginCall) {
         let visible = call.getBool("visible") ?? false
+        let kind = call.getString("kind") ?? "chat"
         DispatchQueue.main.async {
-            AiRequests.shared.setChatVisible(visible)
+            AiRequests.shared.setChatVisible(visible, kind: kind)
             call.resolve()
         }
     }

@@ -68,6 +68,18 @@ const MIGRATIONS: Migration[] = [
     last_used_at INTEGER
   );
   `,
+  // Разборы трат от AI и итоги периодов: один на вид и начало отрезка — итоги периода не просим дважды,
+  // с какого бы устройства ни пришёл запрос.
+  `
+  CREATE TABLE ai_reports (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    report_json TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind, period_start)
+  );
+  `,
 ];
 
 function addLoginKey(db: DatabaseSync): void {

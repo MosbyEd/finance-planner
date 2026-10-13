@@ -3,6 +3,7 @@ import type { Action } from "@/domain/actions";
 import type { AiProposal } from "@/domain/ai";
 import type { IsoDate } from "@/domain/dates";
 import { stateSchema, type State } from "@/domain/schema";
+import { analysisReportSchema, type AnalysisKind, type AnalysisReport } from "@/domain/spendingAnalysis";
 import { apiBase, isNativeApp } from "./runtime";
 import { storage } from "./storage";
 
@@ -157,6 +158,23 @@ export function parseAiChatReply(status: number, body: string): AiChatResponse {
   return interpret(status, body, aiChatSchema) as AiChatResponse;
 }
 
+const aiAnalysisSchema = z.object({
+  /** Первое предложение итога — для уведомления. */
+  text: z.string(),
+  report: analysisReportSchema.nullable(),
+  /** Итоги пока не нужны (анализ не открыт или уже есть) — без уведомления. */
+  silent: z.boolean().optional(),
+  cached: z.boolean().optional(),
+});
+export type AiAnalysisResponse = z.infer<typeof aiAnalysisSchema>;
+
+/** Разбор трат, полученный фоновым запросом приложения. */
+export function parseAiAnalysisReply(status: number, body: string): AiAnalysisResponse {
+  return interpret(status, body, aiAnalysisSchema);
+}
+
+const aiReportsSchema = z.object({ reports: z.array(z.unknown()) });
+
 export const api = {
   me: () => request("/api/me", meSchema),
   login: (login: string, password: string) =>
@@ -179,6 +197,20 @@ export const api = {
       body: { messages, mode, today },
       timeoutMs: 200_000,
     })) as AiChatResponse,
+  aiAnalysis: (kind: AnalysisKind, today: IsoDate, auto = false): Promise<AiAnalysisResponse> =>
+    request("/api/ai/chat", aiAnalysisSchema, {
+      method: "POST",
+      body: { analysis: { kind, auto }, mode: "auto", today },
+      timeoutMs: 200_000,
+    }),
+  /** Разборы и итоги периодов, новые первыми. Разбор не того формата пропускается, а не ломает список. */
+  aiReports: async (): Promise<AnalysisReport[]> => {
+    const { reports } = await request("/api/ai/reports", aiReportsSchema);
+    return reports.flatMap((r) => {
+      const parsed = analysisReportSchema.safeParse(r);
+      return parsed.success ? [parsed.data] : [];
+    });
+  },
   updateName: (name: string) => request("/api/account", userResponseSchema, { method: "PATCH", body: { name } }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request("/api/account/password", okSchema, { method: "POST", body: { currentPassword, newPassword } }),

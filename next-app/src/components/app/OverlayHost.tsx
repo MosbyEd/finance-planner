@@ -2,6 +2,7 @@
 
 import { AccountSheet } from "./sheets/AccountSheets";
 import { AiChatSheet } from "./sheets/AiChatSheet";
+import { AnalysisSheet } from "./sheets/AnalysisSheet";
 import { WhatsNewSheet } from "./sheets/WhatsNewSheet";
 import { AuthSheet } from "./sheets/AuthSheet";
 import { GoalMoneySheet, GoalSheet } from "./sheets/GoalSheets";
@@ -60,5 +61,7 @@ export function OverlayHost() {
       return <ReviewSheet />;
     case "sms":
       return <SmsPasteSheet />;
+    case "analysis":
+      return <AnalysisSheet />;
   }
 }

@@ -16,6 +16,8 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         var threadId: String
         var account: String
         var startedAt: Date
+        /// «analysis» — разбор трат, «period» — итоги периода; nil — вопрос в чате.
+        var kind: String?
     }
 
     struct Done: Codable {
@@ -31,8 +33,8 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var buffers: [Int: Data] = [:]
     /// Обработчик системы для фоновой сессии: вызвать, когда все её события разобраны.
     var backgroundCompletion: (() -> Void)?
-    /// Открыт ли чат помощника (сообщает интерфейс): ответ в открытый чат приходит без уведомления.
-    var chatVisible = false
+    /// Что из помощника открыто в интерфейсе («chat» или «analysis»): ответ в открытое окно — без уведомления.
+    var visibleKind: String?
 
     lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionId)
@@ -77,8 +79,12 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         case notSignedIn
     }
 
-    /// Задать вопрос: body — тело запроса /api/ai/chat (сообщения, режим, дата) в JSON.
-    func start(requestId: String, threadId: String, question: String, engine: String, expectedSeconds: Int, body: Data) throws {
+    /// Задать вопрос: body — тело запроса /api/ai/chat (сообщения, режим, дата) в JSON. kind — разбор трат или
+    /// итоги периода; silent — без Live Activity (итоги, о которых приложение просит само).
+    func start(
+        requestId: String, threadId: String, question: String, engine: String, expectedSeconds: Int, body: Data,
+        kind: String? = nil, silent: Bool = false
+    ) throws {
         guard let token = BudgetStore.token, let base = BudgetStore.apiBase, let account = BudgetStore.account,
               let url = URL(string: base + "/api/ai/chat")
         else { throw StartError.notSignedIn }
@@ -90,13 +96,13 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         let file = directory.appendingPathComponent("ai-\(requestId).json")
         try body.write(to: file, options: .atomic)
 
-        let meta = Meta(requestId: requestId, threadId: threadId, account: account, startedAt: Date())
+        let meta = Meta(requestId: requestId, threadId: threadId, account: account, startedAt: Date(), kind: kind)
         let task = session.uploadTask(with: request, fromFile: file)
         task.taskDescription = (try? JSONEncoder().encode(meta)).flatMap { String(data: $0, encoding: .utf8) }
         modify(runningURL) { (items: inout [Meta]) in items.append(meta) }
         task.resume()
         askNotificationPermission()
-        startActivity(meta, question: question, engine: engine, expectedSeconds: expectedSeconds)
+        if !silent { startActivity(meta, question: question, engine: engine, expectedSeconds: expectedSeconds) }
     }
 
     /// Готовые ответы и вопросы в пути — для интерфейса этого аккаунта. Вопрос, чей запрос система
@@ -123,9 +129,13 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         modify(doneURL) { (items: inout [Done]) in items.removeAll { set.contains($0.requestId) } }
     }
 
-    /// Чат открыли или закрыли. Открыли — готовый ответ уже виден, Live Activity больше не нужна.
-    func setChatVisible(_ visible: Bool) {
-        chatVisible = visible
+    /// Чат или разбор трат открыли или закрыли. Открыли — готовый ответ уже виден, Live Activity больше не нужна.
+    func setChatVisible(_ visible: Bool, kind: String = "chat") {
+        if visible {
+            visibleKind = kind
+        } else if visibleKind == kind {
+            visibleKind = nil
+        }
         guard visible else { return }
         for activity in Activity<AiActivityAttributes>.activities where activity.content.state.phase != .thinking {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
@@ -164,12 +174,19 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         var text: String
         var hasProposal: Bool
         var failed: Bool
+        /// Сервер ответил, что сообщать нечего (итоги периода пока не нужны или уже были).
+        var silent = false
     }
 
     private func reply(status: Int, body: String) -> Reply {
         let object = body.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         if (200..<300).contains(status), let text = object["text"] as? String {
-            return Reply(text: text, hasProposal: !(object["proposal"] is NSNull) && object["proposal"] != nil, failed: false)
+            return Reply(
+                text: text,
+                hasProposal: !(object["proposal"] is NSNull) && object["proposal"] != nil,
+                failed: false,
+                silent: (object["silent"] as? Bool) ?? false
+            )
         }
         let message = (object["error"] as? String) ?? (object["message"] as? String)
         return Reply(text: message ?? (status == 0 ? "Нет связи с сервером." : "Не удалось получить ответ."), hasProposal: false, failed: true)
@@ -190,7 +207,8 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         }
         DispatchQueue.main.async {
             let active = UIApplication.shared.applicationState == .active
-            if !(active && self.chatVisible) { self.notify(meta, result) }
+            let window = meta.kind == nil ? "chat" : "analysis"
+            if !(active && self.visibleKind == window) { self.notify(meta, result) }
             AppShell.shared.plugin?.notifyListeners(
                 "aiReply",
                 data: ["requestId": meta.requestId, "threadId": meta.threadId, "status": status, "body": body],
@@ -210,14 +228,28 @@ final class AiRequests: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     }
 
     private func notify(_ meta: Meta, _ reply: Reply) {
+        if reply.silent { return }
         let content = UNMutableNotificationContent()
-        content.title = reply.failed ? "Помощник не ответил" : "Ответ помощника готов"
         let text = Self.clip(reply.text, 180)
-        content.body = reply.hasProposal ? "\(Self.clip(reply.text, 110)) Откройте, чтобы подтвердить изменения." : text
+        switch meta.kind ?? "chat" {
+        case "period":
+            // Итоги периода приложение просит само — о неудаче не беспокоим.
+            if reply.failed || reply.text.isEmpty { return }
+            content.title = "Итоги периода"
+            content.body = text
+        case "analysis":
+            content.title = reply.failed ? "Разбор трат не получился" : "Разбор трат готов"
+            content.body = text
+        default:
+            content.title = reply.failed ? "Помощник не ответил" : "Ответ помощника готов"
+            content.body = reply.hasProposal ? "\(Self.clip(reply.text, 110)) Откройте, чтобы подтвердить изменения." : text
+        }
         content.sound = .default
         content.threadIdentifier = "ai"
-        // cap_extra — как у уведомлений интерфейса: нажатие придёт в него и откроет этот чат.
-        content.userInfo = ["cap_extra": ["kind": "ai", "threadId": meta.threadId]]
+        // cap_extra — как у уведомлений интерфейса: нажатие придёт в него и откроет этот чат (или разбор трат).
+        content.userInfo = meta.kind == nil
+            ? ["cap_extra": ["kind": "ai", "threadId": meta.threadId]]
+            : ["cap_extra": ["kind": "analysis"]]
         let id = String(Int.random(in: 1_000_000_000..<2_000_000_000))
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }

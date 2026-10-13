@@ -125,6 +125,11 @@ final class RootViewController: UITabBarController, UITabBarControllerDelegate {
             case "add":
                 if presentedViewController == nil { presentAdd() }
             case "ai":
+                // Live Activity разбора трат (threadId «analysis:…») открывает окно разбора, а не чат.
+                if let thread, thread.hasPrefix("analysis:") {
+                    AppShell.shared.open(["kind": .string("analysis")])
+                    break
+                }
                 var overlay: [String: JSONValue] = ["kind": .string("ai")]
                 if let thread { overlay["threadId"] = .string(thread) }
                 AppShell.shared.open(overlay)
