@@ -39,7 +39,7 @@
 		B0D6E00C2FF0000100A1B2C3 /* ShortcutsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E00B2FF0000100A1B2C3 /* ShortcutsSheet.swift */; };
 		B0D6E00E2FF0000100A1B2C3 /* SiriOrbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D6E00D2FF0000100A1B2C3 /* SiriOrbView.swift */; };
 		B46E9CA8D66491194704BBBC /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8BBEDE33F8E204F817B452 /* AppShell.swift */; };
-		E547EA6BC53C6C1643167E3A /* Бюджет СМС.shortcut in Resources */ = {isa = PBXBuildFile; fileRef = 65D9871EF204022ED518291E /* Бюджет СМС.shortcut */; };
+		E547EA6BC53C6C1643167E3A /* Shortcuts in Resources */ = {isa = PBXBuildFile; fileRef = 65D9871EF204022ED518291E /* Shortcuts */; };
 		E6443106F3F4F2E4F3507FEF /* HomeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56599AF6B58426CDDCBDCB90 /* HomeModel.swift */; };
 		EB8EE50E6952DBF240187936 /* AddTransactionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */; };
 /* End PBXBuildFile section */
@@ -87,7 +87,7 @@
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		56599AF6B58426CDDCBDCB90 /* HomeModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeModel.swift; sourceTree = "<group>"; };
-		65D9871EF204022ED518291E /* Бюджет СМС.shortcut */ = {isa = PBXFileReference; includeInIndex = 1; path = "Бюджет СМС.shortcut"; sourceTree = "<group>"; };
+		65D9871EF204022ED518291E /* Shortcuts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Shortcuts; sourceTree = "<group>"; };
 		68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AddTransactionView.swift; sourceTree = "<group>"; };
 		7AF3CD19C55241895A0C692C /* RootViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RootViewController.swift; sourceTree = "<group>"; };
 		80A186C082CBE0ED31FEC74C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -176,7 +176,7 @@
 				9F51C0C8567B79CB7B06B26C /* HomeView.swift */,
 				68C5F5EE20BFB8B2AF712537 /* AddTransactionView.swift */,
 				A069B7F3E0F2B16473FE86C4 /* App.entitlements */,
-				65D9871EF204022ED518291E /* Бюджет СМС.shortcut */,
+				65D9871EF204022ED518291E /* Shortcuts */,
 				983AB7229CF9E2546AB949C9 /* SmsEngine.swift */,
 				0CAE5D5C3E112E52D7DA1235 /* LocalSms.swift */,
 				1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */,
@@ -306,7 +306,7 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
-				E547EA6BC53C6C1643167E3A /* Бюджет СМС.shortcut in Resources */,
+				E547EA6BC53C6C1643167E3A /* Shortcuts in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

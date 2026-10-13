@@ -66,7 +66,7 @@ interface BudgetNativePlugin {
   addListener(event: "tabBarSelect", listener: (data: { id: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: "tabBarAction", listener: () => void): Promise<PluginListenerHandle>;
   openShortcuts(): Promise<void>;
-  addSmsShortcut(): Promise<void>;
+  addSmsShortcut(options?: { name?: string }): Promise<void>;
   stateMirror(options: { account: string; stateJson: string }): Promise<void>;
   smsInbox(options: { account: string }): Promise<{ items: { id: string; ops: { opId: string; action: unknown }[] }[] }>;
   ackSmsInbox(options: { ids: string[] }): Promise<void>;
@@ -214,11 +214,14 @@ export function onNativeCommand(handler: (command: unknown) => Promise<unknown>)
   };
 }
 
-/** Окно «Поделиться» с командой «Бюджет СМС» (в нём «Команды» → «Добавить»). false — в этой сборке её нет. */
-export async function nativeAddSmsShortcut(): Promise<boolean> {
+/**
+ * Окно «Поделиться» с командой (в нём «Команды» → «Добавить»): name — команда банка («Бюджет СМС Т-Банк»),
+ * без него — общая «Бюджет СМС». false — в этой сборке такой команды нет.
+ */
+export async function nativeAddSmsShortcut(name?: string): Promise<boolean> {
   if (!isNativeApp()) return false;
   try {
-    await plugin.addSmsShortcut();
+    await plugin.addSmsShortcut(name ? { name } : {});
     return true;
   } catch {
     return false;

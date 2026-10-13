@@ -1,7 +1,19 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { findAccount } from "./accounts";
 import { applyActions } from "./actions";
-import { accountBankId, bankFormat, banksOf, canParseBank, detectSmsBank, senderKey, withSavedBanks } from "./banks";
+import {
+  GENERIC_SHORTCUT,
+  KNOWN_BANKS,
+  accountBankId,
+  bankFormat,
+  bankShortcut,
+  banksOf,
+  canParseBank,
+  detectSmsBank,
+  senderKey,
+  withSavedBanks,
+} from "./banks";
 import type { Account, Bank } from "./schema";
 import { SMS_NOTE_PREFIX, looksLikeOperation } from "./sms";
 import { prepareSmsImport } from "./smsImport";
@@ -220,5 +232,19 @@ describe("правка банков", () => {
 
   it("банк счёта: несуществующий нельзя", () => {
     expect(() => applyActions(withBanks(), [{ type: "account.update", id: "main", patch: { bankId: "nope" } }])).toThrow(/Банк не найден/);
+  });
+});
+
+describe("команда «Команд» для банка", () => {
+  it("у известного банка — своя команда с его отправителями, у незнакомого — нет", () => {
+    expect(bankShortcut(tbank)).toEqual({ name: "Бюджет СМС Т-Банк", senders: ["Tinkoff", "T-Bank"] });
+    expect(bankShortcut({ name: "Мой банк", senders: ["900"] })).toEqual({ name: "Бюджет СМС Сбербанк", senders: ["900"] });
+    expect(bankShortcut({ name: "Почта Банк", senders: ["PochtaBank"] })).toBeNull();
+  });
+
+  it("подписанные команды есть в пакете приложения — общая и для каждого известного банка", () => {
+    const file = (name: string) => `ios/App/App/Shortcuts/${name}.shortcut`;
+    expect(existsSync(file(GENERIC_SHORTCUT))).toBe(true);
+    for (const bank of KNOWN_BANKS) expect(existsSync(file(bankShortcut(bank)!.name)), bank.name).toBe(true);
   });
 });

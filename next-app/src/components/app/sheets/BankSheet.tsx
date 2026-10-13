@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { accountsOf } from "@/domain/accounts";
-import { KNOWN_BANKS, accountBankId, bankFormat, banksOf, canParseBank, senderKey } from "@/domain/banks";
+import { KNOWN_BANKS, accountBankId, bankFormat, bankShortcut, banksOf, canParseBank, senderKey } from "@/domain/banks";
 import { newId, useSnapshot } from "@/client/react";
 import { Button } from "../../ui/Button";
 import { Notice } from "../../ui/controls";
@@ -228,7 +228,7 @@ export function BankSheet({ bankId }: { bankId?: string }) {
             <h3 id="bank-shortcuts" className="text-[17px] font-semibold">
               Настройка «Команд»
             </h3>
-            <SmsAutomationSetup senders={existing.senders.length ? existing.senders : filled} />
+            <SmsAutomationSetup senders={existing.senders.length ? existing.senders : filled} shortcut={bankShortcut(existing)} />
           </section>
         ) : (
           <p className="text-sm text-muted">После добавления здесь появится настройка «Команд» для отправителей банка.</p>

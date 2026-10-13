@@ -3,11 +3,17 @@ import Capacitor
 import SwiftUI
 import UIKit
 
-/// Подписанная команда «Бюджет СМС» в пакете приложения: передаёт текст и отправителя СМС действию «Добавить
-/// операцию из СМС» и показывает уведомление с результатом. Исходник — ios/shortcuts/budget-sms.plist; после правки:
-/// plutil -convert binary1, затем shortcuts sign --mode anyone --input … --output «Бюджет СМС.shortcut». «Команды» импортируют её из окна «Поделиться».
+/// Подписанные команды в пакете приложения (папка Shortcuts): передают текст и отправителя СМС действию «Добавить
+/// операцию из СМС» и показывают уведомление с результатом. «Бюджет СМС» — общая, без автоматизации; «Бюджет СМС
+/// Т-Банк» и т. п. — с автоматизацией «Сообщение» от отправителей банка. Собирает scripts/sign-shortcuts.ts,
+/// «Команды» импортируют их из окна «Поделиться».
 enum SmsShortcut {
-    static var fileURL: URL? { Bundle.main.url(forResource: "Бюджет СМС", withExtension: "shortcut") }
+    static let generic = "Бюджет СМС"
+
+    static func fileURL(named name: String = generic) -> URL? {
+        guard !name.contains("/"), !name.hasPrefix(".") else { return nil }
+        return Bundle.main.url(forResource: name, withExtension: "shortcut", subdirectory: "Shortcuts")
+    }
 }
 
 /// Экран «Siri и Команды»: команда для СМС, системная кнопка, открывающая действия приложения в «Командах»,
@@ -19,7 +25,7 @@ struct ShortcutsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if let url = SmsShortcut.fileURL {
+                if let url = SmsShortcut.fileURL() {
                     Section {
                         ShareLink(item: url, preview: SharePreview("Бюджет СМС", image: Image(systemName: "message.badge"))) {
                             Label("Добавить команду «Бюджет СМС»", systemImage: "plus.circle.fill")
@@ -72,10 +78,12 @@ struct ShortcutsSheet: View {
 }
 
 extension BudgetNativePlugin {
-    /// Окно «Поделиться» с командой «Бюджет СМС»: в нём «Команды» → «Добавить быструю команду».
+    /// Окно «Поделиться» с командой: в нём «Команды» → «Добавить быструю команду». name — команда банка
+    /// («Бюджет СМС Т-Банк», с его автоматизацией); нет — общая «Бюджет СМС».
     @objc func addSmsShortcut(_ call: CAPPluginCall) {
+        let name = call.getString("name") ?? SmsShortcut.generic
         DispatchQueue.main.async {
-            guard let url = SmsShortcut.fileURL, let presenter = self.bridge?.viewController else {
+            guard let url = SmsShortcut.fileURL(named: name), let presenter = self.bridge?.viewController else {
                 call.reject("Команды нет в этой сборке")
                 return
             }

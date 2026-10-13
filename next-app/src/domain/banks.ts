@@ -96,6 +96,25 @@ export function bankFormat(bank: Pick<Bank, "name" | "senders">): SmsFormat | nu
   return (bySender ?? KNOWN_BANKS.find((k) => k.match.test(bank.name)))?.format ?? null;
 }
 
+/** Общая команда «Команд» — без автоматизации: её запускает автоматизация, созданная вручную. */
+export const GENERIC_SHORTCUT = "Бюджет СМС";
+
+/** Готовая команда банка: при добавлении сразу создаёт автоматизацию «Сообщение» от этих отправителей. */
+export interface BankShortcut {
+  name: string;
+  senders: string[];
+}
+
+/**
+ * Команда для банка — у известных банков: «Бюджет СМС Т-Банк» с отправителями Tinkoff и T-Bank. Команды подписаны
+ * заранее на Mac (scripts/sign-shortcuts.ts) — iOS открывает только подписанные, поэтому своих отправителей
+ * в команду не вписать: их добавляют в автоматизацию вручную. null — банк незнаком, только общая команда.
+ */
+export function bankShortcut(bank: Pick<Bank, "name" | "senders">): BankShortcut | null {
+  const preset = KNOWN_BANKS.find((k) => k.format === bankFormat(bank));
+  return preset ? { name: `${GENERIC_SHORTCUT} ${preset.name}`, senders: preset.senders } : null;
+}
+
 /** СМС этого банка приложение разбирает (есть разбор его формата). */
 export function canParseBank(bank: Pick<Bank, "name" | "senders">): boolean {
   const format = bankFormat(bank);

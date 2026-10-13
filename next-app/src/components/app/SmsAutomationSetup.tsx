@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GENERIC_SHORTCUT, senderKey, type BankShortcut } from "@/domain/banks";
 import { nativeAddSmsShortcut, nativeOpenShortcuts, nativeOpenShortcutsApp } from "@/client/native";
 import { isNativeApp } from "@/client/runtime";
 import { Button } from "../ui/Button";
@@ -10,73 +11,110 @@ import { Disclosure } from "../screens/settings/common";
 import { appActionPrompt, copyText, sendersText } from "./smsSetup";
 
 /**
- * Автоматизация «Команд» для СМС от этих отправителей: команда «Бюджет СМС», шаги автоматизации, задание для Siri
- * и способ без команды — действием приложения. Создать автоматизацию по сообщениям iOS разрешает только самому
- * пользователю. Кнопки «Команд» — только в iOS-приложении; на компьютере видны шаги и задание.
+ * Автоматизация «Команд» для СМС от этих отправителей. У известного банка — своя готовая команда («Бюджет СМС
+ * Т-Банк»): при добавлении она сама создаёт автоматизацию на его отправителей. Иначе — общая «Бюджет СМС»
+ * и автоматизация вручную. Или отправителей можно дописать в уже созданную автоматизацию. Ещё — задание для Siri
+ * и способ без команды. Кнопки «Команд» — только в iOS-приложении; на компьютере видны шаги и задание.
  */
-export function SmsAutomationSetup({ senders }: { senders: string[] }) {
+export function SmsAutomationSetup({ senders, shortcut = null }: { senders: string[]; shortcut?: BankShortcut | null }) {
   const toast = useToast();
   const native = isNativeApp();
   const [siri, setSiri] = useState(false);
   const [manual, setManual] = useState(false);
+  const [existing, setExisting] = useState(false);
   const list = sendersText(senders);
   const prompt = appActionPrompt(senders);
   const many = senders.length > 1;
+  // Отправители банка, которых нет в готовой команде: их дописывают в автоматизацию вручную.
+  const inShortcut = new Set((shortcut?.senders ?? []).map(senderKey));
+  const extra = shortcut ? senders.filter((s) => !inShortcut.has(senderKey(s))) : [];
   const copy = async () => {
     if (await copyText(prompt)) toast("Задание для Siri скопировано");
     else toast("Не удалось скопировать — выделите текст вручную.", { kind: "error" });
   };
+  const add = (name?: string) =>
+    void nativeAddSmsShortcut(name).then((ok) => {
+      if (!ok) toast("Обновите приложение — в этой сборке такой команды нет.", { kind: "error" });
+    });
+  const openApp = () =>
+    void nativeOpenShortcutsApp().then((ok) => {
+      if (!ok) toast("Не удалось открыть «Команды».", { kind: "error" });
+    });
+  const onIphone = "В приложении «Бюджет» на iPhone: Настройки → «Банки» → этот банк → «Добавить команду», в окне «Поделиться» — «Команды».";
+
   return (
     <div className="space-y-4">
-      <ol className="space-y-3 text-[15px]">
-        <li>
-          <p className="font-medium">1. Добавьте команду «Бюджет СМС»</p>
+      {shortcut ? (
+        <div className="space-y-2 text-[15px]">
+          <p className="font-medium">Добавьте команду «{shortcut.name}»</p>
           <p className="text-sm text-muted">
-            {native
-              ? "В окне «Поделиться» выберите «Команды» → «Добавить быструю команду». Уже добавлена до этого обновления — добавьте заново: новая передаёт и отправителя."
-              : "В приложении «Бюджет» на iPhone: Настройки → «Банки» → этот банк → «Добавить команду», в окне «Поделиться» — «Команды»."}
+            {native ? "В окне «Поделиться» выберите «Команды» → «Добавить быструю команду». " : `${onIphone} `}
+            Команда сама создаст автоматизацию на сообщения от {sendersText(shortcut.senders)}. Проверьте в «Командах» →
+            «Автоматизация», что у неё включено «Запускать сразу».
+          </p>
+          {extra.length > 0 && (
+            <p className="text-sm text-warning">
+              {extra.length > 1 ? "Отправителей" : "Отправителя"} {sendersText(extra)} в готовой команде нет — допишите в её
+              автоматизации: «Команды» → «Автоматизация» → она → «Отправитель».
+            </p>
+          )}
+          <p className="text-sm text-muted">
+            Не добавляйте команду второй раз, если автоматизация на этих отправителей уже есть, — иначе каждая СМС придёт
+            дважды.
           </p>
           {native && (
-            <Button
-              className="mt-2"
-              icon="plus"
-              onClick={() =>
-                void nativeAddSmsShortcut().then((ok) => {
-                  if (!ok) toast("Обновите приложение — в этой сборке команды нет.", { kind: "error" });
-                })
-              }
-            >
+            <Button className="mt-1" icon="plus" onClick={() => add(shortcut.name)}>
               Добавить команду
             </Button>
           )}
-        </li>
-        <li>
-          <p className="font-medium">2. Создайте автоматизацию</p>
-          <p className="text-sm text-muted">
-            «Команды» → «Автоматизация» → «+» → «Сообщение». {many ? "Отправители" : "Отправитель"} — {list}, включите
-            «Запускать сразу» → «Новая пустая автоматизация» → действие «Запустить быструю команду» → «Бюджет СМС», ввод —
-            «Ввод команды». Автоматизация для другого банка уже есть — можно добавить этих отправителей в неё.
+        </div>
+      ) : (
+        <ol className="space-y-3 text-[15px]">
+          <li>
+            <p className="font-medium">1. Добавьте команду «{GENERIC_SHORTCUT}»</p>
+            <p className="text-sm text-muted">
+              {native
+                ? "В окне «Поделиться» выберите «Команды» → «Добавить быструю команду». Уже добавлена до этого обновления — добавьте заново: новая передаёт и отправителя."
+                : onIphone}
+            </p>
+            {native && (
+              <Button className="mt-2" icon="plus" onClick={() => add()}>
+                Добавить команду
+              </Button>
+            )}
+          </li>
+          <li>
+            <p className="font-medium">2. Создайте автоматизацию</p>
+            <p className="text-sm text-muted">
+              «Команды» → «Автоматизация» → «+» → «Сообщение». {many ? "Отправители" : "Отправитель"} — {list}, включите
+              «Запускать сразу» → «Новая пустая автоматизация» → действие «Запустить быструю команду» → «{GENERIC_SHORTCUT}»,
+              ввод — «Ввод команды».
+            </p>
+            {native && (
+              <Button className="mt-2" variant="secondary" onClick={openApp}>
+                Открыть «Команды»
+              </Button>
+            )}
+          </li>
+        </ol>
+      )}
+      <Disclosure label="Или — в уже созданную автоматизацию" open={existing} onToggle={() => setExisting((v) => !v)}>
+        <div className="space-y-3 text-sm">
+          <p>
+            Одна автоматизация на все банки: «Команды» → «Автоматизация» → ваша автоматизация по СМС → «Отправитель» →
+            добавьте {list}. Новую команду тогда добавлять не нужно.
+          </p>
+          <p className="text-muted">
+            Отправителя нет в списке — создайте в «Контактах» контакт, у которого в поле телефона этот номер или имя
+            (например, {senders[0] ?? "900"}), и выберите его.
           </p>
           {native && (
-            <Button
-              className="mt-2"
-              variant="secondary"
-              onClick={() =>
-                void nativeOpenShortcutsApp().then((ok) => {
-                  if (!ok) toast("Не удалось открыть «Команды».", { kind: "error" });
-                })
-              }
-            >
+            <Button variant="secondary" onClick={openApp}>
               Открыть «Команды»
             </Button>
           )}
-        </li>
-      </ol>
-      <p className="text-sm text-muted">
-        Отправителя нет в списке — создайте в «Контактах» контакт, у которого в поле телефона этот номер или имя (например,
-        {" "}
-        {senders[0] ?? "900"}), и выберите его.
-      </p>
+        </div>
+      </Disclosure>
       <Disclosure label="Задание для Siri" open={siri} onToggle={() => setSiri((v) => !v)}>
         <div className="space-y-3">
           <textarea
