@@ -65,3 +65,22 @@ describe("зарплата и аванс по названию", () => {
     expect(p.next).toMatchObject({ date: "2026-10-25", title: "Аванс" });
   });
 });
+
+describe("прошлую выплату приложение не видело", () => {
+  it("регулярные доходы завели после зарплаты — период всё равно с неё, по плановой сумме", () => {
+    let s = stateWith();
+    s.settings.savingsRatePercent = 10;
+    s.settings.salarySaving.enabled = false;
+    s.settings.purchaseSaving.enabled = false;
+    // Завели 11 октября: зарплата 10-го уже прошла, в приложении её нет.
+    s.templates = [
+      template({ id: "salary", kind: "income", amount: 10_000_000, dayOfMonth: 10, startDate: "2026-10-11" }),
+      template({ id: "advance", kind: "income", title: "Аванс", category: "Аванс", amount: 5_000_000, dayOfMonth: 25, startDate: "2026-10-11" }),
+    ];
+    s = run(s, { type: "balance.set", id: "start", date: "2026-10-01", actual: 2_000_000 }, { type: "recurring.sync", today: "2026-10-12" });
+    const p = budgetPeriod(s, "2026-10-12");
+    expect(p.kind).toBe("pay");
+    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24" });
+    expect(p.current.income.plan).toBe(10_000_000);
+  });
+});

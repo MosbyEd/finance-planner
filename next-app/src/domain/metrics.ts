@@ -12,7 +12,7 @@ import {
 } from "./dates";
 import { formatMoney, percentOf, type Kopecks } from "./money";
 import { getOwn } from "./records";
-import { plannedOccurrences } from "./recurring";
+import { isSkipped, occurrenceDate, plannedOccurrences } from "./recurring";
 import { salarySavingAmount } from "./savings";
 import {
   MAIN_ACCOUNT_ID,
@@ -545,20 +545,33 @@ export function payEvents(state: State, today: IsoDate): PayEvent[] {
   const ids = new Set(templates.map((t) => t.id));
   const from = addDays(today, -62);
   const to = addDays(today, 100);
-  const events: PayEvent[] = [];
+  const received: PayEvent[] = [];
+  const done = new Set<string>();
   for (const tx of state.transactions) {
     if (tx.type !== "income" || tx.date < from || tx.date > to) continue;
     // Пришла раньше срока — период начинается в день поступления.
     if (tx.templateId ? ids.has(tx.templateId) : isPayIncome(tx)) {
-      events.push({ date: tx.date, title: tx.title || tx.category, category: tx.category, amount: tx.amount, received: true });
+      received.push({ date: tx.date, title: tx.title || tx.category, category: tx.category, amount: tx.amount, received: true });
+      if (tx.templateId && tx.occurrenceMonth) done.add(`${tx.templateId}|${tx.occurrenceMonth}`);
     }
   }
-  for (const occ of plannedOccurrences(state, from, to)) {
-    if (ids.has(occ.templateId)) {
-      events.push({ date: occ.date, title: occ.title, category: occ.category, amount: occ.amount, received: false });
+  // По расписанию — и впереди, и в прошлом: даже если прошлую выплату приложение не видело (регулярный доход
+  // завели позже, зарплату не записали). Иначе у периода не было бы начала и бюджет молча считался бы по месяцу.
+  const scheduled: PayEvent[] = [];
+  for (const t of templates) {
+    for (let month = monthKeyOf(from); month <= monthKeyOf(to); month = addMonths(month, 1)) {
+      if (done.has(`${t.id}|${month}`) || isSkipped(state, t.id, month)) continue;
+      const date = occurrenceDate(t, month);
+      if (date < from || date > to || (t.endDate && date > t.endDate)) continue;
+      // Будущие — с начала действия; прошлые — только у уже действующего дохода.
+      if (date > today ? date < t.startDate : t.startDate > today) continue;
+      // Пришедшая рядом выплата — это она и есть (пришла раньше или позже срока).
+      if (received.some((r) => Math.abs(diffDays(r.date, date)) <= 7)) continue;
+      scheduled.push({ date, title: t.title, category: t.category, amount: t.amount, received: false });
     }
   }
-  return events.sort((a, b) => a.date.localeCompare(b.date));
+  // Сначала пришедшие: при одинаковой дате граница — по факту.
+  return [...received, ...scheduled].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Бюджет за отрезок дат — как у месяца: доходы − обязательные − норма сбережений, минус уже потраченное. */
@@ -576,10 +589,14 @@ export interface PeriodBudget {
   perDay: Kopecks;
 }
 
-export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: IsoDate): PeriodBudget {
+/**
+ * assumedIncome — выплата, с которой начался период, если в приложении её нет (регулярный доход завели позже):
+ * бюджет периода всё равно строится от неё, по плановой сумме.
+ */
+export function periodBudget(state: State, start: IsoDate, end: IsoDate, today: IsoDate, assumedIncome = 0): PeriodBudget {
   const cutoff = today < start ? addDays(start, -1) : today > end ? end : today;
   const w = windowTotals(state, start, end, cutoff, today);
-  const incomePlan = w.incomeFact + w.incomeFuture;
+  const incomePlan = w.incomeFact + w.incomeFuture + assumedIncome;
   const mandatoryPlan = w.mandatoryFact + w.mandatoryFuture;
   const target = percentOf(incomePlan, savingsRateFor(state.settings, monthKeyOf(start)));
   const budget = incomePlan - mandatoryPlan - target;
@@ -635,7 +652,7 @@ export function budgetPeriod(state: State, today: IsoDate): BudgetPeriod {
   const following = events.find((e) => e.date > next.date);
   return {
     kind: "pay",
-    current: periodBudget(state, start.date, addDays(next.date, -1), today),
+    current: periodBudget(state, start.date, addDays(next.date, -1), today, start.received ? 0 : start.amount),
     next,
     after: following ? periodBudget(state, next.date, addDays(following.date, -1), today) : null,
   };

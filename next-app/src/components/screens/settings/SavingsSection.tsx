@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { monthKeyOf } from "@/domain/dates";
-import { isPayIncome, monthMetrics } from "@/domain/metrics";
+import { formatDay, monthKeyOf } from "@/domain/dates";
+import { budgetPeriod, isPayIncome, monthMetrics, payEventName } from "@/domain/metrics";
 import { formatMoney, percentOf, type Kopecks } from "@/domain/money";
 import { accountCards, activeAccounts, cardLabel, SAVINGS_ACCOUNT_ID, savingsTarget } from "@/domain/accounts";
 import { pendingSavings, purchaseSavingAmount } from "@/domain/savings";
@@ -201,6 +201,8 @@ export function SavingsSection() {
   const preview = previewSettings(form, saved);
 
   const hasPayTemplates = state.templates.some((t) => t.active && t.kind === "income" && isPayIncome(t));
+  // Какой период определился по сохранённым настройкам — чтобы было видно, что всё работает.
+  const detected = useMemo(() => budgetPeriod(state, today), [state, today]);
   const monthIncome = useMemo(() => monthMetrics(state, monthKeyOf(today), today).income.plan, [state, today]);
 
   const incomeOptions = withSelected(state.categories.income, form.salaryCategories);
@@ -273,6 +275,13 @@ export function SavingsSection() {
                 ? "Гибкий бюджет и лимит на день — от поступления зарплаты или аванса до следующего. Сколько будет в день после следующего поступления — на Главной."
                 : "Нужен регулярный доход «Зарплата» или «Аванс» (вкладка «Регулярные»). Пока его нет, считаем по календарному месяцу."}
           </p>
+          {form.period === "pay" && hasPayTemplates && (
+            <p className="text-sm font-medium">
+              {detected.kind === "pay" && detected.next
+                ? `Сейчас: с ${formatDay(detected.current.start)} до ${payEventName(detected.next)} ${formatDay(detected.next.date)}.`
+                : "Не нашли ближайшую зарплату или аванс в «Регулярных» — пока считаем по месяцу."}
+            </p>
+          )}
         </div>
 
         <div className="space-y-2 border-t border-border pt-5">
