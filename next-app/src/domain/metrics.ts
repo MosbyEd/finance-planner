@@ -564,8 +564,9 @@ export function payEvents(state: State, today: IsoDate): PayEvent[] {
       if (done.has(`${t.id}|${month}`) || isSkipped(state, t.id, month)) continue;
       const date = occurrenceDate(t, month);
       if (date < from || date > to || (t.endDate && date > t.endDate)) continue;
-      // Будущие — с начала действия; прошлые — только у уже действующего дохода.
-      if (date > today ? date < t.startDate : t.startDate > today) continue;
+      // Будущие — с даты начала. Прошлые — и до неё: датой начала часто ставят ближайшую выплату
+      // («Зарплата с 10 ноября»), а прошлая, 10 октября, была — от неё и идёт текущий период.
+      if (date > today && date < t.startDate) continue;
       // Пришедшая рядом выплата — это она и есть (пришла раньше или позже срока).
       if (received.some((r) => Math.abs(diffDays(r.date, date)) <= 7)) continue;
       scheduled.push({ date, title: t.title, category: t.category, amount: t.amount, received: false });
@@ -679,12 +680,9 @@ export function payPeriodStatus(state: State, today: IsoDate): { ok: boolean; te
     if (t.startDate > today) return `${name} — начнётся ${formatDay(t.startDate)}`;
     return `${name} — с ${formatDay(t.startDate)}`;
   });
-  const future = templates.some((t) => t.startDate > today);
   return {
     ok: false,
-    text: `Не получилось определить период — пока считаем по месяцу. Регулярные доходы: ${reasons.join("; ")}.${
-      future ? " Если эти выплаты уже приходят, поставьте им в «Регулярных» дату начала не позже сегодняшней." : ""
-    }`,
+    text: `Не получилось определить период — пока считаем по месяцу. Регулярные доходы: ${reasons.join("; ")}.`,
   };
 }
 

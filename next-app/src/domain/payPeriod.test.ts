@@ -86,14 +86,32 @@ describe("прошлую выплату приложение не видело",
 });
 
 describe("что с периодом — для настроек", () => {
-  it("определился — пишет период; дата начала в будущем — объясняет, что поправить", () => {
+  it("определился — пишет период; не определился — какие регулярные доходы и что с ними", () => {
     expect(payPeriodStatus(withPay(), "2026-10-12")).toEqual({ ok: true, text: "Сейчас: с 10 октября до аванса 25 октября." });
     const s = withPay();
-    s.templates = s.templates.map((t) => (t.kind === "income" ? { ...t, startDate: "2026-11-01" } : t));
+    s.templates = s.templates.map((t) => (t.kind === "income" ? { ...t, endDate: "2026-09-30" } : t));
     s.transactions = s.transactions.filter((t) => t.type !== "income");
     const status = payPeriodStatus(s, "2026-10-12");
     expect(status.ok).toBe(false);
-    expect(status.text).toMatch(/«Зарплата» 10-го — начнётся 1 ноября/);
-    expect(status.text).toMatch(/дату начала не позже сегодняшней/);
+    expect(status.text).toMatch(/«Зарплата» 10-го — закончился 30 сентября/);
+  });
+
+  it("датой начала поставили ближайшую выплату («Зарплата с 10 ноября», «Аванс с 25 октября») — период всё равно с 10 октября", () => {
+    let s = stateWith();
+    s.settings.savingsRatePercent = 10;
+    s.settings.salarySaving.enabled = false;
+    s.settings.purchaseSaving.enabled = false;
+    s.templates = [
+      template({ id: "salary", kind: "income", amount: 10_000_000, dayOfMonth: 10, startDate: "2026-11-10" }),
+      template({ id: "advance", kind: "income", title: "Аванс", category: "Аванс", amount: 5_000_000, dayOfMonth: 25, startDate: "2026-10-25" }),
+    ];
+    s = run(s, { type: "balance.set", id: "start", date: "2026-10-01", actual: 2_000_000 }, { type: "recurring.sync", today: "2026-10-13" });
+    const p = budgetPeriod(s, "2026-10-13");
+    expect(p.kind).toBe("pay");
+    expect(p.current).toMatchObject({ start: "2026-10-10", end: "2026-10-24" });
+    expect(p.current.income.plan).toBe(10_000_000);
+    expect(p.next).toMatchObject({ date: "2026-10-25", category: "Аванс" });
+    expect(p.after).toMatchObject({ start: "2026-10-25", end: "2026-11-09" });
+    expect(p.after?.income.plan).toBe(5_000_000);
   });
 });

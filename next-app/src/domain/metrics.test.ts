@@ -191,12 +191,12 @@ describe("остаток прошлого месяца", () => {
 
 describe("ревью домена: лимит на день без доходов в этом месяце (M1)", () => {
   it("первая зарплата в следующем месяце — лимит по деньгам на счёте, статус no-income", () => {
-    // Доход начнётся в будущем (дата начала — завтра): прошлую выплату 5 октября не считаем полученной.
+    // Регулярный доход (не зарплата — по нему период не делится) начнётся в следующем месяце.
     const s = applyActions(emptyState(), [
       { type: "balance.set", id: "b1", date: "2026-10-09", actual: 8_000_000 },
       {
         type: "template.add",
-        template: { id: "sal", kind: "income", title: "Зарплата", category: "Зарплата", amount: 15_000_000, dayOfMonth: 5, active: true, startDate: "2026-10-10", note: "" },
+        template: { id: "sal", kind: "income", title: "Фриланс", category: "Фриланс", amount: 15_000_000, dayOfMonth: 5, active: true, startDate: "2026-10-10", note: "" },
       },
       {
         type: "template.add",
