@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import os from "node:os";
 import type { NextConfig } from "next";
 
@@ -23,6 +24,15 @@ const securityHeaders = [
 /** Версия сборки: по ней service worker отделяет кэш новой сборки от старой. */
 const appVersion = process.env.APP_VERSION ?? Date.now().toString(36);
 
+/** Коммит сборки — в «О приложении», чтобы сверить телефон с сервером. Не git-папка — пусто. */
+function gitCommit(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Сборка для сервера в облаке (scripts/deploy.sh): самодостаточный пакет в отдельной папке,
  * чтобы не трогать .next, из которого работает локальный сервер.
@@ -34,7 +44,7 @@ const nextConfig: NextConfig = {
   ...(deployBuild ? { output: "standalone" as const, distDir: ".next-deploy" } : {}),
   // База переносится отдельно (с остановкой сервера), а не внутри сборки; sharp не нужен — картинки не оптимизируются.
   outputFileTracingExcludes: { "*": ["data/**", "node_modules/sharp/**", "node_modules/@img/**"] },
-  env: { NEXT_PUBLIC_APP_VERSION: appVersion },
+  env: { NEXT_PUBLIC_APP_VERSION: appVersion, NEXT_PUBLIC_APP_COMMIT: gitCommit() },
   // Значок dev-инструментов перекрывает нижнее меню на телефоне.
   devIndicators: false,
   allowedDevOrigins: lanHosts(),

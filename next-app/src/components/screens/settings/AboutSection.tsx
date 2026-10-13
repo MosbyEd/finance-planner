@@ -1,10 +1,13 @@
 "use client";
 
+import { formatDay } from "@/domain/dates";
 import { useUi } from "../../app/overlays";
+import { APP_VERSION, LATEST_RELEASE } from "../../app/whatsNew/releases";
 import { Button } from "../../ui/Button";
 import { SectionCard } from "./SettingsList";
 
-export const APP_VERSION = "3.0";
+/** Коммит, из которого собран интерфейс: у телефона он свой (интерфейс в пакете), у сайта и Mac — серверный. */
+const COMMIT = process.env.NEXT_PUBLIC_APP_COMMIT ?? "";
 
 export function AboutSection() {
   const { open } = useUi();
@@ -27,7 +30,10 @@ export function AboutSection() {
             Как посчитан лимит сегодня
           </Button>
         </div>
-        <p className="text-sm text-muted">Версия {APP_VERSION}</p>
+        <p className="text-sm text-muted">
+          Версия {APP_VERSION} от {formatDay(LATEST_RELEASE.date)}
+          {COMMIT && ` · сборка ${COMMIT}`}
+        </p>
       </div>
     </SectionCard>
   );

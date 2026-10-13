@@ -11,13 +11,17 @@ DEVICE=${IOS_DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ 
 # Не во временной папке: macOS её чистит, и скачанные пакеты Capacitor ломаются («no Info.plist found»).
 DERIVED=${IOS_DERIVED:-$HOME/Library/Caches/budget-ios-build}
 NOTICE=$(sed -n 's/^ *summary: "\(.*\)",$/\1/p' src/components/app/whatsNew/releases.ts | head -1)
+# Версия в настройках iPhone — та же, что в «О приложении»; номер сборки — дата и время.
+VERSION=$(scripts/app-version.sh)
+BUILD_NUMBER=$(date +%Y%m%d%H%M)
 
 echo "→ Интерфейс"
 npm run ios:sync >/dev/null
 
-echo "→ Сборка"
+echo "→ Сборка $VERSION ($BUILD_NUMBER)"
 (cd ios/App && xcodebuild -project App.xcodeproj -scheme App -configuration Release -destination "id=$DEVICE" \
-  -derivedDataPath "$DERIVED" -allowProvisioningUpdates build 2>&1 | grep -E " error:|BUILD" | sort -u)
+  -derivedDataPath "$DERIVED" -allowProvisioningUpdates MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  build 2>&1 | grep -E " error:|BUILD" | sort -u)
 
 echo "→ Установка"
 xcrun devicectl device install app --device "$DEVICE" "$DERIVED/Build/Products/Release-iphoneos/App.app" >/dev/null

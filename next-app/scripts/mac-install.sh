@@ -15,7 +15,7 @@ NAME="Бюджет"
 TARGET="/Applications/$NAME.app"
 BUILD="${TMPDIR:-/tmp}budget-mac"
 APP="$BUILD/$NAME.app"
-VERSION=$(sed -n 's/^export const APP_VERSION = "\(.*\)";/\1/p' src/components/screens/settings/AboutSection.tsx)
+VERSION=$(scripts/app-version.sh)
 BUILD_NUMBER=$(date +%Y%m%d%H%M)
 
 echo "→ Сборка ($SERVER_URL)"
