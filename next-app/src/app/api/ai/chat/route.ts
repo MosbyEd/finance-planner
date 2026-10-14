@@ -14,6 +14,7 @@ import {
   type AnalysisKind,
 } from "@/domain/spendingAnalysis";
 import { findReport, saveReport } from "@/server/aiReports";
+import { recordAiUsage, type AiRequestKind } from "@/server/aiUsage";
 import { AiProviderError, deepseekChat, type AiMode, type ChatMessage } from "@/server/deepseek";
 import { env } from "@/server/env";
 import { jsonError, jsonOk, readBody, tooManyRequests, withUser, corsPreflight } from "@/server/http";
@@ -90,7 +91,7 @@ export const POST = withUser(async (req, { user }) => {
     const question = body.data.messages[body.data.messages.length - 1].content;
     const mode = body.data.mode === "auto" ? pickAiMode(question) : body.data.mode;
     const messages = [{ role: "system" as const, content: buildAiSystemPrompt(state, today) }, ...body.data.messages];
-    const reply = await ask(mode, body.data.mode === "auto", messages);
+    const reply = await ask(user.id, "chat", mode, body.data.mode === "auto", messages);
     const parsed = parseAiReply(reply.text, state, today);
     return jsonOk({
       text: parsed.text || "Готово.",
@@ -106,13 +107,24 @@ export const POST = withUser(async (req, { user }) => {
   }
 });
 
-async function ask(mode: AiMode, auto: boolean, messages: ChatMessage[]) {
+/** Спрашивает DeepSeek и записывает потраченные токены — и за ответ, который не подошёл. */
+async function ask(userId: number, kind: AiRequestKind, mode: AiMode, auto: boolean, messages: ChatMessage[]) {
+  const counted = async (m: AiMode) => {
+    try {
+      const reply = await deepseekChat(env.deepseekApiKey, m, messages);
+      recordAiUsage(userId, kind, reply.usage);
+      return reply;
+    } catch (error) {
+      if (error instanceof AiProviderError && error.usage) recordAiUsage(userId, kind, error.usage);
+      throw error;
+    }
+  };
   try {
-    return await deepseekChat(env.deepseekApiKey, mode, messages);
+    return await counted(mode);
   } catch (error) {
     // Модель с рассуждением не ответила вовремя — при автоматическом выборе спрашиваем быструю.
     if (!(error instanceof AiProviderError) || error.status !== 504 || mode !== "reasoning" || !auto) throw error;
-    return deepseekChat(env.deepseekApiKey, "fast", messages);
+    return counted("fast");
   }
 }
 
@@ -135,7 +147,7 @@ async function analysisReply(
   }
   const data = analysisData(state, plan, today);
   const mode = requested === "auto" ? pickAiMode(ANALYSIS_QUESTION[kind]) : requested;
-  const reply = await ask(mode, requested === "auto", analysisMessages(data, state.profile.savingsStyle));
+  const reply = await ask(userId, kind, mode, requested === "auto", analysisMessages(data, state.profile.savingsStyle));
   const report = parseAnalysisReply(reply.text, data, { model: reply.model, createdAt: Date.now(), thinking: Boolean(reply.reasoning) });
   saveReport(userId, report);
   return jsonOk({ text: reportHeadline(report), report, reasoning: reply.reasoning, model: reply.model });

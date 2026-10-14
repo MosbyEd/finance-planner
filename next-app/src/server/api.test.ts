@@ -19,14 +19,14 @@ import type { IsoDate } from "@/domain/dates";
 import { stateWith, template, tx } from "@/domain/test-utils";
 import { hashPassword, verifyPassword } from "./auth";
 import { closeDb, getDb } from "./db";
-import { deepseekChat } from "./deepseek";
+import { AiProviderError, deepseekChat, type AiUsage } from "./deepseek";
 import { clearRateLimits } from "./rateLimit";
 import { clearStateCache, writeState } from "./stateStore";
 
 // Внешний AI не вызываем: ответ провайдера подменён.
 vi.mock("./deepseek", async (importOriginal) => {
   const original = await importOriginal<typeof import("./deepseek")>();
-  return { ...original, deepseekChat: vi.fn(async () => ({ text: "Ответ", reasoning: null, model: "test" })) };
+  return { ...original, deepseekChat: vi.fn(async () => ({ text: "Ответ", reasoning: null, model: "test", usage: null })) };
 });
 
 // Проверка пароля несуществующего пользователя (фиктивный bcrypt) в тестах мгновенная — считаем вызовы.
@@ -304,6 +304,47 @@ describe("AI", () => {
     const cookie = await signUp();
     expect((await aiChat(request("/api/ai/chat", { method: "POST", cookie, body }))).status).toBe(503);
   });
+
+  const usage = (over: Partial<AiUsage> = {}): AiUsage => ({
+    model: "deepseek-flash",
+    mode: "fast",
+    promptTokens: 9000,
+    cacheHitTokens: 6400,
+    cacheMissTokens: 2600,
+    completionTokens: 120,
+    reasoningTokens: null,
+    ...over,
+  });
+  const usageRows = () =>
+    getDb().prepare("SELECT u.login, a.kind, a.mode, a.model, a.prompt_tokens, a.completion_tokens FROM ai_usage a JOIN users u ON u.id = a.user_id ORDER BY a.id").all();
+
+  it("каждый ответ записывает расход токенов: кто, вид запроса, режим — без текста вопроса", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    getDb().exec("DELETE FROM ai_usage");
+    const cookie = await signUp("anna");
+    vi.mocked(deepseekChat).mockResolvedValueOnce({ text: "Ответ", reasoning: null, model: "deepseek-flash", usage: usage() });
+    const body = { messages: [{ role: "user", content: "Сколько ушло на такси?" }], mode: "fast", today };
+    expect((await aiChat(request("/api/ai/chat", { method: "POST", cookie, body }))).status).toBe(200);
+    expect(usageRows()).toEqual([{ login: "anna", kind: "chat", mode: "fast", model: "deepseek-flash", prompt_tokens: 9000, completion_tokens: 120 }]);
+    expect(JSON.stringify(getDb().prepare("SELECT * FROM ai_usage").all())).not.toContain("такси");
+  });
+
+  it("пустой ответ тоже стоит денег; при таймауте модели с рассуждением записывается быстрая", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    getDb().exec("DELETE FROM ai_usage");
+    const cookie = await signUp("anna");
+    const body = { messages: [{ role: "user", content: "Посоветуй, как накопить на отпуск" }], mode: "auto", today };
+    vi.mocked(deepseekChat).mockRejectedValueOnce(new AiProviderError("AI вернул пустой ответ.", 502, usage({ mode: "reasoning", completionTokens: 0 })));
+    expect((await aiChat(request("/api/ai/chat", { method: "POST", cookie, body }))).status).toBe(502);
+    vi.mocked(deepseekChat)
+      .mockRejectedValueOnce(new AiProviderError("AI не ответил вовремя.", 504))
+      .mockResolvedValueOnce({ text: "Ответ", reasoning: null, model: "deepseek-flash", usage: usage({ completionTokens: 300 }) });
+    expect((await aiChat(request("/api/ai/chat", { method: "POST", cookie, body }))).status).toBe(200);
+    expect(usageRows()).toEqual([
+      { login: "anna", kind: "chat", mode: "reasoning", model: "deepseek-flash", prompt_tokens: 9000, completion_tokens: 0 },
+      { login: "anna", kind: "chat", mode: "fast", model: "deepseek-flash", prompt_tokens: 9000, completion_tokens: 300 },
+    ]);
+  });
 });
 
 describe("ревью: логины и ограничители частоты", () => {
@@ -556,6 +597,7 @@ describe("анализ трат от AI", () => {
       text: JSON.stringify({ summary: "За период ушло 10 500 ₽ — почти всё на такси. Остальное в норме.", changes: [], steps: [{ title: "Такси реже", target: "Такси", cutPercent: 30, why: "" }] }),
       reasoning: null,
       model: "deepseek-reasoner",
+      usage: { model: "deepseek-flash", mode: "reasoning", promptTokens: 3000, cacheHitTokens: 0, cacheMissTokens: 3000, completionTokens: 900, reasoningTokens: 700 },
     });
     const first = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("period", "2026-11-10", true) }));
     expect(first.status).toBe(200);
@@ -576,6 +618,10 @@ describe("анализ трат от AI", () => {
     const again = await aiChat(request("/api/ai/chat", { method: "POST", cookie, body: analysis("period", "2026-11-10", true) }));
     expect(await again.json()).toMatchObject({ cached: true, silent: true, report: { from: "2026-10-25" } });
     expect(deepseekChat).toHaveBeenCalledTimes(1);
+    // Расход записан один раз — с видом «итоги периода».
+    expect(getDb().prepare("SELECT kind, mode, reasoning_tokens FROM ai_usage WHERE user_id = (SELECT id FROM users WHERE login = 'anna')").all()).toEqual([
+      { kind: "period", mode: "reasoning", reasoning_tokens: 700 },
+    ]);
 
     const list = await (await aiReports(request("/api/ai/reports", { cookie }))).json();
     expect(list.reports).toHaveLength(1);
@@ -588,7 +634,7 @@ describe("анализ трат от AI", () => {
     const anna = await signUp("anna");
     const boris = await signUp("boris");
     seed("anna");
-    vi.mocked(deepseekChat).mockResolvedValueOnce({ text: "Не JSON, а просто текст.", reasoning: null, model: "deepseek-reasoner" });
+    vi.mocked(deepseekChat).mockResolvedValueOnce({ text: "Не JSON, а просто текст.", reasoning: null, model: "deepseek-reasoner", usage: null });
     const res = await aiChat(request("/api/ai/chat", { method: "POST", cookie: anna, body: analysis("analysis", "2026-11-10") }));
     expect((await res.json()).report).toMatchObject({ kind: "analysis", from: "2026-10-10", to: "2026-11-09", summary: "Не JSON, а просто текст." });
     expect((await (await aiReports(request("/api/ai/reports", { cookie: boris }))).json()).reports).toEqual([]);

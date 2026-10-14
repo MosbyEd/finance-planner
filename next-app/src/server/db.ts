@@ -80,6 +80,26 @@ const MIGRATIONS: Migration[] = [
     PRIMARY KEY (user_id, kind, period_start)
   );
   `,
+  // Расход токенов на каждый ответ DeepSeek — для подсчёта стоимости AI на пользователя (scripts/ai-usage.ts).
+  // Тексты вопросов и ответов не хранятся. После удаления аккаунта строки остаются без user_id:
+  // потраченное на ушедших пользователей тоже входит в расходы.
+  `
+  CREATE TABLE ai_usage (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL,
+    cache_hit_tokens INTEGER NOT NULL,
+    cache_miss_tokens INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    reasoning_tokens INTEGER
+  );
+  CREATE INDEX ai_usage_created_at ON ai_usage(created_at);
+  CREATE INDEX ai_usage_user_id ON ai_usage(user_id);
+  `,
 ];
 
 function addLoginKey(db: DatabaseSync): void {
