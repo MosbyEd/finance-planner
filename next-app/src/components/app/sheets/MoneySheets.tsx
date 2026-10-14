@@ -6,6 +6,8 @@ import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID, SAVINGS_A
 import { balanceAt, goalsReservedOn, payEventName, periodLeftView, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
+import { pendingSavings } from "@/domain/savings";
+import type { State } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import { newId, useSnapshot, useToday } from "@/client/react";
 import { storage } from "@/client/storage";
@@ -143,6 +145,18 @@ export function BalanceSheet({ accountId: presetAccount }: { accountId?: string 
 }
 
 /** Пополнение или снятие общих сбережений. */
+/**
+ * Автоотчисления, которые ещё копятся до порога «переводить, когда накопится»: «Ожидается +40 ₽ — переведём,
+ * когда наберётся 100 ₽. Пока эти деньги на счёте». null — копить нечего.
+ */
+function expectedSavingsNote(state: State): string | null {
+  const kinds = (["expense", "income"] as const).map((type) => pendingSavings(state, type)).filter((p) => p.total > 0);
+  if (!kinds.length) return null;
+  const total = kinds.reduce((sum, p) => sum + p.total, 0);
+  const when = kinds.length === 1 ? `, когда наберётся ${formatMoney(kinds[0].threshold, { whole: true })}` : ", когда наберётся порог";
+  return `Ожидается ${formatMoney(total, { sign: true })} автоотчислений — переведём${when}. Пока эти деньги на счёте.`;
+}
+
 export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
   const { state } = useSnapshot();
   const { close } = useUi();
@@ -157,6 +171,7 @@ export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
   // Снимается со счёта «Сбережения»: доступно то, что на нём лежит, кроме денег целей (их снимают на вкладке «Цели»).
   const inGoals = goalsReservedOn(state, SAVINGS_ACCOUNT_ID);
   const available = Math.max(0, accountBalance(state, SAVINGS_ACCOUNT_ID, today) - inGoals);
+  const expected = expectedSavingsNote(state);
   // Снять больше, чем свободно, нельзя — подсказываем сразу, а не после нажатия.
   const overLimit = dir === "out" && amount !== null && amount > available;
   const touchesGoals = dir === "out" && inGoals > 0;
@@ -204,6 +219,7 @@ export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
           <p className="text-sm text-muted">Накоплено</p>
           <Money value={total} className="text-2xl font-semibold" />
           {inGoals > 0 && <p className="text-sm text-muted">из них на целях: {formatMoney(inGoals)}</p>}
+          {expected && <p className="mt-1 text-sm text-muted">{expected}</p>}
         </div>
         <Segmented
           label="Направление"

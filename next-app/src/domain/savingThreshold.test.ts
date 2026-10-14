@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { accountBalance } from "./accounts";
 import { monthMetrics, savingsTotal } from "./metrics";
-import { pendingSavings, purchaseSourceExcluded } from "./savings";
+import { expectedSavings, pendingSavings, purchaseSourceExcluded } from "./savings";
 import type { State } from "./schema";
 import { addTx, run, stateWith } from "./test-utils";
 
@@ -64,6 +64,23 @@ describe("автоотчисления — переводить, когда на
     expect(linked(next).map((t) => [t.linkedTo, t.amount])).toEqual([["pay", 100_000]]);
     expect(pendingSavings(next, "expense").total).toBe(4_000);
     expect(pendingSavings(next, "income").total).toBe(0);
+  });
+});
+
+describe("автоотчисления — ожидается в сбережения", () => {
+  it("пока порог не набран — сумма ждёт на счёте-копилке, но ни с карты, ни в копилку не проведена", () => {
+    let s = run(base(), { type: "account.add", account: { id: "piggy", name: "Автонакопления", kind: "savings", spending: false } });
+    s.settings.purchaseSaving.toAccountId = "piggy";
+    s = run(s, addTx({ id: "a", type: "expense", amount: 6_000, date: "2026-10-02", autoSaving: true }));
+    expect(expectedSavings(s)).toEqual({ total: 4_000, byAccount: new Map([["piggy", 4_000]]) });
+    expect(accountBalance(s, "main", "2026-10-02")).toBe(1_000_000 - 6_000);
+    expect(accountBalance(s, "piggy", "2026-10-02")).toBe(0);
+
+    // Набралось 110 ₽ — переведено, ожидать больше нечего.
+    s = run(s, addTx({ id: "b", type: "expense", amount: 3_000, date: "2026-10-03", autoSaving: true }));
+    expect(expectedSavings(s).total).toBe(0);
+    expect(accountBalance(s, "piggy", "2026-10-03")).toBe(11_000);
+    expect(accountBalance(s, "main", "2026-10-03")).toBe(1_000_000 - 6_000 - 3_000 - 11_000);
   });
 });
 

@@ -35,6 +35,7 @@ import {
   bankTransferOverlay,
   hasOwnAccounts,
   previewAccountRows,
+  savingsTileHint,
 } from "../app/accounts";
 import { useBalancesPrivacy } from "@/client/privacy";
 import { BalancesEye } from "../app/BalancesEye";
@@ -459,7 +460,7 @@ export function Dashboard() {
                 <span className="mt-1 block max-w-full truncate text-lg font-semibold sm:text-xl" title={masked ? undefined : formatMoney(data.savings)}>
                   {masked ? "•••• ₽" : <Money value={data.savings} whole />}
                 </span>
-                <span className="mt-1 block text-xs text-muted">Пополнить или снять</span>
+                <span className="mt-1 block text-xs text-muted">{savingsTileHint(state, masked)}</span>
               </button>
             </div>
 

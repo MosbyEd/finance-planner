@@ -36,7 +36,7 @@ import {
 } from "./metrics";
 import { getOwn, withKey, withoutKey } from "./records";
 import { dueOccurrences, occurrenceTxId, skippedMonths, type Occurrence } from "./recurring";
-import { autoSavingAmount, buildLinkedSaving, linkedSavingId, salarySavingAmount, savingThreshold } from "./savings";
+import { autoSavingAmount, autoSavingTarget, buildLinkedSaving, linkedSavingId, salarySavingAmount, savingThreshold } from "./savings";
 import {
   LIMITS,
   accountSchema,
@@ -548,8 +548,7 @@ function linkBankAccounts(state: State, bankId: string, accountIds: string[] | u
 
 /** Куда автоотчисление: с дохода — на счёт из настроек «Откладывать с доходов», с покупки — «с покупок». */
 function linkedSavingTarget(state: State, tx: Transaction): string {
-  const id = tx.type === "income" ? state.settings.salarySaving.toAccountId : state.settings.purchaseSaving.toAccountId;
-  return savingsTarget(state, id);
+  return autoSavingTarget(state, tx.type);
 }
 
 /** Откуда автоотчисление: со счёта операции, если это обычный счёт или наличные; иначе (кредитка) — с основного. */

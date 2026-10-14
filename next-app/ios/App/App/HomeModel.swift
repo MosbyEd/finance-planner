@@ -150,6 +150,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var balanceNegative: Bool
         var balanceHint: String
         var savings: String
+        /// «Ожидается +40 ₽» — автоотчисления копятся до порога и со счёта ещё не списаны.
+        var savingsHint: String?
     }
 
     struct Month: Codable, Equatable, Sendable {

@@ -14,7 +14,7 @@ import {
 } from "@/domain/accounts";
 import type { Action } from "@/domain/actions";
 import { CREDIT_OPERATION_LABEL } from "@/domain/interest";
-import { purchaseSourceExcluded } from "@/domain/savings";
+import { expectedSavings, expectedSavingsLabel, purchaseSourceExcluded } from "@/domain/savings";
 import { formatDay, formatRelativeDay, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
@@ -98,9 +98,13 @@ export interface AccountRow {
   overdue: boolean;
 }
 
-/** Строки счетов: остаток, у кредитки — долг и беспроцентный период. */
+/**
+ * Строки счетов: остаток, у кредитки — долг и беспроцентный период, у копилки — сколько автоотчислений
+ * ещё копится до порога («ожидается +40 ₽»): в остаток они не входят, пока не переведены.
+ */
 export function accountRows(state: State, today: IsoDate): AccountRow[] {
   const balances = accountBalances(state, today);
+  const expected = expectedSavings(state).byAccount;
   return activeAccounts(state).map((account) => {
     const balance = balances.get(account.id) ?? 0;
     if (account.kind === "credit") {
@@ -120,15 +124,27 @@ export function accountRows(state: State, today: IsoDate): AccountRow[] {
         overdue: credit.overdue,
       };
     }
+    const pending = expected.get(account.id);
     return {
       account,
       balance,
       amount: formatMoney(balance, { whole: true }),
       negative: balance < 0,
-      detail: isSpendingAccount(account) ? "Учитывается в лимите на день" : ACCOUNT_KINDS[account.kind].label,
+      detail: [
+        isSpendingAccount(account) ? "Учитывается в лимите на день" : ACCOUNT_KINDS[account.kind].label,
+        pending ? expectedSavingsLabel(pending) : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       overdue: false,
     };
   });
+}
+
+/** Подпись под сбережениями на Главной: сколько автоотчислений ещё копится до порога, иначе — что делает плитка. */
+export function savingsTileHint(state: State, masked: boolean): string {
+  const { total } = expectedSavings(state);
+  return total > 0 && !masked ? `Ожидается ${formatMoney(total, { sign: true })}` : "Пополнить или снять";
 }
 
 /**

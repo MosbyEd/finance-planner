@@ -1,7 +1,7 @@
-import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID } from "./accounts";
+import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, savingsTarget } from "./accounts";
 import { SAVINGS_CATEGORY } from "./defaults";
-import { percentOf, type Kopecks } from "./money";
-import { LIMITS, type Settings, type Transaction } from "./schema";
+import { formatMoney, percentOf, type Kopecks } from "./money";
+import { LIMITS, type Settings, type State, type Transaction } from "./schema";
 
 /** Счёт и карта операции — для «с каких карт откладывать». */
 type Source = Partial<Pick<Transaction, "accountId" | "card">>;
@@ -66,6 +66,37 @@ export function pendingSavings(
     count += 1;
   }
   return { total, threshold: savingThreshold(state.settings, type), count };
+}
+
+/** Накопительный счёт, куда переводятся автоотчисления с доходов или с покупок. */
+export function autoSavingTarget(state: Pick<State, "accounts" | "settings">, type: Transaction["type"]): string {
+  return savingsTarget(state, type === "income" ? state.settings.salarySaving.toAccountId : state.settings.purchaseSaving.toAccountId);
+}
+
+/**
+ * Ожидается в сбережения: автоотчисления, которые ещё копятся до порога «переводить, когда накопится».
+ * Со счёта операции они не списаны и в сбережения не засчитаны; byAccount — по счетам, куда их переведут.
+ */
+export function expectedSavings(state: Pick<State, "accounts" | "settings" | "transactions">): {
+  total: Kopecks;
+  byAccount: Map<string, Kopecks>;
+} {
+  const byAccount = new Map<string, Kopecks>();
+  let total = 0;
+  for (const t of state.transactions) {
+    if (!t.savingPending || (t.type !== "income" && t.type !== "expense")) continue;
+    const amount = autoSavingAmount(t, state.settings);
+    if (amount <= 0) continue;
+    const to = autoSavingTarget(state, t.type);
+    byAccount.set(to, (byAccount.get(to) ?? 0) + amount);
+    total += amount;
+  }
+  return { total, byAccount };
+}
+
+/** «ожидается +40 ₽» — подпись к сбережениям и к счёту, куда переведутся накопленные отчисления. */
+export function expectedSavingsLabel(amount: Kopecks): string {
+  return `ожидается ${formatMoney(amount, { sign: true })}`;
 }
 
 export function linkedSavingId(txId: string): string {

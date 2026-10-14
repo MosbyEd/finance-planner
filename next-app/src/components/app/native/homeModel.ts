@@ -32,6 +32,7 @@ import {
   lastAccountId,
   lastCardOf,
   payableAccounts,
+  savingsTileHint,
   transactionAccountLabel,
 } from "../accounts";
 import type { NativeCommand } from "./commands";
@@ -207,7 +208,15 @@ export interface HomeModel {
   attention: AttentionModel[];
   onboarding: OnboardingModel | null;
   quick: QuickModel[];
-  tiles: { balanceLabel: string; balance: string; balanceNegative: boolean; balanceHint: string; savings: string } | null;
+  tiles: {
+    balanceLabel: string;
+    balance: string;
+    balanceNegative: boolean;
+    balanceHint: string;
+    savings: string;
+    /** «Ожидается +40 ₽» — автоотчисления копятся до порога; нет — «Пополнить или снять». */
+    savingsHint: string;
+  } | null;
   /** Самые важные счета (до трёх) — когда пользователь завёл свои (иначе пусто); все — на экране «Счета». */
   accounts: AccountModel[];
   /** Сколько счетов всего. */
@@ -648,6 +657,7 @@ export function buildHomeModel(input: HomeInput): HomeModel {
       balanceNegative: !masked && balance < 0,
       balanceHint: steps.balance ? "Сверить остаток" : "Указать остаток",
       savings: masked ? MASK : formatMoney(savingsTotal(state, today), { whole: true }),
+      savingsHint: savingsTileHint(state, masked),
     },
     accountsTotal: ownAccounts ? accountRows(state, today).length : 0,
     balancesHidden: masked,

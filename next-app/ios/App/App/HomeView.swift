@@ -563,7 +563,7 @@ private struct Tiles: View {
             Tile(symbol: "wallet.bifold", title: tiles.balanceLabel ?? "На счёте", amount: tiles.balance, negative: tiles.balanceNegative, hint: tiles.balanceHint) {
                 AppShell.shared.open(["kind": .string("balance")])
             }
-            Tile(symbol: "banknote", title: "Сбережения", amount: tiles.savings, negative: false, hint: "Пополнить или снять") {
+            Tile(symbol: "banknote", title: "Сбережения", amount: tiles.savings, negative: false, hint: tiles.savingsHint ?? "Пополнить или снять") {
                 AppShell.shared.open(["kind": .string("savings"), "direction": .string("in")])
             }
         }

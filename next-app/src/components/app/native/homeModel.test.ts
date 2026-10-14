@@ -4,7 +4,7 @@ import { addTx, stateWith, template, tx } from "@/domain/test-utils";
 import type { Snapshot } from "@/client/store";
 import { applyActions } from "@/domain/actions";
 import { accountBalance } from "@/domain/accounts";
-import { bankResolveActions, transferAction, transferMessage } from "../accounts";
+import { accountRows, bankResolveActions, transferAction, transferMessage } from "../accounts";
 import { commandSchema } from "./commands";
 import { smsTextImport } from "../smsText";
 import { buildHomeModel, type HomeModel } from "./homeModel";
@@ -148,6 +148,30 @@ describe("счета на Главной", () => {
     const m = model(s);
     expect(m.accountsTotal).toBe(5); // с «Основным счётом» и «Сбережениями» по умолчанию
     expect(m.accounts.map((a) => a.id)).toEqual(["cc", "cash", "main"]);
+  });
+});
+
+describe("ожидается в сбережения", () => {
+  it("копилка не набрала порог: на плитке и у счёта «ожидается +40 ₽», с карты не списано; спрятано — без суммы", () => {
+    const s = applyActions(base(), [
+      { type: "account.update", id: "savings", patch: { name: "Автонакопления" } },
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 },
+    ]);
+    s.settings.purchaseSaving = { enabled: true, percent: 0, cap: 0, roundTo: 10_000, excludedCategories: [], minTransfer: 10_000 };
+    const next = applyActions(s, [addTx({ id: "a", type: "expense", amount: 6_000, date: today, autoSaving: true })]);
+    expect(model(next).tiles).toMatchObject({ balance: "4 940 ₽", savings: "0 ₽", savingsHint: "Ожидается +40 ₽" });
+    const row = accountRows(next, today).find((r) => r.account.id === "savings");
+    expect(row?.detail.replace(/[\u00a0\u202f]/g, " ")).toBe("Накопительный · ожидается +40 ₽");
+    expect(model(s).tiles?.savingsHint).toBe("Пополнить или снять");
+    const masked = buildHomeModel({
+      snapshot: snapshot(next),
+      today,
+      balanceConfirmed: true,
+      mandatorySkipped: true,
+      assistant: true,
+      privacy: { masked: true, hiding: true },
+    });
+    expect(masked.tiles?.savingsHint).toBe("Пополнить или снять");
   });
 });
 
