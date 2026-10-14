@@ -50,8 +50,11 @@ function deployEnv(): Record<string, string> {
   return vars;
 }
 
-/** Строки с сервера: тот же запрос, что и локально, выполняет node сервера от пользователя службы. */
-function readServerRows(from: number, to: number): AiUsageRow[] {
+/** Таблицу создаёт сервер при первом обращении к базе после выкладки — до этого её нет. */
+const TABLE_EXISTS_SQL = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_usage'";
+
+/** Строки с сервера (null — таблицы ещё нет): тот же запрос, что и локально, выполняет node сервера от пользователя службы. */
+function readServerRows(from: number, to: number): AiUsageRow[] | null {
   const vars = { ...deployEnv(), ...process.env };
   const host = vars.DEPLOY_HOST ?? fail("Задайте DEPLOY_HOST в .env.deploy или укажите --db.");
   const key = vars.DEPLOY_KEY ?? path.join(os.homedir(), ".ssh", "budget_server_ed25519");
@@ -59,7 +62,8 @@ function readServerRows(from: number, to: number): AiUsageRow[] {
   const program = `
     import { DatabaseSync } from "node:sqlite";
     const db = new DatabaseSync(${JSON.stringify(dbPath)}, { readOnly: true });
-    process.stdout.write(JSON.stringify(db.prepare(${JSON.stringify(AI_USAGE_ROWS_SQL)}).all(${from}, ${to})));
+    const exists = db.prepare(${JSON.stringify(TABLE_EXISTS_SQL)}).get();
+    process.stdout.write(exists ? JSON.stringify(db.prepare(${JSON.stringify(AI_USAGE_ROWS_SQL)}).all(${from}, ${to})) : "null");
   `;
   try {
     const out = execFileSync("ssh", ["-i", key, "-o", "BatchMode=yes", host, "sudo -n -u budget-app node --input-type=module -"], {
@@ -68,17 +72,17 @@ function readServerRows(from: number, to: number): AiUsageRow[] {
       maxBuffer: 512 * 1024 * 1024,
       stdio: ["pipe", "pipe", "inherit"],
     });
-    return JSON.parse(out) as AiUsageRow[];
+    return JSON.parse(out) as AiUsageRow[] | null;
   } catch {
-    fail(`Не удалось прочитать ai_usage на ${host}. Если выше «no such table» — на сервере ещё версия без учёта расхода.`);
+    fail(`Не удалось прочитать базу на ${host} — подробности выше.`);
   }
 }
 
-function readLocalRows(file: string, from: number, to: number): AiUsageRow[] {
+function readLocalRows(file: string, from: number, to: number): AiUsageRow[] | null {
   if (!fs.existsSync(file)) fail(`Нет базы ${file}.`);
   const db = new DatabaseSync(path.resolve(file), { readOnly: true });
   try {
-    return readAiUsageRows(db, from, to);
+    return db.prepare(TABLE_EXISTS_SQL).get() ? readAiUsageRows(db, from, to) : null;
   } finally {
     db.close();
   }
@@ -137,6 +141,10 @@ console.log(`Расход AI с ${fromDay} по ${toDay} · курс ${rate} ₽
 console.log(`Цены ${PRICED_MODEL} за 1 млн токенов: пик — ${price(DEEPSEEK_PRICES.peak)}; вне пика — ${price(DEEPSEEK_PRICES.offPeak)}`);
 console.log("Часы пик — по будням 01:00–04:00 и 06:00–10:00 UTC. Выход — вместе с рассуждением.\n");
 
+if (rows === null) {
+  console.log("Таблицы ai_usage ещё нет: сервер создаёт её при первом обращении к базе после выкладки новой версии.");
+  process.exit(0);
+}
 if (rows.length === 0) {
   console.log("За период запросов к AI не записано.");
   process.exit(0);
