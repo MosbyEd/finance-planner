@@ -238,8 +238,8 @@ export interface HomeInput {
   mandatorySkipped: boolean;
   /** Доступен ли помощник (DeepSeek на сервере или модель Apple на телефоне). */
   assistant: boolean;
-  /** Глазок у сумм счетов: masked — суммы спрятаны, hiding — скрытие включено. Нет — показаны. */
-  privacy?: { masked: boolean; hiding: boolean };
+  /** Глазок у сумм счетов: masked — суммы спрятаны. Нет — показаны. */
+  privacy?: { masked: boolean };
 }
 
 const STATUS: Record<SafeToSpend["status"], { text: string; tone: Tone }> = {

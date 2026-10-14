@@ -169,7 +169,7 @@ describe("ожидается в сбережения", () => {
       balanceConfirmed: true,
       mandatorySkipped: true,
       assistant: true,
-      privacy: { masked: true, hiding: true },
+      privacy: { masked: true },
     });
     expect(masked.tiles?.savingsHint).toBe("Пополнить или снять");
   });
@@ -188,7 +188,7 @@ describe("глазок у сумм счетов", () => {
       balanceConfirmed: true,
       mandatorySkipped: true,
       assistant: true,
-      privacy: { masked: true, hiding: true },
+      privacy: { masked: true },
     });
     expect(built.balancesHidden).toBe(true);
     expect(built.tiles).toMatchObject({ balance: "•••• ₽", savings: "•••• ₽", balanceNegative: false });

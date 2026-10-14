@@ -2,7 +2,7 @@
 
 import { creditStatus } from "@/domain/accounts";
 import { formatMoney } from "@/domain/money";
-import { hideBalances, stopHidingBalances, useBalancesPrivacy } from "@/client/privacy";
+import { hideBalances, revealBalances, useBalancesPrivacy } from "@/client/privacy";
 import { useSnapshot, useToday } from "@/client/react";
 import { Switch } from "../../ui/controls";
 import { BalancesEye } from "../../app/BalancesEye";
@@ -21,7 +21,7 @@ export function AccountsSection() {
   const today = useToday();
   const { open } = useUi();
   const rows = accountRows(state, today);
-  const { masked, hiding } = useBalancesPrivacy();
+  const { masked } = useBalancesPrivacy();
   const hide = (text: string) => (masked ? "•••• ₽" : text);
   return (
     <SectionCard title="Счета">
@@ -79,10 +79,10 @@ export function AccountsSection() {
       </p>
       <div className="mt-4">
         <Switch
-          checked={hiding}
-          onChange={(on) => (on ? hideBalances() : void stopHidingBalances())}
+          checked={masked}
+          onChange={(on) => (on ? hideBalances() : void revealBalances())}
           label="Скрывать суммы на счетах"
-          description="Вместо сумм — «•••• ₽». Показать — глазком, по Face ID; свернули приложение — суммы снова спрятаны."
+          description="Вместо сумм — «•••• ₽». То же делает глазок; показать — по Face ID. Как оставили, так и будет при следующем заходе."
         />
       </div>
     </SectionCard>
