@@ -93,6 +93,23 @@ export function accountBalance(state: State, accountId: string, date?: IsoDate):
   return accountBalances(state, date).get(accountId) ?? 0;
 }
 
+/**
+ * Расхождение с банком сейчас: остаток из последней СМС минус остаток счёта в приложении на конец её дня —
+ * по текущим операциям. Записали пропущенную операцию — расхождение уменьшилось, а не поправляется второй раз.
+ * null — СМС с остатком не было или расхождение решено (совпало, поправили или оставили).
+ */
+export function bankDelta(state: State, account: Account): Kopecks | null {
+  const bank = account.bank;
+  if (!bank || bank.delta === 0) return null;
+  return bank.amount - accountBalance(state, account.id, bank.date);
+}
+
+/** Остаток из СМС a — раньше b: по дню, а в один день — по времени СМС (если оно известно у обоих). */
+export function bankSnapshotOlder(a: { date: IsoDate; time?: string }, b: { date: IsoDate; time?: string }): boolean {
+  if (a.date !== b.date) return a.date < b.date;
+  return a.time !== undefined && b.time !== undefined && a.time < b.time;
+}
+
 /** Деньги этого счёта считаются в «Сколько можно потратить»: отмечен, открыт и это не кредитная карта. */
 export function isSpendingAccount(account: Account): boolean {
   return account.spending && account.kind !== "credit" && !account.archived;

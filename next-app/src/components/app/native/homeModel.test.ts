@@ -115,9 +115,23 @@ describe("расхождение остатка с банком", () => {
     ]);
     // «Оставить» — крестиком в углу.
     expect(row?.dismiss).toEqual({ type: "bank", accountId: "main", fix: false });
-    s = applyActions(s, bankResolveActions(s, "main", true, today, "fix"));
+    s = applyActions(s, bankResolveActions(s, "main", true, "fix"));
     expect(accountBalance(s, "main", today)).toBe(490_000);
     expect(model(s).attention.some((r) => r.id === "bank:main")).toBe(false);
+  });
+
+  it("копилка банка: «Перевод» сразу в накопительный автоотчислений, подсказка в тексте", () => {
+    const s = applyActions(stateWith(), [
+      { type: "account.update", id: "savings", patch: { name: "Автонакопления" } },
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 },
+      { type: "account.bank", accountId: "main", amount: 488_400, delta: -11_600, date: today },
+    ]);
+    const row = model(s).attention.find((r) => r.id === "bank:main");
+    expect(row?.text).toMatch(/Если это копилка банка — «Перевод» в «Автонакопления»/);
+    expect(row?.actions[1].command).toEqual({
+      type: "open",
+      overlay: { kind: "transfer", from: "main", to: "savings", amount: 11_600, resolveBank: "main" },
+    });
   });
 });
 

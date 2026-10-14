@@ -15,6 +15,8 @@ import {
   accountBalance,
   accountKeys,
   accountsOf,
+  bankDelta,
+  bankSnapshotOlder,
   savingsTarget,
   findAccount,
   sourceAccountId,
@@ -207,14 +209,23 @@ export const actionSchema = z.discriminatedUnion("type", [
   }),
   /** Удалить банк: его счета остаются, но уже без банка. */
   z.object({ type: z.literal("bank.delete"), id: idSchema }),
-  /** Остаток в банке по СМС и расхождение с приложением; delta 0 — расхождение решено (поправили или оставили). */
+  /**
+   * Остаток в банке по СМС и расхождение с приложением; delta 0 — расхождение решено (оставили). Остаток из более
+   * ранней СМС (её обработали позже) свежий не заменяет.
+   */
   z.object({
     type: z.literal("account.bank"),
     accountId: idSchema,
     amount: kopecksSchema,
     delta: kopecksSchema,
     date: isoDateSchema,
+    time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   }),
+  /**
+   * «Поправить» расхождение с банком: корректировка на разницу, посчитанную при применении (по тем операциям,
+   * что есть в этот момент), — на сервере и на телефоне одна и та же. Расхождение уже решено — ничего не делает.
+   */
+  z.object({ type: z.literal("account.bankFix"), id: idSchema, accountId: idSchema }),
   z.object({ type: z.literal("template.add"), template: templateSchema }),
   z.object({
     type: z.literal("template.update"),
@@ -415,6 +426,25 @@ function assertAccount(state: State, id: string, forNew = true): Account {
   if (!account) throw new DomainError("Счёт не найден — возможно, его удалили.");
   if (forNew && account.archived) throw new DomainError(`Счёт «${account.name}» закрыт — выберите другой.`);
   return account;
+}
+
+/** Корректировка остатка счёта на amount; без accountId — основной счёт. */
+function balanceAdjustment(
+  state: State,
+  account: Account,
+  t: { id: string; amount: Kopecks; date: IsoDate; accountId?: string },
+): Transaction {
+  const multiple = accountsOf(state).length > 2 || account.id !== MAIN_ACCOUNT_ID;
+  return {
+    id: t.id,
+    type: "adjustment",
+    amount: t.amount,
+    date: t.date,
+    category: ADJUSTMENT_CATEGORY,
+    title: clipTitle(multiple ? `Корректировка остатка: ${account.name}` : "Корректировка остатка"),
+    note: "",
+    ...(t.accountId ? { accountId: t.accountId } : {}),
+  };
 }
 
 /**
@@ -1064,17 +1094,7 @@ export function applyAction(state: State, action: Action): State {
       const account = assertAccount(state, accountId, false);
       const delta = action.actual - accountBalance(state, accountId, action.date);
       if (delta === 0) return state;
-      const multiple = accountsOf(state).length > 2 || accountId !== MAIN_ACCOUNT_ID;
-      const tx: Transaction = {
-        id: action.id,
-        type: "adjustment",
-        amount: delta,
-        date: action.date,
-        category: ADJUSTMENT_CATEGORY,
-        title: clipTitle(multiple ? `Корректировка остатка: ${account.name}` : "Корректировка остатка"),
-        note: "",
-        ...(action.accountId ? { accountId: action.accountId } : {}),
-      };
+      const tx = balanceAdjustment(state, account, { id: action.id, amount: delta, date: action.date, accountId: action.accountId });
       return { ...state, transactions: [...state.transactions, tx] };
     }
 
@@ -1194,8 +1214,28 @@ export function applyAction(state: State, action: Action): State {
       const accounts = accountsOf(state);
       const current = accounts.find((a) => a.id === action.accountId);
       if (!current) throw new DomainError("Счёт не найден.");
-      const updated: Account = { ...current, bank: { amount: action.amount, delta: action.delta, date: action.date } };
-      return { ...state, accounts: accounts.map((a) => (a.id === current.id ? updated : a)) };
+      // СМС обработали не по порядку (19:54 раньше 19:52): остаток из более ранней не заменяет свежий —
+      // её операция уже записана, и расхождение по свежему остатку считается с ней.
+      if (current.bank && bankSnapshotOlder(action, current.bank)) return state;
+      const bank = { amount: action.amount, delta: action.delta, date: action.date, ...(action.time ? { time: action.time } : {}) };
+      return { ...state, accounts: accounts.map((a) => (a.id === current.id ? { ...current, bank } : a)) };
+    }
+
+    case "account.bankFix": {
+      const accounts = accountsOf(state);
+      const current = accounts.find((a) => a.id === action.accountId);
+      if (!current) throw new DomainError("Счёт не найден.");
+      const delta = bankDelta(state, current);
+      // Уже решено — например, поправили на другом устройстве.
+      if (delta === null || !current.bank) return state;
+      const resolved = { ...current, bank: { ...current.bank, delta: 0 } };
+      const next = { ...state, accounts: accounts.map((a) => (a.id === current.id ? resolved : a)) };
+      if (delta === 0) return next;
+      assertNewId(state, action.id);
+      assertTxCapacity(state, 1);
+      // Корректировка — днём СМС: остаток приложения на тот день становится как в банке.
+      const tx = balanceAdjustment(state, current, { id: action.id, amount: delta, date: current.bank.date, accountId: current.id });
+      return { ...next, transactions: [...next.transactions, tx] };
     }
 
     case "account.delete": {

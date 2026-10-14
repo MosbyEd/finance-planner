@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountBalance, findAccount } from "./accounts";
+import { accountBalance, bankDelta, findAccount } from "./accounts";
 import { applyActions } from "./actions";
 import { savingsTotal } from "./metrics";
 import { legacySavingsFixes, parseSberSms, planSmsImport, smsAccountKeys, smsBalances, smsDate } from "./sms";
@@ -7,7 +7,7 @@ import type { Action } from "./actions";
 
 /** Действия операции без сверки остатка (account.bank) — её проверяют отдельно. */
 const ops = (actions: Action[]) => actions.filter((a) => a.type !== "account.bank");
-import { stateWith, template, tx } from "./test-utils";
+import { addTx, stateWith, template, tx } from "./test-utils";
 
 const NBSP = " ";
 
@@ -472,7 +472,12 @@ describe("счета в СМС", () => {
 describe("сверка остатка по СМС", () => {
   const sms = (text: string, state: ReturnType<typeof stateWith>) =>
     planSmsImport(state, parseSberSms(text)!, { idBase: "sms-bal", date: "2026-10-10", sms: text });
-  const funded = () => applyActions(stateWith(), [{ type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 }]);
+  // Автоотчисления с покупок — как копилка Сбера: переводятся, когда накопится 100 ₽.
+  const funded = () => {
+    const s = stateWith();
+    s.settings.purchaseSaving.minTransfer = 10_000;
+    return applyActions(s, [{ type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 }]);
+  };
 
   it("остатки из СМС: один на счёт СМС или по каждому счёту", () => {
     expect(smsBalances("Счёт карты MIR-7759 18:42 Покупка 300р IP Баланс: 5260.14р")).toEqual([{ key: null, amount: 526_014 }]);
@@ -506,6 +511,79 @@ describe("сверка остатка по СМС", () => {
     expect(second.skip?.status).toBe("duplicate");
     expect(second.actions).toEqual([{ type: "account.bank", accountId: "dep", amount: 100_000, delta: 0, date: "2026-10-10" }]);
     expect(sms("Кредитная карта MIR-1234 12:00 Покупка 500р LENTA Баланс: 95000р", s).actions.some((a) => a.type === "account.bank")).toBe(false);
+  });
+
+  it("копилка: пока не набралось 100 ₽, деньги на карте; набралось — ушли с карты и в банке, и в приложении", () => {
+    // Покупка 300 ₽: отчисление 15 ₽ копится — в банке оно ещё на карте.
+    const first = sms("Счёт карты MIR-7759 10:00 Покупка 300р LENTA Баланс: 4700р", funded());
+    expect(first.actions.at(-1)).toMatchObject({ type: "account.bank", accountId: "main", delta: 0 });
+    let s = applyActions(funded(), first.actions);
+    // Покупка 1915 ₽: отчисление 131 ₽, вместе с накопленным — больше 100 ₽. Банк забрал 146 ₽ в копилку.
+    const text = "Счёт карты MIR-7759 20:42 Покупка 1915р Самокат Баланс: 2639р";
+    const second = planSmsImport(s, parseSberSms(text)!, { idBase: "sms-big", date: "2026-10-10", sms: text });
+    s = applyActions(s, second.actions);
+    expect(accountBalance(s, "savings", "2026-10-10")).toBe(14_600);
+    // Карта сравнивается только с основным счётом: «Сбережения» — копилка, её деньги с карты ушли.
+    expect(findAccount(s, "main")?.bank).toMatchObject({ amount: 263_900, delta: 0 });
+  });
+
+  it("СМС обработали не по порядку — остаток из более ранней не заменяет свежий, расхождения нет", () => {
+    let s = applyActions(stateWith(), [
+      { type: "account.update", id: "main", patch: { number: "5804" } },
+      { type: "account.add", account: { id: "dep", name: "Ремонт", kind: "savings", spending: false, number: "6159" } },
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 221_742 },
+      { type: "balance.set", id: "d", date: "2026-10-01", actual: 28_820_127, accountId: "dep" },
+    ]);
+    s.settings.purchaseSaving.enabled = false;
+    const late = "СЧЁТ5804 19:54 Оплата 5093.81р Баланс: 2217.22р";
+    const early = "Накопительный счет *6159 19:52 Перевод 5093.61р на СЧЁТ5804. Баланс счёта *6159: 283 107.66р, баланс *5804: 7311.03р";
+    s = applyActions(s, planSmsImport(s, parseSberSms(late)!, { idBase: "sms-late", date: "2026-10-11", time: "19:54", sms: late }).actions);
+    s = applyActions(s, planSmsImport(s, parseSberSms(early)!, { idBase: "sms-early", date: "2026-10-11", time: "19:52", sms: early }).actions);
+    expect(findAccount(s, "main")?.bank).toMatchObject({ amount: 221_722, time: "19:54" });
+    expect(bankDelta(s, findAccount(s, "main")!)).toBe(0);
+    // Остаток накопительного свежее не было — он сверился.
+    expect(findAccount(s, "dep")?.bank).toMatchObject({ amount: 28_310_766, time: "19:52", delta: 0 });
+  });
+});
+
+describe("«Поправить» расхождение с банком", () => {
+  const today = "2026-10-14";
+  const off = () => {
+    const s = stateWith();
+    s.settings.purchaseSaving.enabled = false;
+    // В банке 2 272,74 ₽, в приложении 2 411,64 ₽ — расхождение по СМС вчера.
+    return applyActions(s, [
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 241_164 },
+      { type: "account.bank", accountId: "main", amount: 227_274, delta: -13_890, date: "2026-10-13", time: "23:54" },
+    ]);
+  };
+
+  it("корректировка на разницу — днём СМС, остаток счёта становится как в банке", () => {
+    const s = applyActions(off(), [{ type: "account.bankFix", id: "fix", accountId: "main" }]);
+    expect(s.transactions.find((t) => t.id === "fix")).toMatchObject({ type: "adjustment", amount: -13_890, date: "2026-10-13" });
+    expect(accountBalance(s, "main", today)).toBe(227_274);
+    expect(findAccount(s, "main")?.bank?.delta).toBe(0);
+    expect(bankDelta(s, findAccount(s, "main")!)).toBeNull();
+  });
+
+  it("пропущенную операцию записали — поправляется только остаток разницы, без дубля", () => {
+    let s = applyActions(off(), [
+      addTx({ id: "cash", type: "expense", amount: 10_000, date: "2026-10-13" }),
+    ]);
+    expect(bankDelta(s, findAccount(s, "main")!)).toBe(-3_890);
+    s = applyActions(s, [{ type: "account.bankFix", id: "fix", accountId: "main" }]);
+    expect(accountBalance(s, "main", today)).toBe(227_274);
+  });
+
+  it("операции после дня СМС не мешают, повторное «Поправить» (с другого устройства) ничего не делает", () => {
+    let s = applyActions(off(), [addTx({ id: "later", type: "expense", amount: 5_000, date: today })]);
+    expect(bankDelta(s, findAccount(s, "main")!)).toBe(-13_890);
+    s = applyActions(s, [
+      { type: "account.bankFix", id: "fix", accountId: "main" },
+      { type: "account.bankFix", id: "fix2", accountId: "main" },
+    ]);
+    expect(s.transactions.filter((t) => t.type === "adjustment").map((t) => t.amount)).toEqual([241_164, -13_890]);
+    expect(accountBalance(s, "main", today)).toBe(227_274 - 5_000);
   });
 });
 

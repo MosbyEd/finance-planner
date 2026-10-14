@@ -205,7 +205,7 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
   }
   for (const m of bankMismatches(state, today)) {
     const resolve = (fix: boolean) => {
-      if (dispatch(bankResolveActions(state, m.account.id, fix, today, newId())) && fix) toast("Остаток поправлен");
+      if (dispatch(bankResolveActions(state, m.account.id, fix, newId())) && fix) toast("Остаток поправлен");
     };
     rows.push(
       <AttentionRow
@@ -219,7 +219,7 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
             <Button size="sm" onClick={() => resolve(true)}>
               Поправить
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(m))}>
+            <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(state, m))}>
               Перевод
             </Button>
           </>
@@ -288,7 +288,7 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
   // Крестик в углу карточки, на уровне заголовка: закрыли — значит, расхождения с банком применять не нужно.
   const mismatches = bankMismatches(state, today);
   const dismiss = () =>
-    dispatch(mismatches.flatMap((m) => bankResolveActions(state, m.account.id, false, today, newId())));
+    dispatch(mismatches.flatMap((m) => bankResolveActions(state, m.account.id, false, newId())));
   return (
     <Card
       title="Требует внимания"

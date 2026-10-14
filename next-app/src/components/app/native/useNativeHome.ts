@@ -229,7 +229,7 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           }
           return revealBalances(true).then((ok) => (ok ? { ok: true } : { ok: false, error: "Не удалось показать суммы." }));
         case "bank": {
-          const actions = bankResolveActions(state, command.accountId, command.fix, day, newId());
+          const actions = bankResolveActions(state, command.accountId, command.fix, newId());
           if (!actions.length) return { ok: true };
           const result = store.dispatch(actions);
           if (!result.ok) return result;

@@ -1,18 +1,20 @@
 import {
-  accountBalance,
   accountBalances,
   accountCards,
   activeAccounts,
+  bankDelta,
   cardLabel,
   creditStatus,
   findAccount,
   type CreditSummary,
   isSpendingAccount,
   MAIN_ACCOUNT_ID,
+  savingsTarget,
   sourceAccountId,
 } from "@/domain/accounts";
 import type { Action } from "@/domain/actions";
 import { CREDIT_OPERATION_LABEL } from "@/domain/interest";
+import { purchaseSourceExcluded } from "@/domain/savings";
 import { formatDay, formatRelativeDay, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
@@ -216,51 +218,74 @@ export interface BankMismatch {
   text: string;
 }
 
+/**
+ * Расхождения с банком (≥ 1 ₽) — по текущим операциям: сколько предложено поправить, на столько «Поправить»
+ * и поправит. Пропущенную операцию записали вручную — расхождение уменьшается или пропадает.
+ */
 export function bankMismatches(state: State, today: IsoDate): BankMismatch[] {
   return activeAccounts(state).flatMap((account) => {
     const bank = account.bank;
-    if (!bank || Math.abs(bank.delta) < 100) return [];
-    const app = bank.amount - bank.delta;
+    const delta = bankDelta(state, account);
+    if (!bank || delta === null || Math.abs(delta) < 100) return [];
+    const app = bank.amount - delta;
+    const piggy = bankPiggyAccount(state, account);
+    const hint = piggy
+      ? ` Если это копилка банка — «Перевод» ${delta < 0 ? "в" : "из"} «${piggy.name}».`
+      : "";
     return [
       {
         account,
         bank: bank.amount,
         app,
-        delta: bank.delta,
+        delta,
         title: `«${account.name}»: в банке ${formatMoney(bank.amount, { whole: true })}, в приложении ${formatMoney(app, { whole: true })}`,
-        text: `По СМС — ${formatRelativeDay(bank.date, today).replace(/, .*/, "").toLowerCase()}. Поправить остаток на ${formatMoney(bank.delta, { sign: true })}?`,
+        text: `По СМС — ${formatRelativeDay(bank.date, today).replace(/, .*/, "").toLowerCase()}. Поправить остаток на ${formatMoney(delta, { sign: true })}?${hint}`,
       },
     ];
   });
 }
 
 /**
- * «Перевод» для расхождения: в банке меньше — деньги ушли с этого счёта (выбрать, куда), больше — пришли
- * (выбрать, откуда). После перевода расхождение снимается.
+ * Накопительный, куда идут автоотчисления с покупок по этому счёту. Банк переводит их в копилку сам, когда
+ * наберётся порог, и без СМС, — поэтому расхождение по карте часто означает перевод в копилку (или обратно,
+ * если приложение отложило больше банка), а не потерянную операцию.
  */
-export function bankTransferOverlay(m: Pick<BankMismatch, "account" | "delta">): {
+function bankPiggyAccount(state: State, account: Account): Account | undefined {
+  const ps = state.settings.purchaseSaving;
+  if (!ps.enabled || account.kind !== "debit" || purchaseSourceExcluded(state.settings, { accountId: account.id })) return undefined;
+  return findAccount(state, savingsTarget(state, ps.toAccountId));
+}
+
+/**
+ * «Перевод» для расхождения: в банке меньше — деньги ушли с этого счёта, больше — пришли. Второй счёт — копилка
+ * автонакоплений (если они идут с этого счёта), иначе его выбирают. После перевода расхождение снимается.
+ */
+export function bankTransferOverlay(
+  state: State,
+  m: Pick<BankMismatch, "account" | "delta">,
+): {
   kind: "transfer";
   from?: string;
   to?: string;
   amount: number;
   resolveBank: string;
 } {
+  const piggy = bankPiggyAccount(state, m.account)?.id;
   return m.delta < 0
-    ? { kind: "transfer", from: m.account.id, amount: -m.delta, resolveBank: m.account.id }
-    : { kind: "transfer", to: m.account.id, amount: m.delta, resolveBank: m.account.id };
+    ? { kind: "transfer", from: m.account.id, ...(piggy ? { to: piggy } : {}), amount: -m.delta, resolveBank: m.account.id }
+    : { kind: "transfer", ...(piggy ? { from: piggy } : {}), to: m.account.id, amount: m.delta, resolveBank: m.account.id };
 }
 
-/** «Поправить»: корректировка счёта на разницу с банком и снятие расхождения. «Оставить» — только снятие. */
-export function bankResolveActions(state: State, accountId: string, fix: boolean, today: IsoDate, id: string): Action[] {
+/**
+ * «Поправить»: корректировка на разницу с банком — её считает само действие по операциям на момент применения,
+ * поэтому сервер и телефон поправят одинаково. «Оставить» — только снятие расхождения.
+ */
+export function bankResolveActions(state: State, accountId: string, fix: boolean, id: string): Action[] {
   const account = activeAccounts(state).find((a) => a.id === accountId);
   const bank = account?.bank;
   if (!account || !bank) return [];
-  const resolve: Action = { type: "account.bank", accountId, amount: bank.amount, delta: 0, date: bank.date };
-  if (!fix || bank.delta === 0) return [resolve];
-  return [
-    { type: "balance.set", id, date: today, actual: accountBalance(state, accountId, today) + bank.delta, accountId },
-    resolve,
-  ];
+  if (fix) return [{ type: "account.bankFix", id, accountId }];
+  return [{ type: "account.bank", accountId, ...bank, delta: 0 }];
 }
 
 export interface InterestLine {

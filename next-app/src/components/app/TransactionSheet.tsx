@@ -281,7 +281,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
     }
     const action = transferAction(state, { id: newId(), date, from, to, amount: value, title: cleanTitle, note });
     const ok = action ? dispatch(action) : false;
-    if (ok && preset?.resolveBank) dispatch(bankResolveActions(state, preset.resolveBank, false, today, newId()));
+    if (ok && preset?.resolveBank) dispatch(bankResolveActions(state, preset.resolveBank, false, newId()));
     if (ok) toast(transferMessage(state, from, to, value));
     return ok;
   };

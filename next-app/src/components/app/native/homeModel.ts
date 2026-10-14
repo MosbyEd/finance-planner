@@ -351,7 +351,7 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       command: null,
       actions: [
         { label: "Поправить", primary: true, command: { type: "bank", accountId: m.account.id, fix: true } },
-        { label: "Перевод", primary: false, command: { type: "open", overlay: bankTransferOverlay(m) } },
+        { label: "Перевод", primary: false, command: { type: "open", overlay: bankTransferOverlay(state, m) } },
       ],
       dismiss: { type: "bank", accountId: m.account.id, fix: false },
     });

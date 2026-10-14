@@ -754,11 +754,14 @@ function balanceAccount(state: State, key: string | null, savingsKeys: Set<strin
  * расхождение — приложение предложит поправить. У кредитки в СМС доступный лимит, а не долг — её не сверяем.
  * Баланс без цифр счёта относится к счёту этой СМС. unmatched — цифры, остаток по которым сверить не с чем
  * (у счёта в приложении их не указали): уведомление подскажет, где их добавить.
+ *
+ * Остаток счёта сравнивается только с самим счётом. Накопительные в приложении — отдельные счета и в банке:
+ * автонакопления банк переводит с карты в копилку, поэтому на карте этих денег уже нет.
  */
 function bankBalanceActions(
   state: State,
   actions: Action[],
-  ctx: { date: IsoDate; sms: string; bankId?: string },
+  ctx: { date: IsoDate; time?: string; sms: string; bankId?: string },
 ): { actions: Action[]; unmatched: string[] } {
   const none = { actions: [], unmatched: [] };
   const balances = smsBalances(ctx.sms);
@@ -777,20 +780,21 @@ function bankBalanceActions(
     if (!account && key && !unmatched.includes(key)) unmatched.push(key);
     return account;
   };
-  // Накопительные счета без цифр из СМС (в том числе «Сбережения» по умолчанию с «копилкой») — конверты внутри
-  // основного счёта: в банке эти деньги лежат на нём же.
-  const envelopes = accountsOf(state).filter((a) => a.kind === "savings" && !accountKeys(a).length && !a.spending && !a.archived);
-  const appBalance = (id: string) =>
-    accountBalance(after, id, ctx.date) +
-    (id === MAIN_ACCOUNT_ID ? envelopes.reduce((sum, a) => sum + accountBalance(after, a.id, ctx.date), 0) : 0);
   const result: Action[] = [];
   const seen = new Set<string>();
   for (const balance of balances) {
     const account = byKey(balance.key ?? keys.source);
     if (!account || account.kind === "credit" || seen.has(account.id)) continue;
     seen.add(account.id);
-    const delta = balance.amount - appBalance(account.id);
-    result.push({ type: "account.bank", accountId: account.id, amount: balance.amount, delta, date: ctx.date });
+    const delta = balance.amount - accountBalance(after, account.id, ctx.date);
+    result.push({
+      type: "account.bank",
+      accountId: account.id,
+      amount: balance.amount,
+      delta,
+      date: ctx.date,
+      ...(ctx.time ? { time: ctx.time } : {}),
+    });
   }
   return { actions: result, unmatched };
 }
@@ -877,10 +881,14 @@ function replacedCorrections(state: State, actions: Action[], date: IsoDate): { 
   return { actions: deletes, notes };
 }
 
-/** Операция из СМС: устойчивый id, дата, текст и банк, приславший СМС (по нему ищем счёт по цифрам карты). */
+/**
+ * Операция из СМС: устойчивый id, дата и время («ЧЧ:ММ» — по нему остаток из СМС, обработанной позже, не заменяет
+ * более свежий), текст и банк, приславший СМС (по нему ищем счёт по цифрам карты).
+ */
 export interface SmsContext {
   idBase: string;
   date: IsoDate;
+  time?: string;
   sms: string;
   bankId?: string;
 }
@@ -1102,7 +1110,7 @@ export function legacySavingsFixes(state: State): LegacySavingsFix[] {
     ];
     // Расхождение с банком у счёта, куда пришли деньги, считалось с лишней суммой — пересчитываем.
     if (target?.bank && target.bank.date >= withdrawal.date) {
-      actions.push({ type: "account.bank", accountId: target.id, amount: target.bank.amount, delta: target.bank.delta + (move.amount - keep), date: target.bank.date });
+      actions.push({ type: "account.bank", accountId: target.id, ...target.bank, delta: target.bank.delta + (move.amount - keep) });
     }
     result.push({
       id: fix.id,

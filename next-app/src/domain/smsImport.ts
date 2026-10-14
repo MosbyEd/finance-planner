@@ -52,7 +52,8 @@ export function prepareSmsImport(
     return { status: "duplicate", message: "Эта операция уже добавлена.", ops: [] };
   }
 
-  const plan = planSmsImport(state, op, { idBase, date, sms, ...(bank.bank ? { bankId: bank.bank.id } : {}) });
+  const time = op.time ?? (/^\d{2}:\d{2}$/.test(received.time) ? received.time : undefined);
+  const plan = planSmsImport(state, op, { idBase, date, sms, ...(time ? { time } : {}), ...(bank.bank ? { bankId: bank.bank.id } : {}) });
   // Операция уже учтена (или это не операция) — но остаток из СМС всё равно сверяем.
   if (plan.skip && !plan.actions.length) return { ...plan.skip, ops: [] };
   return {
