@@ -358,10 +358,16 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       title: m.title,
       text: m.text,
       command: null,
-      actions: [
-        { label: "Поправить", primary: true, command: { type: "bank", accountId: m.account.id, fix: true } },
-        { label: "Перевод", primary: false, command: { type: "open", overlay: bankTransferOverlay(state, m) } },
-      ],
+      // Банк, похоже, уже перевёл в копилку: «Перевод» в неё посчитал бы ожидаемые отчисления второй раз.
+      actions: m.piggy
+        ? [
+            { label: "Копилка банка", primary: true, command: { type: "bank", accountId: m.account.id, fix: true, piggy: true } },
+            { label: "Поправить", primary: false, command: { type: "bank", accountId: m.account.id, fix: true } },
+          ]
+        : [
+            { label: "Поправить", primary: true, command: { type: "bank", accountId: m.account.id, fix: true } },
+            { label: "Перевод", primary: false, command: { type: "open", overlay: bankTransferOverlay(state, m) } },
+          ],
       dismiss: { type: "bank", accountId: m.account.id, fix: false },
     });
   }

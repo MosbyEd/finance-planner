@@ -6,7 +6,7 @@ import { accountBalance, activeAccounts, findAccount, MAIN_ACCOUNT_ID, SAVINGS_A
 import { balanceAt, goalsReservedOn, payEventName, periodLeftView, safeToSpend, savingsTotal } from "@/domain/metrics";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import { occurrenceDate } from "@/domain/recurring";
-import { pendingSavings } from "@/domain/savings";
+import { bankPiggyAccount, expectedToPiggy, pendingSavings } from "@/domain/savings";
 import type { State } from "@/domain/schema";
 import { plural } from "@/domain/text";
 import { newId, useSnapshot, useToday } from "@/client/react";
@@ -47,6 +47,18 @@ export function BalanceSheet({ accountId: presetAccount }: { accountId?: string 
   const actual = entered === null ? null : isCredit ? -entered : entered;
   const [error, setError] = useState<string | null>(null);
   const delta = actual === null ? 0 : actual - computed;
+  // На карте меньше, а с неё ожидаются отчисления в копилку банка — банк, похоже, уже перевёл: «Копилка банка».
+  const piggyAccount = account && !fresh && delta < 0 ? bankPiggyAccount(state, account) : undefined;
+  const expected = piggyAccount && account ? expectedToPiggy(state, account, today) : 0;
+  const piggyRest = delta + expected;
+
+  const saveAsPiggy = () => {
+    if (actual === null) return;
+    if (dispatch({ type: "balance.set", id: newId(), date: today, actual, piggy: true, ...(multiple ? { accountId } : {}) })) {
+      toast("Копилка банка учтена");
+      close();
+    }
+  };
 
   const save = () => {
     if (actual === null) {
@@ -79,9 +91,18 @@ export function BalanceSheet({ accountId: presetAccount }: { accountId?: string 
       dirty={actual !== null}
       title={isCredit ? "Сколько должны по карте?" : fresh ? "Сколько сейчас денег?" : "Сколько на счёте?"}
       footer={
-        <Button className="w-full" onClick={save}>
-          Сохранить
-        </Button>
+        expected > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" onClick={save}>
+              Корректировка
+            </Button>
+            <Button onClick={saveAsPiggy}>Копилка банка</Button>
+          </div>
+        ) : (
+          <Button className="w-full" onClick={save}>
+            Сохранить
+          </Button>
+        )
       }
     >
       <form
@@ -135,6 +156,17 @@ export function BalanceSheet({ accountId: presetAccount }: { accountId?: string 
             месяца — только на остаток.
           </p>
         )}
+        {expected > 0 && piggyAccount && (
+          <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">
+            С этой карты в «{piggyAccount.name}» ожидается {formatMoney(expected, { sign: true })}. Если банк уже перевёл их
+            в копилку — «Копилка банка»: ожидаемое засчитаем переведённым
+            {piggyRest < 0
+              ? `, ещё ${formatMoney(-piggyRest)} — переводом в «${piggyAccount.name}».`
+              : piggyRest > 0
+                ? `, а ${formatMoney(piggyRest)} вернём из «${piggyAccount.name}» на карту.`
+                : " — остаток сойдётся."}
+          </p>
+        )}
         {!fresh && actual !== null && delta === 0 && (
           <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm">Остаток совпадает с расчётным — менять нечего.</p>
         )}
@@ -144,7 +176,6 @@ export function BalanceSheet({ accountId: presetAccount }: { accountId?: string 
   );
 }
 
-/** Пополнение или снятие общих сбережений. */
 /**
  * Автоотчисления, которые ещё копятся до порога «переводить, когда накопится»: «Ожидается +40 ₽ — переведём,
  * когда наберётся 100 ₽. Пока эти деньги на счёте». null — копить нечего.
@@ -157,6 +188,7 @@ function expectedSavingsNote(state: State): string | null {
   return `Ожидается ${formatMoney(total, { sign: true })} автоотчислений — переведём${when}. Пока эти деньги на счёте.`;
 }
 
+/** Пополнение или снятие общих сбережений. */
 export function SavingsSheet({ direction }: { direction: "in" | "out" }) {
   const { state } = useSnapshot();
   const { close } = useUi();

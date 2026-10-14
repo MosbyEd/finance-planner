@@ -9,12 +9,11 @@ import {
   type CreditSummary,
   isSpendingAccount,
   MAIN_ACCOUNT_ID,
-  savingsTarget,
   sourceAccountId,
 } from "@/domain/accounts";
 import type { Action } from "@/domain/actions";
 import { CREDIT_OPERATION_LABEL } from "@/domain/interest";
-import { expectedSavings, expectedSavingsLabel, purchaseSourceExcluded } from "@/domain/savings";
+import { bankPiggyAccount, expectedSavings, expectedSavingsLabel, expectedToPiggy } from "@/domain/savings";
 import { formatDay, formatRelativeDay, type IsoDate } from "@/domain/dates";
 import { formatMoney, type Kopecks } from "@/domain/money";
 import type { Account, AccountKind, State, Transaction } from "@/domain/schema";
@@ -232,6 +231,11 @@ export interface BankMismatch {
   delta: Kopecks;
   title: string;
   text: string;
+  /**
+   * «Копилка банка»: в банке меньше, а с карты ожидаются отчисления в копилку — банк, похоже, уже перевёл.
+   * expected засчитается переведённым, rest — остаток разницы (минус — ещё в копилку, плюс — обратно на карту).
+   */
+  piggy: { name: string; expected: Kopecks; rest: Kopecks } | null;
 }
 
 /**
@@ -244,10 +248,23 @@ export function bankMismatches(state: State, today: IsoDate): BankMismatch[] {
     const delta = bankDelta(state, account);
     if (!bank || delta === null || Math.abs(delta) < 100) return [];
     const app = bank.amount - delta;
-    const piggy = bankPiggyAccount(state, account);
-    const hint = piggy
-      ? ` Если это копилка банка — «Перевод» ${delta < 0 ? "в" : "из"} «${piggy.name}».`
-      : "";
+    const piggyAccount = bankPiggyAccount(state, account);
+    const expected = piggyAccount && delta < 0 ? expectedToPiggy(state, account, bank.date) : 0;
+    const piggy = piggyAccount && expected > 0 ? { name: piggyAccount.name, expected, rest: delta + expected } : null;
+    const when = `По СМС — ${formatRelativeDay(bank.date, today).replace(/, .*/, "").toLowerCase()}.`;
+    let text: string;
+    if (piggy) {
+      const rest =
+        piggy.rest < 0
+          ? `, ещё ${formatMoney(-piggy.rest)} — переводом в «${piggy.name}»`
+          : piggy.rest > 0
+            ? `, а ${formatMoney(piggy.rest)} вернём из «${piggy.name}» на карту`
+            : " — остаток сойдётся";
+      text = `${when} Если банк уже перевёл в копилку — «Копилка банка»: ожидаемые ${formatMoney(expected, { sign: true })} засчитаем переведёнными${rest}. Или поправить остаток на ${formatMoney(delta, { sign: true })}.`;
+    } else {
+      const hint = piggyAccount ? ` Если это копилка банка — «Перевод» ${delta < 0 ? "в" : "из"} «${piggyAccount.name}».` : "";
+      text = `${when} Поправить остаток на ${formatMoney(delta, { sign: true })}?${hint}`;
+    }
     return [
       {
         account,
@@ -255,21 +272,11 @@ export function bankMismatches(state: State, today: IsoDate): BankMismatch[] {
         app,
         delta,
         title: `«${account.name}»: в банке ${formatMoney(bank.amount, { whole: true })}, в приложении ${formatMoney(app, { whole: true })}`,
-        text: `По СМС — ${formatRelativeDay(bank.date, today).replace(/, .*/, "").toLowerCase()}. Поправить остаток на ${formatMoney(delta, { sign: true })}?${hint}`,
+        text,
+        piggy,
       },
     ];
   });
-}
-
-/**
- * Накопительный, куда идут автоотчисления с покупок по этому счёту. Банк переводит их в копилку сам, когда
- * наберётся порог, и без СМС, — поэтому расхождение по карте часто означает перевод в копилку (или обратно,
- * если приложение отложило больше банка), а не потерянную операцию.
- */
-function bankPiggyAccount(state: State, account: Account): Account | undefined {
-  const ps = state.settings.purchaseSaving;
-  if (!ps.enabled || account.kind !== "debit" || purchaseSourceExcluded(state.settings, { accountId: account.id })) return undefined;
-  return findAccount(state, savingsTarget(state, ps.toAccountId));
 }
 
 /**

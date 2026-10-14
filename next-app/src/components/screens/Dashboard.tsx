@@ -216,14 +216,26 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
         title={m.title}
         text={m.text}
         actions={
-          <>
-            <Button size="sm" onClick={() => resolve(true)}>
-              Поправить
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(state, m))}>
-              Перевод
-            </Button>
-          </>
+          m.piggy ? (
+            // Банк, похоже, уже перевёл в копилку: «Перевод» в неё посчитал бы ожидаемые отчисления второй раз.
+            <>
+              <Button size="sm" onClick={() => dispatch({ type: "account.bankPiggy", id: newId(), accountId: m.account.id }) && toast("Копилка банка учтена")}>
+                Копилка банка
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => resolve(true)}>
+                Поправить
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" onClick={() => resolve(true)}>
+                Поправить
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => open(bankTransferOverlay(state, m))}>
+                Перевод
+              </Button>
+            </>
+          )
         }
       />,
     );

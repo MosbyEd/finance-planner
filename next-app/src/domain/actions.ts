@@ -36,7 +36,17 @@ import {
 } from "./metrics";
 import { getOwn, withKey, withoutKey } from "./records";
 import { dueOccurrences, occurrenceTxId, skippedMonths, type Occurrence } from "./recurring";
-import { autoSavingAmount, autoSavingTarget, buildLinkedSaving, linkedSavingId, salarySavingAmount, savingThreshold } from "./savings";
+import {
+  autoSavingAmount,
+  autoSavingSource,
+  autoSavingTarget,
+  bankPiggyAccount,
+  buildLinkedSaving,
+  linkedSavingId,
+  pendingToPiggy,
+  salarySavingAmount,
+  savingThreshold,
+} from "./savings";
 import {
   LIMITS,
   accountSchema,
@@ -170,6 +180,8 @@ export const actionSchema = z.discriminatedUnion("type", [
     actual: kopecksSchema,
     /** Какой счёт сверяем. Нет — основной. */
     accountId: idSchema.optional(),
+    /** Разница — копилка банка: ожидаемые отчисления засчитываются переведёнными, остаток — переводом в копилку. */
+    piggy: z.literal(true).optional(),
   }),
   z.object({
     type: z.literal("savings.move"),
@@ -226,6 +238,11 @@ export const actionSchema = z.discriminatedUnion("type", [
    * что есть в этот момент), — на сервере и на телефоне одна и та же. Расхождение уже решено — ничего не делает.
    */
   z.object({ type: z.literal("account.bankFix"), id: idSchema, accountId: idSchema }),
+  /**
+   * «Копилка банка»: в банке меньше, потому что банк уже перевёл в копилку. Ожидаемые отчисления с карты
+   * засчитываются переведёнными, остаток разницы — переводом между картой и копилкой. Считается при применении.
+   */
+  z.object({ type: z.literal("account.bankPiggy"), id: idSchema, accountId: idSchema }),
   z.object({ type: z.literal("template.add"), template: templateSchema }),
   z.object({
     type: z.literal("template.update"),
@@ -551,11 +568,7 @@ function linkedSavingTarget(state: State, tx: Transaction): string {
   return autoSavingTarget(state, tx.type);
 }
 
-/** Откуда автоотчисление: со счёта операции, если это обычный счёт или наличные; иначе (кредитка) — с основного. */
-function linkedSavingSource(state: State, tx: Transaction): string {
-  const account = findAccount(state, sourceAccountId(tx));
-  return account && (account.kind === "debit" || account.kind === "cash") ? account.id : MAIN_ACCOUNT_ID;
-}
+
 
 // Записи skipped читаются и пишутся только через getOwn/withKey/withoutKey: ключи — id от пользователя.
 function addSkip(state: State, templateId: string, month: MonthKey): State {
@@ -615,7 +628,7 @@ function syncLinkedSaving(state: State, source: Transaction): State {
   return markSavingPending(
     {
       ...state,
-      transactions: [...others, buildLinkedSaving(source, desired, linkedSavingSource(state, source), linkedSavingTarget(state, source))],
+      transactions: [...others, buildLinkedSaving(source, desired, autoSavingSource(state, source), linkedSavingTarget(state, source))],
     },
     source.id,
     false,
@@ -637,14 +650,19 @@ function settleAutoSavings(state: State, type: Transaction["type"]): State {
   const total = amounts.reduce((sum, a) => sum + Math.max(0, a), 0);
   const settle = total > 0 && total >= savingThreshold(state.settings, type);
   if (!settle && !stale.size) return state;
-  const done = settle ? new Set(pending.map((t) => t.id)) : stale;
-  const created = settle
-    ? pending.flatMap((t, i) =>
-        amounts[i] > 0 && findLinkedSaving(state, t) === undefined
-          ? [buildLinkedSaving(t, amounts[i], linkedSavingSource(state, t), linkedSavingTarget(state, t))]
-          : [],
-      )
-    : [];
+  return finishPending(state, settle ? pending : pending.filter((t) => stale.has(t.id)));
+}
+
+/** Отчисления этих операций перестают копиться: у каждой — своё отчисление в сбережения (если оно ещё есть). */
+function finishPending(state: State, pending: Transaction[]): State {
+  if (!pending.length) return state;
+  const done = new Set(pending.map((t) => t.id));
+  const created = pending.flatMap((t) => {
+    const amount = autoSavingAmount(t, state.settings);
+    return amount > 0 && findLinkedSaving(state, t) === undefined
+      ? [buildLinkedSaving(t, amount, autoSavingSource(state, t), linkedSavingTarget(state, t))]
+      : [];
+  });
   if (created.length) assertTxCapacity(state, created.length);
   return {
     ...state,
@@ -661,6 +679,37 @@ function settleAutoSavings(state: State, type: Transaction["type"]): State {
 }
 
 /**
+ * Копилка банка: банк сам перевёл с карты в копилку автонакоплений, и на карте на date — actual. Ожидаемые
+ * отчисления с карты до этого дня засчитываются переведёнными (каждое своим отчислением, как при наборе порога),
+ * остаток разницы — переводом между картой и копилкой: банк перевёл больше — в копилку, меньше — обратно на карту.
+ */
+function bankPiggySweep(state: State, account: Account, actual: Kopecks, date: IsoDate, id: string): State {
+  const piggy = bankPiggyAccount(state, account);
+  if (!piggy) throw new DomainError(`С «${account.name}» автонакопления не идут — копилки у этого счёта нет.`);
+  assertNewId(state, id);
+  const next = finishPending(state, pendingToPiggy(state, account, date));
+  const rest = accountBalance(next, account.id, date) - actual;
+  if (rest === 0) return next;
+  assertTxCapacity(next, 1);
+  const onPiggy = accountBalance(next, piggy.id);
+  if (onPiggy + rest < 0) {
+    throw new DomainError(`В «${piggy.name}» только ${formatMoney(Math.max(0, onPiggy))} — вернуть на карту больше нельзя.`);
+  }
+  const tx: Transaction = {
+    id,
+    type: "saving",
+    amount: rest,
+    date,
+    category: SAVINGS_CATEGORY,
+    title: "Копилка банка",
+    note: "",
+    ...(account.id !== MAIN_ACCOUNT_ID ? { accountId: account.id } : {}),
+    ...(piggy.id !== SAVINGS_ACCOUNT_ID ? { toAccountId: piggy.id } : {}),
+  };
+  return { ...next, transactions: [...next.transactions, tx] };
+}
+
+/**
  * Правка операции, которая не меняет сумму отчисления (дата, название, заметка, «обязательный»):
  * отчисление сохраняет свою сумму, а дата и название следуют за исходной операцией.
  * Пересчёт по сегодняшним настройкам переписал бы историю (например, удалил бы старую копилку,
@@ -669,7 +718,7 @@ function settleAutoSavings(state: State, type: Transaction["type"]): State {
 function moveLinkedSaving(state: State, source: Transaction): State {
   const existing = findLinkedSaving(state, source);
   if (!existing) return state;
-  const rebuilt = buildLinkedSaving(source, existing.amount, linkedSavingSource(state, source));
+  const rebuilt = buildLinkedSaving(source, existing.amount, autoSavingSource(state, source));
   if (existing.date === rebuilt.date && existing.title === rebuilt.title) return state;
   const moved: Transaction = { ...existing, date: rebuilt.date, title: rebuilt.title };
   return { ...state, transactions: state.transactions.map((t) => (t === existing ? moved : t)) };
@@ -789,7 +838,7 @@ function materialize(state: State, today: IsoDate): State {
       tx.savingPending = true;
     } else if (saving > 0 && !existing.has(savingId)) {
       existing.add(savingId);
-      created.push(buildLinkedSaving(tx, saving, linkedSavingSource(state, tx), linkedSavingTarget(state, tx)));
+      created.push(buildLinkedSaving(tx, saving, autoSavingSource(state, tx), linkedSavingTarget(state, tx)));
     }
   }
   // Все начисления упёрлись в занятые id — состояние не меняется (повторная синхронизация — тот же объект).
@@ -1091,6 +1140,7 @@ export function applyAction(state: State, action: Action): State {
       assertTxCapacity(state, 1);
       const accountId = action.accountId ?? MAIN_ACCOUNT_ID;
       const account = assertAccount(state, accountId, false);
+      if (action.piggy) return bankPiggySweep(state, account, action.actual, action.date, action.id);
       const delta = action.actual - accountBalance(state, accountId, action.date);
       if (delta === 0) return state;
       const tx = balanceAdjustment(state, account, { id: action.id, amount: delta, date: action.date, accountId: action.accountId });
@@ -1235,6 +1285,17 @@ export function applyAction(state: State, action: Action): State {
       // Корректировка — днём СМС: остаток приложения на тот день становится как в банке.
       const tx = balanceAdjustment(state, current, { id: action.id, amount: delta, date: current.bank.date, accountId: current.id });
       return { ...next, transactions: [...next.transactions, tx] };
+    }
+
+    case "account.bankPiggy": {
+      const accounts = accountsOf(state);
+      const current = accounts.find((a) => a.id === action.accountId);
+      if (!current) throw new DomainError("Счёт не найден.");
+      // Уже решено — например, на другом устройстве.
+      if (bankDelta(state, current) === null || !current.bank) return state;
+      const resolved = { ...current, bank: { ...current.bank, delta: 0 } };
+      const next = { ...state, accounts: accounts.map((a) => (a.id === current.id ? resolved : a)) };
+      return bankPiggySweep(next, resolved, current.bank.amount, current.bank.date, action.id);
     }
 
     case "account.delete": {

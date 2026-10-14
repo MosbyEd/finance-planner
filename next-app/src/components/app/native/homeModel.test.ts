@@ -175,6 +175,26 @@ describe("ожидается в сбережения", () => {
   });
 });
 
+describe("сверка с банком — копилка банка", () => {
+  it("в банке меньше и с карты ожидается отчисление — «Копилка банка» вместо «Перевода»", () => {
+    const s = applyActions(base(), [
+      { type: "account.update", id: "savings", patch: { name: "Автонакопления" } },
+      { type: "balance.set", id: "b", date: "2026-10-01", actual: 500_000 },
+    ]);
+    s.settings.purchaseSaving = { enabled: true, percent: 0, cap: 0, roundTo: 10_000, excludedCategories: [], minTransfer: 10_000 };
+    const next = applyActions(s, [
+      addTx({ id: "a", type: "expense", amount: 6_000, date: today, autoSaving: true }),
+      { type: "account.bank", accountId: "main", amount: 484_000, delta: -10_000, date: today },
+    ]);
+    const row = model(next).attention.find((r) => r.id === "bank:main");
+    expect(row?.text).toBe(
+      "По СМС — сегодня. Если банк уже перевёл в копилку — «Копилка банка»: ожидаемые +40 ₽ засчитаем переведёнными, ещё 60 ₽ — переводом в «Автонакопления». Или поправить остаток на −100 ₽.",
+    );
+    expect(row?.actions.map((a) => a.label)).toEqual(["Копилка банка", "Поправить"]);
+    expect(commandSchema.safeParse(row?.actions[0].command).success).toBe(true);
+  });
+});
+
 describe("глазок у сумм счетов", () => {
   it("спрятано — вместо остатков «•••• ₽», без сумм в пояснениях; команда глазка проходит проверку", () => {
     const s = applyActions(base(), [

@@ -1,7 +1,8 @@
-import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, savingsTarget } from "./accounts";
+import { findAccount, MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, savingsTarget, sourceAccountId } from "./accounts";
+import type { IsoDate } from "./dates";
 import { SAVINGS_CATEGORY } from "./defaults";
 import { formatMoney, percentOf, type Kopecks } from "./money";
-import { LIMITS, type Settings, type State, type Transaction } from "./schema";
+import { LIMITS, type Account, type Settings, type State, type Transaction } from "./schema";
 
 /** Счёт и карта операции — для «с каких карт откладывать». */
 type Source = Partial<Pick<Transaction, "accountId" | "card">>;
@@ -92,6 +93,44 @@ export function expectedSavings(state: Pick<State, "accounts" | "settings" | "tr
     total += amount;
   }
   return { total, byAccount };
+}
+
+/** Откуда автоотчисление: со счёта операции, если это обычный счёт или наличные; иначе (кредитка) — с основного. */
+export function autoSavingSource(state: Pick<State, "accounts">, tx: Transaction): string {
+  const account = findAccount(state, sourceAccountId(tx));
+  return account && (account.kind === "debit" || account.kind === "cash") ? account.id : MAIN_ACCOUNT_ID;
+}
+
+/**
+ * Копилка банка у карты: накопительный, куда идут автоотчисления с покупок по ней. Банк переводит туда сам,
+ * когда наберётся его порог, и без СМС, — поэтому расхождение по карте часто означает перевод в копилку.
+ */
+export function bankPiggyAccount(state: Pick<State, "accounts" | "settings">, account: Account): Account | undefined {
+  const ps = state.settings.purchaseSaving;
+  if (!ps.enabled || account.kind !== "debit" || purchaseSourceExcluded(state.settings, { accountId: account.id })) return undefined;
+  return findAccount(state, autoSavingTarget(state, "expense"));
+}
+
+/**
+ * Ожидаемые отчисления с этого счёта в его копилку банка: ещё копятся до порога, со счёта не списаны.
+ * date — только по операциям до этого дня включительно (остаток из СМС того дня их уже мог учесть).
+ */
+export function pendingToPiggy(state: Pick<State, "accounts" | "settings" | "transactions">, account: Account, date: IsoDate): Transaction[] {
+  const piggy = bankPiggyAccount(state, account);
+  if (!piggy) return [];
+  return state.transactions.filter(
+    (t) =>
+      t.savingPending &&
+      t.date <= date &&
+      autoSavingSource(state, t) === account.id &&
+      autoSavingTarget(state, t.type) === piggy.id &&
+      autoSavingAmount(t, state.settings) > 0,
+  );
+}
+
+/** Сколько с этого счёта ожидается в копилку банка к этому дню. */
+export function expectedToPiggy(state: Pick<State, "accounts" | "settings" | "transactions">, account: Account, date: IsoDate): Kopecks {
+  return pendingToPiggy(state, account, date).reduce((sum, t) => sum + autoSavingAmount(t, state.settings), 0);
 }
 
 /** «ожидается +40 ₽» — подпись к сбережениям и к счёту, куда переведутся накопленные отчисления. */

@@ -229,6 +229,10 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           }
           return revealBalances(true).then((ok) => (ok ? { ok: true } : { ok: false, error: "Не удалось показать суммы." }));
         case "bank": {
+          if (command.piggy) {
+            const result = store.dispatch({ type: "account.bankPiggy", id: newId(), accountId: command.accountId });
+            return result.ok ? { ok: true, message: "Копилка банка учтена" } : result;
+          }
           const actions = bankResolveActions(state, command.accountId, command.fix, newId());
           if (!actions.length) return { ok: true };
           const result = store.dispatch(actions);
