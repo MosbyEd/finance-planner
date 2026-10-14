@@ -1,5 +1,6 @@
 import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf, type IsoDate, type MonthKey } from "@/domain/dates";
 import {
+  afterPayReason,
   balanceAt,
   balanceEffect,
   monthMetrics,
@@ -94,10 +95,18 @@ export interface MonthModel {
   progress: number;
   tone: Tone;
   daysLeft: string | null;
-  /** «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты. */
+  /**
+   * «После аванса: ≈ 1 850 ₽ в день на 15 дней» — у периода от зарплаты до зарплаты; если в день станет намного
+   * меньше — и почему («на обязательные платежи уйдёт 45 000 ₽»).
+   */
   next?: string | null;
   /** Почему остаток — по деньгам на счетах («Зарплаты 10 октября в приложении нет…»). */
   note?: string | null;
+  /**
+   * «Подробнее»: у периода от зарплаты до зарплаты — «Как посчитано» (тот же период и те же цифры),
+   * у месяца — Аналитика. Аналитика считает календарный месяц, и её остаток с периодом не совпадает.
+   */
+  more?: NativeCommand;
 }
 
 export interface UpcomingModel {
@@ -476,6 +485,7 @@ function periodModel(period: BudgetPeriod, month: MonthKey): MonthModel {
   const view = periodLeftView(period);
   const ratio = f.budget > 0 ? view.used / f.budget : 1;
   const days = (n: number) => `${n} ${plural(n, ["день", "дня", "дней"])}`;
+  const reason = afterPayReason(period);
   return {
     title: next ? `До ${payEventName(next)} ${formatDay(next.date)}` : formatMonth(month),
     label: view.label,
@@ -487,9 +497,10 @@ function periodModel(period: BudgetPeriod, month: MonthKey): MonthModel {
     daysLeft: current.daysLeft > 0 ? (next ? `До ${payEventName(next)} ${days(current.daysLeft)}` : `До конца месяца ${days(current.daysLeft)}`) : null,
     next:
       after && next
-        ? `После ${payEventName(next)}: ≈ ${formatMoney(Math.max(0, after.perDay), { whole: true })} в день на ${days(after.days)}`
+        ? `После ${payEventName(next)}: ≈ ${formatMoney(Math.max(0, after.perDay), { whole: true })} в день на ${days(after.days)}${reason ? ` — ${reason}` : ""}`
         : null,
     note: view.note,
+    more: period.kind === "pay" ? { type: "open", overlay: { kind: "explain" } } : { type: "tab", tab: "analytics" },
   };
 }
 

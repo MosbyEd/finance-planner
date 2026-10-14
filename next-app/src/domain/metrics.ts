@@ -792,6 +792,17 @@ export function periodLeftView(period: BudgetPeriod): PeriodLeftView {
 }
 
 /**
+ * Почему после следующей выплаты в день намного меньше, чем сейчас: её съедят обязательные платежи
+ * («на обязательные платежи уйдёт 45 000 ₽»). null — разница не вдвое или дело не в обязательных.
+ */
+export function afterPayReason(period: BudgetPeriod): string | null {
+  const { current, after } = period;
+  if (!after || after.mandatory.plan <= 0 || after.mandatory.plan < after.savings.target) return null;
+  if (after.perDay * 2 >= current.perDay) return null;
+  return `на обязательные платежи уйдёт ${formatMoney(after.mandatory.plan, { whole: true })}`;
+}
+
+/**
  * «Сколько можно потратить сегодня» — детерминированно, без LLM.
  * Берём меньшее из двух: дневной лимит гибкого бюджета месяца и деньги на счёте,
  * поделённые на дни до ближайшего дохода за вычетом обязательных платежей до него.
@@ -920,12 +931,14 @@ export interface PeriodTotals {
   expense: Kopecks;
   mandatory: Kopecks;
   flexible: Kopecks;
+  /** Отложено — как в итогах месяца (countsAsMonthSaving), а не любые переводы на накопительные. */
   savings: Kopecks;
   adjustments: Kopecks;
 }
 
 export function periodTotals(state: State, from: IsoDate, to: IsoDate): PeriodTotals {
   const totals: PeriodTotals = { income: 0, expense: 0, mandatory: 0, flexible: 0, savings: 0, adjustments: 0 };
+  const goalAccounts = goalAccountIds(state);
   for (const tx of state.transactions) {
     if (tx.date < from || tx.date > to) continue;
     if (tx.type === "income") totals.income += tx.amount;
@@ -933,7 +946,7 @@ export function periodTotals(state: State, from: IsoDate, to: IsoDate): PeriodTo
       totals.expense += tx.amount;
       if (tx.mandatory) totals.mandatory += tx.amount;
       else totals.flexible += tx.amount;
-    } else if (tx.type === "saving") totals.savings += tx.amount;
+    } else if (countsAsMonthSaving(tx, goalAccounts)) totals.savings += tx.amount;
     else if (tx.type === "adjustment") totals.adjustments += tx.amount;
   }
   return totals;

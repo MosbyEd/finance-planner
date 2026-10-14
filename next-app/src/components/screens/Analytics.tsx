@@ -13,8 +13,10 @@ import {
   type MonthKey,
 } from "@/domain/dates";
 import {
+  budgetPeriod,
   categoryBreakdown,
   monthMetrics,
+  payEventName,
   periodTotals,
   type BreakdownKind,
   type CategoryRow,
@@ -83,6 +85,13 @@ export function Analytics() {
   const metrics = useMemo(() => monthMetrics(state, month, today), [state, month, today]);
   const range = useMemo(() => factRange(month, today), [month, today]);
   const empty = isEmptyMonth(metrics);
+  // Главная и лимит на день считают от зарплаты до зарплаты, а здесь — календарный месяц: остатки не совпадают.
+  const periodNote = useMemo(() => {
+    if (month !== current) return null;
+    const period = budgetPeriod(state, today);
+    if (period.kind !== "pay" || !period.next) return null;
+    return `Это календарный месяц. Главная и лимит на день считают период с ${formatDay(period.current.start)} до ${payEventName(period.next)} ${formatDay(period.next.date)}.`;
+  }, [state, month, current, today]);
 
   return (
     <div className="space-y-4">
@@ -104,7 +113,7 @@ export function Analytics() {
       ) : (
         // В широком окне приложения для Mac — итоги слева, расходы и доходы справа.
         <div className="space-y-4 desktop-app:lg:grid desktop-app:lg:grid-cols-2 desktop-app:lg:items-start desktop-app:lg:gap-4 desktop-app:lg:space-y-0">
-          <SummaryCard metrics={metrics} />
+          <SummaryCard metrics={metrics} periodNote={periodNote} />
           <div className="space-y-4">
             <ExpensesCard month={month} range={range} today={today} />
             <IncomeCard range={range} today={today} />
@@ -161,7 +170,7 @@ function EmptyMonth({ future }: { future: boolean }) {
 
 // ---------- итоги месяца ----------
 
-function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
+function SummaryCard({ metrics, periodNote }: { metrics: MonthMetrics; periodNote: string | null }) {
   const f = metrics.flexible;
   const future = metrics.status === "future";
   const used = f.spent + f.reserved + f.extraSavings;
@@ -174,7 +183,7 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
       <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
         <div className="min-w-0">
           <p className={`text-sm ${over ? "font-medium text-negative" : "text-muted"}`}>
-            {over ? "Перерасход гибкого бюджета" : "Осталось в гибком бюджете"}
+            {over ? "Перерасход гибкого бюджета месяца" : "Осталось в гибком бюджете месяца"}
           </p>
           <Money whole value={Math.abs(f.left)} tone={over ? "negative" : "default"} className="text-2xl font-semibold" />
         </div>
@@ -195,6 +204,7 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
           tone={ratio > 1 ? "negative" : ratio > 0.85 ? "warning" : "accent"}
           label="Использовано гибкого бюджета"
         />
+        {periodNote && <p className="mt-1.5 text-xs text-muted">{periodNote}</p>}
       </div>
 
       <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 desktop-app:lg:grid-cols-1">
@@ -220,10 +230,11 @@ function SummaryCard({ metrics }: { metrics: MonthMetrics }) {
           tone={f.budget < 0 ? "negative" : "default"}
           sub="план доходов − план обязательных − норма сбережений"
         />
+        {/* «Расходы» в Истории и на графике — это обязательные плюс повседневные. */}
         <Stat
-          label="Потрачено"
+          label="Повседневные траты"
           value={f.spent}
-          sub={f.reserved > 0 ? `ещё запланировано ${rubles(f.reserved)}` : "повседневные траты"}
+          sub={f.reserved > 0 ? `ещё запланировано ${rubles(f.reserved)}` : "без обязательных"}
         />
         <Stat
           label="Отложено"
@@ -473,15 +484,6 @@ interface TrendPoint {
   partial: boolean;
 }
 
-/** Сумма переносов остатка прошлого месяца в сбережения за период. */
-function rolloverSavings(state: State, from: IsoDate, to: IsoDate): Kopecks {
-  let sum = 0;
-  for (const tx of state.transactions) {
-    if (tx.type === "saving" && tx.rolloverOf && tx.date >= from && tx.date <= to) sum += tx.amount;
-  }
-  return sum;
-}
-
 const SERIES = [
   { key: "income", label: "Доходы", color: "bg-positive" },
   { key: "expense", label: "Расходы", color: "bg-negative" },
@@ -498,12 +500,11 @@ function TrendCard({ month, today, hideWhenEmpty }: { month: MonthKey; today: Is
       monthRange(addMonths(month, -5), month).map((m) => {
         const range = factRange(m, today);
         if (!range) return { month: m, totals: null, partial: false };
+        // «Отложено» — как в итогах месяца: пополнения целей и автоотчисления, без переноса остатка.
         const t = periodTotals(state, range.from, range.to);
-        // Перенос остатка прошлого месяца не считаем сбережениями этого — как в итогах месяца.
-        const rollover = rolloverSavings(state, range.from, range.to);
         return {
           month: m,
-          totals: { income: t.income, expense: t.expense, savings: t.savings - rollover },
+          totals: { income: t.income, expense: t.expense, savings: t.savings },
           partial: range.to !== lastDayOfMonth(m),
         };
       }),

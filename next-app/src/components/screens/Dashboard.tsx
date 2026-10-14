@@ -5,6 +5,7 @@ import { autoSavingByDefault } from "@/domain/savings";
 import { legacySavingsFixes } from "@/domain/sms";
 import { addDays, formatDay, formatMonth, formatMonthIn, formatRelativeDay, monthKeyOf, type MonthKey } from "@/domain/dates";
 import {
+  afterPayReason,
   balanceAt,
   monthMetrics,
   payEventName,
@@ -622,18 +623,20 @@ function TodayCard({ sts }: { sts: SafeToSpend }) {
  * в день после следующего поступления.
  */
 function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey }) {
-  const { setTab } = useUi();
+  const { open, setTab } = useUi();
   const { current, next, after } = period;
   const f = current.flexible;
   // Остаток — не больше денег на счетах для трат до конца периода.
   const view = periodLeftView(period);
   const ratio = f.budget > 0 ? view.used / f.budget : 1;
   const days = `${current.daysLeft} ${plural(current.daysLeft, ["день", "дня", "дней"])}`;
+  const reason = afterPayReason(period);
   return (
     <Card
       title={next ? `До ${payEventName(next)} ${formatDay(next.date)}` : formatMonth(month)}
       action={
-        <Button variant="ghost" size="sm" onClick={() => setTab("analytics")}>
+        // Аналитика считает календарный месяц — у периода от зарплаты до зарплаты подробности в «Как посчитано».
+        <Button variant="ghost" size="sm" onClick={() => (period.kind === "pay" ? open({ kind: "explain" }) : setTab("analytics"))}>
           Подробнее
         </Button>
       }
@@ -660,7 +663,11 @@ function MonthCard({ period, month }: { period: BudgetPeriod; month: MonthKey })
       {after && next && (
         <p className="mt-3 rounded-2xl bg-surface-2 px-3 py-2 text-sm">
           После {payEventName(next)}: <span className="font-semibold tabular-nums">≈ {formatMoney(Math.max(0, after.perDay))} в день</span>
-          <span className="text-muted"> на {after.days} {plural(after.days, ["день", "дня", "дней"])}</span>
+          <span className="text-muted">
+            {" "}
+            на {after.days} {plural(after.days, ["день", "дня", "дней"])}
+            {reason && ` — ${reason}`}
+          </span>
         </p>
       )}
 

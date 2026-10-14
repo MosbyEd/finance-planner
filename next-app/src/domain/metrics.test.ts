@@ -7,6 +7,7 @@ import {
   loanPaid,
   monthMetrics,
   pendingRollover,
+  periodTotals,
   safeToSpend,
   upcomingEvents,
 } from "./metrics";
@@ -84,6 +85,20 @@ describe("метрики месяца", () => {
     const m = monthMetrics(s, "2026-03", "2026-03-15");
     expect(m.savings.fact).toBe(1_500_000);
     expect(m.flexible.extraSavings).toBe(0);
+  });
+
+  it("«Отложено» на графике месяцев — то же, что в итогах месяца: без перекладывания и переноса остатка", () => {
+    const s = base();
+    s.transactions.push(
+      tx({ type: "income", amount: 10_000_000, date: "2026-03-01" }),
+      tx({ type: "saving", amount: 23_000_000, date: "2026-03-02" }),
+      tx({ type: "saving", amount: 1_500_000, date: "2026-03-01", linkedTo: "salary" }),
+      tx({ type: "saving", amount: 300_000, date: "2026-03-05", goalId: "trip" }),
+      tx({ type: "saving", amount: 700_000, date: "2026-03-06", rolloverOf: "2026-02" }),
+    );
+    const totals = periodTotals(s, "2026-03-01", "2026-03-31");
+    expect(totals.savings).toBe(1_800_000);
+    expect(totals.savings).toBe(monthMetrics(s, "2026-03", "2026-03-31").savings.fact);
   });
 
   it("прошлый месяц — всё факт, будущий — всё план", () => {

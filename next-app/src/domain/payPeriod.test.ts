@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetPeriod, payPeriodStatus, periodLeftView, safeToSpend } from "./metrics";
+import { afterPayReason, budgetPeriod, payPeriodStatus, periodLeftView, safeToSpend } from "./metrics";
 import type { State } from "./schema";
 import { run, stateWith, template, tx } from "./test-utils";
 
@@ -48,6 +48,17 @@ describe("бюджет от зарплаты до зарплаты", () => {
     expect(p.after).toMatchObject({ start: "2026-10-25", end: "2026-11-09", days: 16 });
     expect(p.after?.flexible.budget).toBe(1_500_000);
     expect(p.after?.perDay).toBe(93_700);
+  });
+
+  it("после аванса в день впятеро меньше из-за аренды — карточка объясняет почему; дело не в обязательных — молчит", () => {
+    expect(afterPayReason(budgetPeriod(withPay(), "2026-10-12"))).toMatch(/^на обязательные платежи уйдёт 30\s000\s₽$/);
+    // Аренда 1 000 ₽ — меньше нормы сбережений 5 000 ₽: причина не в обязательных.
+    const s = withPay();
+    s.templates = s.templates.map((t) => (t.id === "rent" ? { ...t, amount: 100_000 } : t));
+    expect(afterPayReason(budgetPeriod(s, "2026-10-12"))).toBeNull();
+    // Календарный месяц — следующего периода нет.
+    s.settings.budgetPeriod = "month";
+    expect(afterPayReason(budgetPeriod(s, "2026-10-12"))).toBeNull();
   });
 
   it("лимит на день — по периоду; «календарный месяц» — как раньше", () => {

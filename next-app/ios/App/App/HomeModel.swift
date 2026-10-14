@@ -165,6 +165,8 @@ struct HomeModel: Codable, Equatable, Sendable {
         var next: String?
         /// Почему остаток — по деньгам на счетах («Зарплаты 10 октября в приложении нет…»).
         var note: String?
+        /// «Подробнее»: у периода от зарплаты до зарплаты — «Как посчитано», у месяца — Аналитика.
+        var more: JSONValue?
     }
 
     struct Upcoming: Codable, Equatable, Sendable, Identifiable {

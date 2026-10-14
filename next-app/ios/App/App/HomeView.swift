@@ -661,7 +661,13 @@ private struct MonthCard: View {
 
     var body: some View {
         HomeCard(title: month.title) {
-            LinkButton(title: "Подробнее") { AppShell.shared.setTab("analytics") }
+            LinkButton(title: "Подробнее") {
+                if let more = month.more {
+                    Task { await AppShell.shared.perform(more) }
+                } else {
+                    AppShell.shared.setTab("analytics")
+                }
+            }
         } content: {
             HStack(alignment: .lastTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
