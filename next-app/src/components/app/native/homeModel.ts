@@ -338,7 +338,7 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       ],
     });
   }
-  // Дубль от прежней версии: корректировка накопительного повторяет снятие по СМС.
+  // Записи прежних версий по накопительному: дубль корректировки при снятии, проценты доходом и переводом.
   for (const fix of legacySavingsFixes(state)) {
     rows.push({
       id: `fix:${fix.id}`,
@@ -347,7 +347,7 @@ function attention(input: HomeInput, warnings: string[]): AttentionModel[] {
       title: fix.title,
       text: fix.text,
       command: null,
-      actions: [{ label: "Убрать дубль", primary: true, command: { type: "repairSmsFix", id: fix.id } }],
+      actions: [{ label: fix.label, primary: true, command: { type: "repairSmsFix", id: fix.id } }],
     });
   }
   for (const m of bankMismatches(state, today)) {

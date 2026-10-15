@@ -214,7 +214,7 @@ export function useNativeHome(active: boolean, assistant: boolean): void {
           const fix = legacySavingsFixes(state).find((f) => f.id === command.id);
           if (!fix) return { ok: true };
           const result = store.dispatch(fix.actions);
-          return result.ok ? { ok: true, message: "Дубль убран" } : result;
+          return result.ok ? { ok: true, message: fix.done } : result;
         }
         case "undo": {
           const result = store.dispatch({ type: "tx.delete", id: command.txId });

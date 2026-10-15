@@ -187,7 +187,7 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
       />,
     );
   }
-  // Дубль от прежней версии: корректировка накопительного повторяет снятие по СМС.
+  // Записи прежних версий по накопительному: дубль корректировки при снятии, проценты доходом и переводом.
   for (const fix of legacySavingsFixes(state)) {
     rows.push(
       <AttentionRow
@@ -197,8 +197,8 @@ function AttentionCard({ warnings }: { warnings: string[] }) {
         title={fix.title}
         text={fix.text}
         actions={
-          <Button size="sm" onClick={() => dispatch(fix.actions) && toast("Дубль убран")}>
-            Убрать дубль
+          <Button size="sm" onClick={() => dispatch(fix.actions) && toast(fix.done)}>
+            {fix.label}
           </Button>
         }
       />,

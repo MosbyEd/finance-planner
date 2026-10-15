@@ -1,4 +1,14 @@
-import { MAIN_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, accountBalance, accountCards, accountKeys, accountsOf, findAccount } from "./accounts";
+import {
+  MAIN_ACCOUNT_ID,
+  SAVINGS_ACCOUNT_ID,
+  accountBalance,
+  accountCards,
+  accountKeys,
+  accountsOf,
+  findAccount,
+  sourceAccountId,
+  targetAccountId,
+} from "./accounts";
 import { applyActions, type Action } from "./actions";
 import { addDays, addMonths, diffDays, monthKeyOf, type IsoDate, type MonthKey } from "./dates";
 import { OTHER_CATEGORY } from "./defaults";
@@ -949,7 +959,10 @@ function planOperation(state: State, op: SmsOperation, ctx: SmsContext): SmsPlan
   }
 
   if (op.kind === "savingsInterest") {
-    // Доход месяца, который сразу лежит в сбережениях: на остаток счёта не влияет.
+    // Банк начислил проценты прямо на накопительный счёт: это доход этого счёта, одной операцией — карта и
+    // основной счёт тут ни при чём. Цифры счёта незнакомы — на «Сбережения» (уведомление подскажет их добавить).
+    const savings = savingsAccount(source) ?? defaultSavings;
+    if (!savings) return { actions: [], summary: "", skip: { status: "ignored", message: "Не найден накопительный счёт." } };
     const category = findCategory(state, INCOME_CATEGORY.interest) ?? INCOME_CATEGORY.interest;
     return {
       actions: [
@@ -966,19 +979,11 @@ function planOperation(state: State, op: SmsOperation, ctx: SmsContext): SmsPlan
             mandatory: false,
             autoSaving: false,
             review: true,
+            accountId: savings.id,
           },
         },
-        {
-          type: "savings.move",
-          id: `${ctx.idBase}.m`,
-          date: ctx.date,
-          amount: op.amount,
-          note,
-          review: true,
-          ...(savingsAccount(source) ? { toAccountId: source?.id } : {}),
-        },
       ],
-      summary: `Проценты ${money} → в сбережения`,
+      summary: `Проценты ${money} → «${savings.name}»`,
     };
   }
 
@@ -1073,22 +1078,66 @@ function planOperation(state: State, op: SmsOperation, ctx: SmsContext): SmsPlan
   };
 }
 
-/** Дубль от прежней версии: корректировка накопительного перед снятием по СМС и само снятие. */
+/** Запись прежней версии по накопительному, которую теперь пишем иначе, — исправляется кнопкой на главном. */
 export interface LegacySavingsFix {
-  /** id корректировки. */
+  /** id корректировки (у процентов — общий для всех пар). */
   id: string;
   title: string;
   text: string;
-  /** Привести пару к тому, что записывается теперь: снятие — на столько, сколько было в приложении. */
+  /** Кнопка и что сказать, когда исправили. */
+  label: string;
+  done: string;
+  /** Привести к тому, что записывается теперь: снятие — на столько, сколько было в приложении. */
   actions: Action[];
+}
+
+/** id исправления процентов по накопительным (одно на все такие пары). */
+export const INTEREST_PAIRS_FIX_ID = "sms-interest";
+
+/**
+ * Прежние версии (до 15 октября 2026) записывали проценты по накопительному доходом на основной счёт и
+ * пополнением сбережений «sms-….m» с него. Теперь это один доход на накопительном; остатки счетов те же.
+ */
+function interestPairsFix(state: State): LegacySavingsFix | null {
+  const pairs = state.transactions.flatMap((move) => {
+    const base = /^(sms-[0-9a-f]+)\.m$/.exec(move.id)?.[1];
+    const income = base ? state.transactions.find((t) => t.id === base) : undefined;
+    const same =
+      income?.type === "income" &&
+      move.type === "saving" &&
+      move.amount === income.amount &&
+      move.date === income.date &&
+      sourceAccountId(move) === sourceAccountId(income);
+    return same ? [{ income, move }] : [];
+  });
+  if (!pairs.length) return null;
+  const from = findAccount(state, sourceAccountId(pairs[0].income))?.name ?? "";
+  const total = pairs.reduce((sum, p) => sum + p.income.amount, 0);
+  return {
+    id: INTEREST_PAIRS_FIX_ID,
+    title:
+      pairs.length === 1
+        ? `Проценты ${formatMoney(total)} записаны доходом на «${from}» и переводом`
+        : `Проценты по накопительным (${pairs.length}, ${formatMoney(total)}) записаны доходом на «${from}» и переводом`,
+    text: "Записать одной операцией — доходом прямо на накопительный счёт. Остатки счетов не изменятся.",
+    label: "Исправить",
+    done: "Проценты — на накопительном счёте",
+    actions: pairs.flatMap(({ income, move }) => [
+      { type: "tx.delete", id: move.id },
+      { type: "tx.update", id: income.id, patch: { accountId: targetAccountId(move) ?? SAVINGS_ACCOUNT_ID } },
+    ]),
+  };
 }
 
 /**
  * Прежняя версия (12 октября 2026) при снятии с накопительного, на котором в приложении меньше, добавляла
  * корректировку «sms-….fix» — и деньги, которые банк откладывал сам, учитывались второй раз. Находим такие пары.
+ * И проценты по накопительному, записанные доходом и переводом (interestPairsFix).
  */
 export function legacySavingsFixes(state: State): LegacySavingsFix[] {
   const result: LegacySavingsFix[] = [];
+  const interest = interestPairsFix(state);
+  if (interest) result.push(interest);
   for (const fix of state.transactions) {
     const base = /^(sms-[0-9a-f]+)\.fix\d*$/.exec(fix.id)?.[1];
     if (!base || fix.type !== "adjustment" || fix.amount <= 0) continue;
@@ -1119,6 +1168,8 @@ export function legacySavingsFixes(state: State): LegacySavingsFix[] {
         keep > 0
           ? `Убрать корректировку — снятие останется на ${formatMoney(keep)}, сколько было в приложении. Остальное приложение и так считало на «${target?.name ?? ""}».`
           : `Убрать корректировку и снятие: эти деньги приложение и так считало на «${target?.name ?? ""}».`,
+      label: "Убрать дубль",
+      done: "Дубль убран",
       actions,
     });
   }

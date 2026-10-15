@@ -151,7 +151,11 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
   const [to, setTo] = useState(() => movement?.to ?? preset?.to ?? firstOther(movement?.from ?? preset?.from ?? accountId));
   // Карта счёта, которой платили: у счёта с картами — выбор чипами (по умолчанию — карта последней операции).
   const selectedAccount = findAccount(state, accountId);
-  const cards = selectedAccount && kind !== "transfer" ? accountCards(selectedAccount) : [];
+  // Проценты из СМС — доход прямо на накопительном: в выборе и накопительные (его счёт отмечен, можно
+  // перенести на другой накопительный, если цифры счёта в СМС не нашлись).
+  const onSavings = existing?.type === "income" && findAccount(state, sourceAccountId(existing))?.kind === "savings";
+  const pickerAccounts = onSavings ? accounts : payableAccounts(state);
+  const cards =selectedAccount && kind !== "transfer" ? accountCards(selectedAccount) : [];
   const [card, setCard] = useState<string | null>(() =>
     existing ? (existing.card ?? null) : (preset?.card ?? lastCardOf(state, accountId)),
   );
@@ -468,7 +472,7 @@ export function TransactionSheet({ txId, preset }: { txId?: string; preset?: TxP
             <>
               <AccountPicker
                 label={kind === "income" ? "На какой счёт" : "С какого счёта"}
-                accounts={payableAccounts(state)}
+                accounts={pickerAccounts}
                 value={accountId}
                 amounts={chipAmounts}
                 compact={accounts.length > 4}

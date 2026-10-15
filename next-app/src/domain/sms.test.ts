@@ -755,3 +755,74 @@ describe("дубль прежней версии: корректировка н�
     expect(accountBalance(next, "main", "2026-10-12")).toBe(100_000);
   });
 });
+
+describe("проценты по накопительному счёту", () => {
+  const SMS_3150 = `Накопительный счет *3150 Выплатили проценты 327,88р. Баланс: 1534,26р.`;
+  const SMS_6159 = `Накопительный счет *6159 Выплатили проценты 388,13р. Баланс: 267${NBSP}715,79р.`;
+  const setup = () =>
+    stateWith({
+      accounts: [
+        { id: "main", name: "Сбербанк", kind: "debit", spending: true, smsKeys: ["5804"] },
+        { id: "savings", name: "Автонакопления", kind: "savings", spending: false, smsKeys: ["3150"] },
+        { id: "cushion", name: "Подушка", kind: "savings", spending: false, smsKeys: [] },
+      ],
+      transactions: [
+        tx({ id: "start", type: "adjustment", amount: 100_000, date: "2026-10-01", category: "" }),
+        tx({ id: "put", type: "saving", amount: 120_638, date: "2026-10-02", category: "" }),
+      ],
+    });
+  const importSms = (state: ReturnType<typeof setup>, text: string, idBase: string) =>
+    planSmsImport(state, parseSberSms(text)!, { idBase, date: "2026-10-15", sms: text });
+
+  it("разбираются обе СМС", () => {
+    expect(parseSberSms(SMS_3150)).toEqual({ kind: "savingsInterest", amount: 32_788, time: null });
+    expect(parseSberSms(SMS_6159)).toEqual({ kind: "savingsInterest", amount: 38_813, time: null });
+  });
+
+  it("одна операция — доход прямо на накопительном; основной счёт не трогается, остаток сверяется", () => {
+    const s = setup();
+    const result = importSms(s, SMS_3150, "sms-p1");
+    expect(ops(result.actions)).toEqual([
+      {
+        type: "tx.add",
+        tx: expect.objectContaining({ id: "sms-p1", type: "income", amount: 32_788, category: "Проценты", accountId: "savings" }),
+      },
+    ]);
+    expect(result.summary.replace(/\s/g, " ")).toBe("Проценты 327,88 ₽ → «Автонакопления»");
+    const next = applyActions(s, result.actions);
+    expect(next.transactions.filter((t) => t.type === "saving")).toHaveLength(1);
+    expect(accountBalance(next, "main")).toBe(accountBalance(s, "main"));
+    expect(accountBalance(next, "savings")).toBe(120_638 + 32_788);
+    // 1 206,38 + 327,88 = 1 534,26 — как в банке.
+    expect(findAccount(next, "savings")?.bank).toMatchObject({ amount: 153_426, delta: 0 });
+  });
+
+  it("цифры счёта незнакомы — на «Сбережения», уведомление подсказывает добавить цифры", () => {
+    const s = setup();
+    const result = importSms(s, SMS_6159, "sms-p2");
+    expect(ops(result.actions)).toEqual([{ type: "tx.add", tx: expect.objectContaining({ type: "income", amount: 38_813, accountId: "savings" }) }]);
+    expect(result.summary).toMatch(/остаток \*6159 не сверен/i);
+    expect(accountBalance(applyActions(s, result.actions), "main")).toBe(accountBalance(s, "main"));
+  });
+
+  it("записанные прежней версией доходом на основной и переводом — исправляются одной кнопкой, остатки те же", () => {
+    // Как записывала прежняя версия: доход на основной и пополнение сбережений с него.
+    const s = applyActions(setup(), [
+      { type: "tx.add", tx: { id: "sms-aa", type: "income", amount: 32_788, date: "2026-10-15", category: "Проценты", title: "Проценты по накопительному счёту", note: "", mandatory: false, autoSaving: false, review: true } },
+      { type: "savings.move", id: "sms-aa.m", date: "2026-10-15", amount: 32_788, note: "", review: true, toAccountId: "savings" },
+      { type: "tx.add", tx: { id: "sms-bb", type: "income", amount: 38_813, date: "2026-10-15", category: "Проценты", title: "Проценты по накопительному счёту", note: "", mandatory: false, autoSaving: false, review: true } },
+      { type: "savings.move", id: "sms-bb.m", date: "2026-10-15", amount: 38_813, note: "", review: true, toAccountId: "cushion" },
+    ]);
+    const [fix, ...rest] = legacySavingsFixes(s);
+    expect(rest).toEqual([]);
+    expect(fix).toMatchObject({ id: "sms-interest", label: "Исправить" });
+    expect(fix.title.replace(/\s/g, " ")).toBe("Проценты по накопительным (2, 716,01 ₽) записаны доходом на «Сбербанк» и переводом");
+    const next = applyActions(s, fix.actions);
+    expect(next.transactions.filter((t) => t.id.startsWith("sms-")).map((t) => [t.id, t.type, t.accountId])).toEqual([
+      ["sms-aa", "income", "savings"],
+      ["sms-bb", "income", "cushion"],
+    ]);
+    for (const id of ["main", "savings", "cushion"]) expect(accountBalance(next, id)).toBe(accountBalance(s, id));
+    expect(legacySavingsFixes(next)).toEqual([]);
+  });
+});
