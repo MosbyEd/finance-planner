@@ -24,6 +24,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
+    /// Ушли в фон — заново ставим уведомления о конце подписи (те же id: новые заменяют прежние).
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        SigningExpiry.schedule()
+    }
+
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         if let url = URLContexts.first?.url, url.scheme == "budget" {
             openBudgetURL(url)

@@ -70,6 +70,11 @@ private struct HomeContent: View {
         .animation(.smooth(duration: 0.3), value: model)
     }
 
+    /// Срок подписи — своя строка приложения, интерфейс про него не знает.
+    private var attention: [HomeModel.Attention] {
+        [SigningExpiry.attention()].compactMap { $0 } + model.attention
+    }
+
     private var cards: some View {
         VStack(spacing: 16) {
             if model.hasData, let today = model.today {
@@ -79,8 +84,8 @@ private struct HomeContent: View {
                     BalancePrompt(text: today.text ?? "")
                 }
             }
-            if !model.attention.isEmpty {
-                AttentionCard(rows: model.attention)
+            if !attention.isEmpty {
+                AttentionCard(rows: attention)
             }
             if let onboarding = model.onboarding {
                 OnboardingCard(onboarding: onboarding)

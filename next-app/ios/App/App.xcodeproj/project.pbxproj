@@ -28,6 +28,7 @@
 		650C3749ECD0C2440B160FA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 334B1B02A204B7E174D799AE /* Theme.swift */; };
 		70ED7CD1B5E2005D5EEF7E6A /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DA5F05393A2D44F8489DAB /* ToastCenter.swift */; };
 		7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */; };
+		AB27821A9C707931E1A95E61 /* SigningExpiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AD0F0159FCE15FC32651F31 /* SigningExpiry.swift */; };
 		93688014D33E9A58E58835A5 /* Biometric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889A3F02F7A90872E0917C71 /* Biometric.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */; };
@@ -97,6 +98,7 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		983AB7229CF9E2546AB949C9 /* SmsEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SmsEngine.swift; sourceTree = "<group>"; };
 		9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateNotice.swift; sourceTree = "<group>"; };
+		5AD0F0159FCE15FC32651F31 /* SigningExpiry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SigningExpiry.swift; sourceTree = "<group>"; };
 		9F51C0C8567B79CB7B06B26C /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		A045312969732F31ED4B8F30 /* BudgetWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = BudgetWidget.entitlements; sourceTree = "<group>"; };
 		A069B7F3E0F2B16473FE86C4 /* App.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
@@ -182,6 +184,7 @@
 				1C9F6916F3D9210DDC0FADA7 /* AiActivity.swift */,
 				4D6BF5E939B40CB6BA6BB593 /* AiRequests.swift */,
 				9B8E630865BC90ADDFA5C89E /* UpdateNotice.swift */,
+				5AD0F0159FCE15FC32651F31 /* SigningExpiry.swift */,
 				889A3F02F7A90872E0917C71 /* Biometric.swift */,
 			);
 			path = App;
@@ -355,6 +358,7 @@
 				A24FDD458F28B0A9198F13CD /* AiActivity.swift in Sources */,
 				642E97826F76A77D516FED38 /* AiRequests.swift in Sources */,
 				7827CEFC3F7A350902300EBA /* UpdateNotice.swift in Sources */,
+				AB27821A9C707931E1A95E61 /* SigningExpiry.swift in Sources */,
 				93688014D33E9A58E58835A5 /* Biometric.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -10,6 +10,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Фоновая сессия помощника: подключаемся к ней сразу, чтобы получить ответы, пришедшие без нас.
         _ = AiRequests.shared.session
         UpdateNotice.postIfRequested()
+        SigningExpiry.schedule()
         return true
     }
 
