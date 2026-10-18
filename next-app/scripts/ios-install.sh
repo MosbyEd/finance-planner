@@ -6,6 +6,10 @@
 # IOS_RENEW=1 — новая подпись на 7 дней, даже если до конца старой больше двух суток.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Телефон один на все сессии и агент еженедельной переустановки (scripts/ios-auto-reinstall.sh).
+. scripts/ios-lock.sh
+ios_lock || exit 1
+trap ios_unlock EXIT
 
 DEVICE=${IOS_DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /available|connected/ && !/unavailable/ {print $3; exit}')}
 : "${DEVICE:?не найден iPhone — подключите телефон или задайте IOS_DEVICE}"
